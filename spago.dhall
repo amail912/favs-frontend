@@ -21,6 +21,7 @@ to generate this file without the comments in this block.
   , "bifunctors"
   , "console"
   , "control"
+  , "dom-indexed"
   , "effect"
   , "either"
   , "foreign-object"

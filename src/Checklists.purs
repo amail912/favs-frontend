@@ -21,7 +21,7 @@ import Data.Bifunctor (lmap)
 import Data.Either (Either, either)
 import Data.Generic.Rep (class Generic)
 import Data.Int (floor, toNumber)
-import Data.Lens (Lens', Traversal', _Just, lens, lens', view, (.~), (^.), (^..))
+import Data.Lens (Lens', Traversal', _Just, lens, lens', view, (.~), (^.), (^..), (^?))
 import Data.Lens.At (at)
 import Data.Lens.Index (ix)
 import Data.Maybe (Maybe, maybe)
@@ -227,14 +227,14 @@ checklistContentRender (EditingChecklistContent checklistIdx itemIdx) idx checkl
 checklistContentRender _ idx checklist = ul [ class_ "list-group" ] $ mapWithIndex (simpleChecklistItemRender idx) checklist.items
 
 simpleChecklistItemRender :: forall w. Int -> Int -> ChecklistItem -> HTML w Action
-simpleChecklistItemRender checklistIdx itemIdx (ChecklistItem { label, checked }) =
+simpleChecklistItemRender checklistIdx itemIdx (ChecklistItem { label }) =
   li [ class_ "list-group-item border-0", onClick (const $ EditLabelContent checklistIdx itemIdx) ]
     [  span [] [ text label ]
     , button [ type_ ButtonButton, class_ "btn btn-sm btn-danger", onClick (const $ DeleteChecklistItem checklistIdx itemIdx) ] [ i [ class_ "bi bi-trash" ] [] ]
     ]
 
 editChecklistItemRender :: forall w. Int -> Int -> Int -> ChecklistItem -> HTML w Action 
-editChecklistItemRender editIdx currentIdx currentChecklistIdx (ChecklistItem { label, checked }) =
+editChecklistItemRender _ currentIdx currentChecklistIdx (ChecklistItem { label }) =
   li [ class_ "list-group-item border-0" ] [ input [ class_ "form-control label-input", onBlur (const EditDone), onValueChange  $ ChecklistLabelChanged currentChecklistIdx currentIdx, value label] ]
 
 checklistNameRender :: forall w. EditingState -> Int -> String -> HTML w Action
@@ -269,10 +269,10 @@ handleAction action = handleError $
       deleteChecklist storageId
       refreshChecklists
     DeleteChecklistItem checklistIdx itemIdx -> do
-      checklists <- gets _.cheklists
-      let retrievedChecklists = checklists ^.. ix checklistIdx 
-      maybe (throwError $ CustomFatalError "Unable to retrieve checklist at index " <> show checklistIdx <> " while trying to delete one of its items")
-            (deleteChecklistItem checklist itemIdx >>= (\_ -> refreshChecklists))
+      checklists <- gets _.checklists
+      let retrievedChecklist = checklists ^? ix checklistIdx
+      maybe (throwError $ CustomFatalError ("Unable to retrieve checklist at index " <> show checklistIdx <> " while trying to delete one of its items"))
+            (\checklist -> deleteChecklistItem checklist itemIdx >>= (\_ -> refreshChecklists))
             retrievedChecklist
 
 
@@ -281,8 +281,9 @@ handleError m = do
   res <- runExceptT m
   either logShow pure res
 
-deleteChecklistItem :: Checklist -> Int -> ErrorChecklistAppM ()
-deleteChecklistItem (ServerChecklist { content })
+deleteChecklistItem :: Checklist -> Int -> ErrorChecklistAppM Unit
+deleteChecklistItem (ServerChecklist _) _ = pure unit
+deleteChecklistItem (NewChecklist _) _ = pure unit
 
 updateChecklistWithSaveAndRefreshChecklists :: forall a. Int -> Traversal' Checklist a -> a -> ErrorChecklistAppM Unit
 updateChecklistWithSaveAndRefreshChecklists idx lens_ newVal = do
