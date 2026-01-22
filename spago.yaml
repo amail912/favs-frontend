@@ -1,32 +1,32 @@
 package:
   dependencies:
-  - aff
-  - affjax
-  - affjax-web
-  - argonaut-codecs
-  - argonaut-core
-  - arrays
-  - bifunctors
-  - console
-  - control
-  - dom-indexed
-  - effect
-  - either
-  - foreign-object
-  - halogen
-  - integers
-  - maybe
-  - newtype
-  - prelude
-  - profunctor-lenses
-  - strings
-  - transformers
-  - tuples
-  - typelevel-prelude
-  - web-dom
-  - web-html
+    - aff
+    - affjax
+    - affjax-web
+    - argonaut-codecs
+    - argonaut-core
+    - arrays
+    - bifunctors
+    - console
+    - control
+    - dom-indexed
+    - effect
+    - either
+    - foreign-object
+    - halogen
+    - integers
+    - maybe
+    - newtype
+    - prelude
+    - profunctor-lenses
+    - strings
+    - transformers
+    - tuples
+    - typelevel-prelude
+    - web-dom
+    - web-html
   name: my-project
 workspace:
-  extra_packages: {}
-  package_set:
+  extraPackages: {}
+  packageSet:
     url: https://raw.githubusercontent.com/purescript/package-sets/psc-0.15.4-20220805/packages.json
