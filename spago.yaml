@@ -19,6 +19,8 @@ package:
     - newtype
     - prelude
     - profunctor-lenses
+    - routing
+    - routing-duplex
     - strings
     - transformers
     - tuples
