@@ -7,7 +7,7 @@
     "test": "test"
   },
   "scripts": {
-    "build": "spago bundle-app --to static/index.js",
+    "build": "spago bundle-app --outfile static/index.js",
     "start-dev": "node dev/proxy-server.js",
     "start-dev-proxy-prod": "node dev/proxy-server-prod.js",
     "test": "spago test"

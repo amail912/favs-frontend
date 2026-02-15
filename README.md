@@ -1,6 +1,6 @@
 # favs-frontend
 
-Application front-end en **PureScript + Halogen** pour gérer des favoris sous forme de **notes** et de **checklists**.
+Application front-end en **PureScript + Halogen** pour gérer son quotidien
 
 ## Stack technique
 
@@ -21,7 +21,7 @@ Application front-end en **PureScript + Halogen** pour gérer des favoris sous f
 Exemple d'installation globale des outils PureScript :
 
 ```bash
-npm install -g purescript spago
+npm install -g purescript spago-next
 ```
 
 ## Installation
