@@ -22,6 +22,7 @@ package:
     - routing
     - routing-duplex
     - strings
+    - spec
     - transformers
     - tuples
     - typelevel-prelude

@@ -26,6 +26,7 @@
             "profunctor-lenses",
             "routing",
             "routing-duplex",
+            "spec",
             "strings",
             "transformers",
             "tuples",
@@ -37,6 +38,7 @@
             "aff",
             "affjax",
             "affjax-web",
+            "ansi",
             "argonaut-codecs",
             "argonaut-core",
             "arraybuffer-types",
@@ -79,6 +81,7 @@
             "lists",
             "maybe",
             "media-types",
+            "mmorph",
             "newtype",
             "nonempty",
             "now",
@@ -88,6 +91,7 @@
             "orders",
             "parallel",
             "partial",
+            "pipes",
             "prelude",
             "profunctor",
             "profunctor-lenses",
@@ -97,6 +101,7 @@
             "routing-duplex",
             "safe-coerce",
             "semirings",
+            "spec",
             "st",
             "strings",
             "tailrec",
@@ -4763,6 +4768,16 @@
         "prelude"
       ]
     },
+    "ansi": {
+      "type": "git",
+      "url": "https://github.com/hdgarrood/purescript-ansi.git",
+      "rev": "7d898732d643a977a78004851112a4417909e126",
+      "dependencies": [
+        "foldable-traversable",
+        "lists",
+        "strings"
+      ]
+    },
     "argonaut-codecs": {
       "type": "git",
       "url": "https://github.com/purescript-contrib/purescript-argonaut-codecs.git",
@@ -5329,6 +5344,16 @@
         "prelude"
       ]
     },
+    "mmorph": {
+      "type": "git",
+      "url": "https://github.com/Thimoteus/purescript-mmorph.git",
+      "rev": "94bc558ac34184d5236a7a9b2463dcc7551ced8e",
+      "dependencies": [
+        "free",
+        "functors",
+        "transformers"
+      ]
+    },
     "newtype": {
       "type": "git",
       "url": "https://github.com/purescript/purescript-newtype.git",
@@ -5429,6 +5454,20 @@
       "url": "https://github.com/purescript/purescript-partial.git",
       "rev": "0fa0646f5ea1ec5f0c46dcbd770c705a6c9ad3ec",
       "dependencies": []
+    },
+    "pipes": {
+      "type": "git",
+      "url": "https://github.com/felixschl/purescript-pipes.git",
+      "rev": "e3bdc0b0db0a67e89a717b6118b23e78a380e23f",
+      "dependencies": [
+        "aff",
+        "lists",
+        "mmorph",
+        "prelude",
+        "tailrec",
+        "transformers",
+        "tuples"
+      ]
     },
     "prelude": {
       "type": "git",
@@ -5556,6 +5595,25 @@
         "lists",
         "newtype",
         "prelude"
+      ]
+    },
+    "spec": {
+      "type": "git",
+      "url": "https://github.com/purescript-spec/purescript-spec.git",
+      "rev": "e7d976e3562e0d0c1d3b4cf51fb9b53957a8e157",
+      "dependencies": [
+        "aff",
+        "ansi",
+        "avar",
+        "console",
+        "exceptions",
+        "foldable-traversable",
+        "fork",
+        "now",
+        "pipes",
+        "prelude",
+        "strings",
+        "transformers"
       ]
     },
     "st": {
