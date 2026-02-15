@@ -169,19 +169,23 @@ newNote = NewNote { content: { title: "What's your new title?", noteContent: "Wh
 
 render :: forall m. State -> H.ComponentHTML Action () m
 render { notes, editingState } =
-  div []
-    [ if (null notes) then noNotesDiv else ul [ class_ "list-group" ] (mapWithIndex (noteRender editingState) notes)
-    , section [ class_ "row" ]
-        [ button [ class_ "btn btn-primary", onClick (const CreateNewNote) ] [ text "+" ] ]
+  div [ class_ "entity-page notes-page" ]
+    [ if (null notes) then noNotesDiv else ul [ class_ "list-group entity-list notes-list" ] (mapWithIndex (noteRender editingState) notes)
+    , section [ class_ "row entity-add-row" ]
+        [ button [ class_ "btn btn-primary entity-add-btn", onClick (const CreateNewNote) ] [ text "+" ] ]
     ]
 
 noNotesDiv :: forall w i. HTML w i
-noNotesDiv = div [ class_ "row" ] [ text "There are no notes to display" ]
+noNotesDiv =
+  div [ class_ "row entity-empty" ]
+    [ div [ class_ "entity-empty-title" ] [ text "No notes yet" ]
+    , div [ class_ "entity-empty-subtitle" ] [ text "Create your first note to get started." ]
+    ]
 
 noteRender :: forall w. EditingState -> Int -> Note -> HTML w Action
 noteRender editingState idx note =
-  li [ class_ "row list-group-item" ] $
-     [ div [ class_ "col", ref (wrap $ "note-" <> show idx) ] $
+  li [ class_ "row list-group-item entity-card note-card" ] $
+     [ div [ class_ "col entity-card-body", ref (wrap $ "note-" <> show idx) ] $
        [ noteTitleRender editingState idx note
        , noteContentRender editingState idx note ]
        <> noteFooterRender note
@@ -190,7 +194,7 @@ noteRender editingState idx note =
 noteFooterRender :: forall w. Note -> Array (HTML w Action)
 noteFooterRender (NewNote _) = []
 noteFooterRender (ServerNote { storageId }) =
-  [ section [ class_ "row my-2 justify-content-center" ]
+  [ section [ class_ "row my-2 justify-content-center entity-footer" ]
     [ button [ class_ "btn btn-sm btn-outline-danger", onClick (const $ DeleteNote storageId) ]
       [ i [ class_ "bi bi-trash" ] [] ]  
     ]
@@ -198,19 +202,19 @@ noteFooterRender (ServerNote { storageId }) =
 
 noteContentRender :: forall w. EditingState -> Int -> Note -> HTML w Action
 noteContentRender editingState idx note =
-  section [ class_ "row my-2" ] [ contentRender editingState ]
+  section [ class_ "row my-2 note-content-row" ] [ contentRender editingState ]
   where
     contentRender (EditingNoteContent editIdx)
-      | editIdx == idx = textarea [ class_ "form-control content-input", onBlur (const EditDone), onValueChange  $ NoteContentChanged idx, value (note ^. _noteContent) ]
-    contentRender _ = div [ onClick (const $ EditNoteContent idx) ] [ text (note ^. _noteContent) ]
+      | editIdx == idx = textarea [ class_ "form-control content-input note-content-input", onBlur (const EditDone), onValueChange  $ NoteContentChanged idx, value (note ^. _noteContent) ]
+    contentRender _ = div [ class_ "note-content-preview", onClick (const $ EditNoteContent idx) ] [ text (note ^. _noteContent) ]
 
 noteTitleRender :: forall w. EditingState -> Int -> Note -> HTML w Action
 noteTitleRender editingState idx note =
-  header [ class_ "row my-2" ] [ contentRender editingState ]
+  header [ class_ "row my-2 note-title-row" ] [ contentRender editingState ]
   where
     contentRender (EditingNoteTitle editIdx)
-      | editIdx == idx = input [ class_ "form-control fs-2 lh-2 title-input", onBlur (const EditDone), onValueChange  $ NoteTitleChanged idx, value (note ^. _title)]
-    contentRender _ = h2  [ onClick (const $ EditNoteTitle idx) ] [ text (note ^. _title) ]
+      | editIdx == idx = input [ class_ "form-control fs-2 lh-2 title-input note-title-input", onBlur (const EditDone), onValueChange  $ NoteTitleChanged idx, value (note ^. _title)]
+    contentRender _ = h2 [ class_ "entity-title", onClick (const $ EditNoteTitle idx) ] [ text (note ^. _title) ]
 
 -- ============================= Action Handling =======================================
 

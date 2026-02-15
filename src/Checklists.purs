@@ -200,19 +200,23 @@ newChecklist = NewChecklist { content: { name: "What's your new name?", items: [
 
 render :: forall m. State -> H.ComponentHTML Action () m
 render { checklists, editingState } =
-  div []
-    [ if (null checklists) then noChecklistsDiv else ul [ class_ "list-group" ] (mapWithIndex (checklistRender editingState) checklists)
-    , section [ class_ "row" ]
-        [ button [ class_ "btn btn-primary", onClick (const CreateNewChecklist) ] [ text "+" ] ]
+  div [ class_ "entity-page checklists-page" ]
+    [ if (null checklists) then noChecklistsDiv else ul [ class_ "list-group entity-list checklists-list" ] (mapWithIndex (checklistRender editingState) checklists)
+    , section [ class_ "row entity-add-row" ]
+        [ button [ class_ "btn btn-primary entity-add-btn", onClick (const CreateNewChecklist) ] [ text "+" ] ]
     ]
 
 noChecklistsDiv :: forall w i. HTML w i
-noChecklistsDiv = div [ class_ "row" ] [ text "There are no checklists to display" ]
+noChecklistsDiv =
+  div [ class_ "row entity-empty" ]
+    [ div [ class_ "entity-empty-title" ] [ text "No checklist yet" ]
+    , div [ class_ "entity-empty-subtitle" ] [ text "Create your first checklist and start tracking tasks." ]
+    ]
 
 checklistRender :: forall w. EditingState -> Int -> Checklist -> HTML w Action
 checklistRender editingState idx checklist =
-  li [ class_ "row list-group-item" ] $
-     [ div [ class_ "col", ref (wrap $ "checklist-" <> show idx) ] $
+  li [ class_ "row list-group-item entity-card checklist-card" ] $
+     [ div [ class_ "col entity-card-body", ref (wrap $ "checklist-" <> show idx) ] $
        [ checklistNameRender editingState idx (checklist ^. _name)
        , checklistContentRender editingState idx (checklist ^. _content) ]
        <> checklistFooterRender checklist
@@ -221,7 +225,7 @@ checklistRender editingState idx checklist =
 checklistFooterRender :: forall w. Checklist -> Array (HTML w Action)
 checklistFooterRender (NewChecklist _) = []
 checklistFooterRender (ServerChecklist { storageId }) =
-  [ section [ class_ "row my-2 justify-content-center" ]
+  [ section [ class_ "row my-2 justify-content-center entity-footer" ]
     [ button [ class_ "btn btn-sm btn-outline-danger", onClick (const $ DeleteChecklist storageId) ]
       [ i [ class_ "bi bi-trash" ] [] ]  
     ]
@@ -229,27 +233,27 @@ checklistFooterRender (ServerChecklist { storageId }) =
 
 checklistContentRender :: forall w. EditingState -> Int -> ChecklistContent -> HTML w Action
 checklistContentRender (EditingChecklistContent checklistIdx itemIdx) idx checklist
-  | checklistIdx == idx = ul [ class_ "list-group" ] $ mapWithIndex (editChecklistItemRender itemIdx checklistIdx) checklist.items
-checklistContentRender _ idx checklist = ul [ class_ "list-group" ] $ mapWithIndex (simpleChecklistItemRender idx) checklist.items
+  | checklistIdx == idx = ul [ class_ "list-group checklist-items" ] $ mapWithIndex (editChecklistItemRender itemIdx checklistIdx) checklist.items
+checklistContentRender _ idx checklist = ul [ class_ "list-group checklist-items" ] $ mapWithIndex (simpleChecklistItemRender idx) checklist.items
 
 simpleChecklistItemRender :: forall w. Int -> Int -> ChecklistItem -> HTML w Action
 simpleChecklistItemRender checklistIdx itemIdx (ChecklistItem { label }) =
-  li [ class_ "list-group-item border-0", onClick (const $ EditLabelContent checklistIdx itemIdx) ]
-    [  span [] [ text label ]
+  li [ class_ "list-group-item border-0 checklist-item-row", onClick (const $ EditLabelContent checklistIdx itemIdx) ]
+    [  span [ class_ "checklist-item-label" ] [ text label ]
     , button [ type_ ButtonButton, class_ "btn btn-sm btn-danger", onClick (const $ DeleteChecklistItem checklistIdx itemIdx) ] [ i [ class_ "bi bi-trash" ] [] ]
     ]
 
 editChecklistItemRender :: forall w. Int -> Int -> Int -> ChecklistItem -> HTML w Action 
 editChecklistItemRender _ currentIdx currentChecklistIdx (ChecklistItem { label }) =
-  li [ class_ "list-group-item border-0" ] [ input [ class_ "form-control label-input", onBlur (const EditDone), onValueChange  $ ChecklistLabelChanged currentChecklistIdx currentIdx, value label] ]
+  li [ class_ "list-group-item border-0 checklist-item-row" ] [ input [ class_ "form-control label-input checklist-item-input", onBlur (const EditDone), onValueChange  $ ChecklistLabelChanged currentChecklistIdx currentIdx, value label] ]
 
 checklistNameRender :: forall w. EditingState -> Int -> String -> HTML w Action
 checklistNameRender editingState idx name =
-  header [ class_ "row my-2" ] [ contentRender editingState ]
+  header [ class_ "row my-2 checklist-title-row" ] [ contentRender editingState ]
   where
     contentRender (EditingChecklistName editIdx)
-      | editIdx == idx = input [ class_ "form-control fs-2 lh-2 name-input", onBlur (const EditDone), onValueChange  $ ChecklistNameChanged idx, value name]
-    contentRender _ = h2  [ onClick (const $ EditChecklistName idx) ] [ text name ]
+      | editIdx == idx = input [ class_ "form-control fs-2 lh-2 name-input checklist-title-input", onBlur (const EditDone), onValueChange  $ ChecklistNameChanged idx, value name]
+    contentRender _ = h2 [ class_ "entity-title", onClick (const $ EditChecklistName idx) ] [ text name ]
 
 -- ============================= Action Handling =======================================
 
