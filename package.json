@@ -12,9 +12,9 @@
     "start-dev-proxy-prod": "node dev/proxy-server-prod.js",
     "test": "spago test",
     "pw:open-session": "node dev/playwright-open-session.mjs",
-    "e2e": "playwright test",
-    "e2e:headed": "playwright test --headed",
-    "e2e:ui": "playwright test --ui",
+    "e2e": "npm run build && playwright test",
+    "e2e:headed": "npm run build && playwright test --headed",
+    "e2e:ui": "npm run build && playwright test --ui",
     "e2e:install": "playwright install chromium"
   },
   "author": "",
