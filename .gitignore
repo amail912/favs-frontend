@@ -10,3 +10,4 @@
 /.spago
 index.js
 *.swp
+/test-results/

@@ -98,6 +98,25 @@ npm test
 
 > Cette commande nécessite `spago` installé sur la machine.
 
+## Tests E2E (Playwright)
+
+Pré-requis:
+- backend disponible sur `http://localhost:8081`
+
+Commandes:
+
+```bash
+npm run e2e:install
+npm run e2e
+```
+
+Options utiles:
+
+```bash
+npm run e2e:headed
+npm run e2e:ui
+```
+
 ## Remarques
 
 - Le dossier `docs/` contient une analyse initiale du dépôt (`docs/repo-analysis.md`) avec des pistes d'amélioration priorisées.
