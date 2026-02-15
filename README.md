@@ -72,6 +72,7 @@ Le front utilise des routes navigateur (history API) :
 - `/notes`
 - `/checklists`
 - `/signup`
+- `/signin`
 
 ## API attendue
 

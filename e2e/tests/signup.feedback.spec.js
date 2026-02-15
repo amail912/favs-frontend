@@ -1,5 +1,5 @@
 const { test, expect } = require("@playwright/test");
-const { createAccountButton, signupPasswordInput, signupUsernameInput } = require("../support/ui");
+const { createAccountButton, signinUsernameInput, signupPasswordInput, signupUsernameInput } = require("../support/ui");
 
 const STRONG_PASSWORD = "StrongPass123!";
 
@@ -21,6 +21,26 @@ test("signup form shows client-side validation feedback", async ({ page }) => {
 
   await expect(page.getByText("Username must be at least 3 characters.")).toBeVisible();
   await expect(page.getByText("Password must be at least 12 characters.")).toBeVisible();
+});
+
+test("successful signup redirects to signin page", async ({ page }) => {
+  const username = `new_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+
+  await page.route("**/api/signup", async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json; charset=utf-8",
+      body: "{}"
+    });
+  });
+
+  await gotoSignup(page);
+  await signupUsernameInput(page).fill(username);
+  await signupPasswordInput(page).fill(STRONG_PASSWORD);
+  await createAccountButton(page).click();
+
+  await expect(page).toHaveURL(/\/signin$/);
+  await expect(signinUsernameInput(page)).toBeVisible();
 });
 
 test("signup form shows backend failure feedback for duplicate username", async ({ page }) => {

@@ -2,7 +2,7 @@ module App (component) where
 
 import Prelude hiding (div, (/))
 
-import Affjax.Web (Response, post, Error)
+import Affjax.Web (Response, post)
 import Affjax.Web as AffjaxWeb
 import Affjax.RequestBody (RequestBody(..))
 import Affjax.ResponseFormat (string)
@@ -29,8 +29,8 @@ import Effect.Class (class MonadEffect)
 import Data.Newtype (unwrap)
 import Foreign (Foreign, unsafeToForeign)
 import Halogen (Component, HalogenM, Slot, ComponentHTML, defaultEval, mkComponent, mkEval) as H
-import Halogen (HalogenM, liftEffect, subscribe)
-import Halogen.HTML (HTML, a, div, h1, nav, slot_, text, form, label, input, button)
+import Halogen (HalogenM, liftEffect, raise, subscribe)
+import Halogen.HTML (HTML, a, div, h1, nav, slot, slot_, text, form, label, input, button)
 import Halogen.HTML.Events (onClick, onValueChange, onSubmit)
 import Halogen.HTML.Properties (for, type_, name, placeholder, id, value, disabled)
 import Halogen.Subscription (create, notify)
@@ -44,17 +44,21 @@ import Utils (class_)
 import Web.Event.Event (Event, preventDefault)
 
 type OpaqueSlot slot = forall query. H.Slot query Void slot
+type AuthSlot slot = forall query. H.Slot query AuthOutput slot
 type ChildSlots = ( notes :: OpaqueSlot Unit
                   , checklists :: OpaqueSlot Unit
-                  , signup :: OpaqueSlot Unit
+                  , signup :: AuthSlot Unit
+                  , signin :: AuthSlot Unit
                   )
 
-data DefinedRoute = Note | Checklist | Signup
+data DefinedRoute = Note | Checklist | Signup | Signin
 derive instance definedRouteGeneric :: Generic DefinedRoute _
 derive instance definedRouteEq :: Eq DefinedRoute
 derive instance definedRouteOrd :: Ord DefinedRoute
 instance showDefinedRoute :: Show DefinedRoute where
   show = genericShow
+
+data AuthOutput = SignupSucceeded | SigninSucceeded
 
 data Route = Root | Route DefinedRoute | NotFound
 derive instance routeGeneric :: Generic Route _
@@ -68,6 +72,7 @@ routeCodec = root $ sum
   { "Note": "notes" / noArgs
   , "Checklist": "checklists" / noArgs
   , "Signup": "signup" / noArgs
+  , "Signin": "signin" / noArgs
   }
 
 parseRouteString :: String -> Either Unit Route
@@ -92,6 +97,7 @@ subscribeToRouting nav = do
 data Action = RouteChanged Route
             | NavigateTo DefinedRoute
             | SignOut
+            | HandleAuthOutput AuthOutput
             | RefreshAuthStatus
             | InitializeRouting
 type State =
@@ -148,6 +154,14 @@ handleAction (NavigateTo route) = do
   st <- get
   modify_ _ { currentRoute = Route route }
   navigateWith _.pushState st.nav route
+handleAction (HandleAuthOutput SignupSucceeded) = do
+  st <- get
+  modify_ _ { currentRoute = Route Signin, isAuthenticated = false }
+  navigateWith _.pushState st.nav Signin
+handleAction (HandleAuthOutput SigninSucceeded) = do
+  st <- get
+  modify_ _ { currentRoute = Route Note, isAuthenticated = true }
+  navigateWith _.pushState st.nav Note
 handleAction SignOut = do
   st <- get
   _ <- liftAff $ post string "/api/signout" Nothing
@@ -168,7 +182,7 @@ render { currentRoute: Route route, isAuthenticated } =
   ([ h1 [ class_ "text-center" ] [ text "FAVS" ]
    , authMenu isAuthenticated
    ] <>
-  (if route /= Signup then [ nav [ class_ "row nav nav-tabs" ] [ tab Note route, tab Checklist route ] ] else []) <>
+  (if route /= Signup && route /= Signin then [ nav [ class_ "row nav nav-tabs" ] [ tab Note route, tab Checklist route ] ] else []) <>
   [ currentComponent route
   , div [ class_ "bottom-space" ] []
   ])
@@ -204,7 +218,8 @@ authMenu isAuthenticated =
 currentComponent :: DefinedRoute -> H.ComponentHTML Action ChildSlots Aff
 currentComponent Note = slot_ (Proxy :: _ "notes") unit Notes.component unit
 currentComponent Checklist = slot_ (Proxy :: _ "checklists") unit Checklists.component unit
-currentComponent Signup = slot_ (Proxy :: _ "signup") unit signupComponent unit
+currentComponent Signup = slot (Proxy :: _ "signup") unit signupComponent unit HandleAuthOutput
+currentComponent Signin = slot (Proxy :: _ "signin") unit signinComponent unit HandleAuthOutput
 
 tab :: forall w. DefinedRoute -> DefinedRoute -> HTML w Action
 tab tabRoute activeRoute =
@@ -219,11 +234,9 @@ tabLabel :: DefinedRoute -> String
 tabLabel Note = "Notes"
 tabLabel Checklist = "Checklists"
 tabLabel Signup = "Signup"
+tabLabel Signin = "Signin"
 
-data SignupAction = SignupInitialize | Submit Event | UsernameChanged String | PasswordChanged String
-type NoOutput = Void
-newtype SignupFormData = SignupFormData SignupState
-type SignupState =
+type AuthState =
   { username :: String
   , password :: String
   , usernameError :: Maybe String
@@ -232,14 +245,18 @@ type SignupState =
   , submitting :: Boolean
   }
 
-instance signupFormDataEncodeJson :: EncodeJson SignupFormData where
-  encodeJson :: SignupFormData -> Json
-  encodeJson (SignupFormData {username, password}) = uname ~> pass ~> jsonEmptyObject
+newtype AuthRequestData = AuthRequestData { username :: String, password :: String }
+instance authRequestDataEncodeJson :: EncodeJson AuthRequestData where
+  encodeJson :: AuthRequestData -> Json
+  encodeJson (AuthRequestData {username, password}) = uname ~> pass ~> jsonEmptyObject
     where uname = "username" := username
           pass = "password" := password
 
-signupInitialState :: SignupState
-signupInitialState =
+jsonRequestBody :: forall a. EncodeJson a => a -> Maybe RequestBody
+jsonRequestBody = Just <<< Json <<< encodeJson
+
+authInitialState :: AuthState
+authInitialState =
   { username: ""
   , password: ""
   , usernameError: Nothing
@@ -248,31 +265,24 @@ signupInitialState =
   , submitting: false
   }
 
-signupComponent :: forall q i. H.Component q i NoOutput Aff
-signupComponent = H.mkComponent { initialState: const signupInitialState
+data SignupAction = SignupInitialize | SignupSubmit Event | SignupUsernameChanged String | SignupPasswordChanged String
+data SigninAction = SigninInitialize | SigninSubmit Event | SigninUsernameChanged String | SigninPasswordChanged String
+
+signupComponent :: forall q i. H.Component q i AuthOutput Aff
+signupComponent = H.mkComponent { initialState: const authInitialState
                                 , render: signupRender
                                 , eval: H.mkEval $ H.defaultEval { handleAction = signupHandleAction
                                                                  , initialize = pure SignupInitialize
                                                                  }
                                 }
---(\err -> liftEffect (logShow "Error while trying to signup") >>= const $ pure unit)
---(\r -> liftEffect (logShow r) >>= const $ pure unit)
-handleError :: Error -> HalogenM SignupState SignupAction () NoOutput Aff Unit
-handleError _ = modify_ $ _ { feedbackMessage = Just "Signup failed. Please try again."
-                            , submitting = false
-                            }
 
-handleResponse :: Response String -> HalogenM SignupState SignupAction () NoOutput Aff Unit
-handleResponse r
-  | unwrap r.status >= 200 && unwrap r.status < 300 =
-      modify_ $ _ { feedbackMessage = Just "Account created successfully."
-                  , submitting = false
-                  , password = ""
-                  }
-  | otherwise =
-      modify_ $ _ { feedbackMessage = Just (if String.length r.body > 0 then r.body else "Signup failed.")
-                  , submitting = false
-                  }
+signinComponent :: forall q i. H.Component q i AuthOutput Aff
+signinComponent = H.mkComponent { initialState: const authInitialState
+                                , render: signinRender
+                                , eval: H.mkEval $ H.defaultEval { handleAction = signinHandleAction
+                                                                 , initialize = pure SigninInitialize
+                                                                 }
+                                }
 
 validateUsername :: String -> Maybe String
 validateUsername username
@@ -302,8 +312,8 @@ validatePassword password
   | String.length password < 12 = Just "Password must be at least 12 characters."
   | otherwise = Nothing
 
-signupHandleAction :: SignupAction -> HalogenM SignupState SignupAction () NoOutput Aff Unit
-signupHandleAction (Submit e) = do
+signupHandleAction :: SignupAction -> HalogenM AuthState SignupAction () AuthOutput Aff Unit
+signupHandleAction (SignupSubmit e) = do
   liftEffect $ preventDefault e
   formData <- get
   let
@@ -320,21 +330,69 @@ signupHandleAction (Submit e) = do
     then pure unit
     else do
       modify_ $ _ { submitting = true }
-      resp <- liftAff $ post string "/api/signup" $ Just $ Json $ encodeJson $ SignupFormData formData
-      either handleError handleResponse resp
-signupHandleAction (UsernameChanged newUsername) = do
+      resp <- liftAff $ post string "/api/signup" (jsonRequestBody $ AuthRequestData { username: formData.username, password: formData.password })
+      either
+        (\_ -> modify_ $ _ { feedbackMessage = Just "Signup failed. Please try again.", submitting = false })
+        (\r ->
+          if statusOk r then do
+            modify_ $ _ { submitting = false, password = "" }
+            raise SignupSucceeded
+          else
+            modify_ $ _ { feedbackMessage = Just (if String.length r.body > 0 then r.body else "Signup failed."), submitting = false })
+        resp
+signupHandleAction (SignupUsernameChanged newUsername) = do
   modify_ $ _ { username = newUsername
               , usernameError = validateUsername newUsername
               , feedbackMessage = Nothing
               }
-signupHandleAction (PasswordChanged newPassword) = do
+signupHandleAction (SignupPasswordChanged newPassword) = do
   modify_ $ _ { password = newPassword
               , passwordError = validatePassword newPassword
               , feedbackMessage = Nothing
               }
 signupHandleAction _ = pure unit
 
-signupRender :: forall m. SignupState -> H.ComponentHTML SignupAction () m
+signinHandleAction :: SigninAction -> HalogenM AuthState SigninAction () AuthOutput Aff Unit
+signinHandleAction (SigninSubmit e) = do
+  liftEffect $ preventDefault e
+  formData <- get
+  let
+    usernameErr = validateUsername formData.username
+    passwordErr = validatePassword formData.password
+    hasErrors = case usernameErr, passwordErr of
+      Nothing, Nothing -> false
+      _, _ -> true
+  modify_ $ _ { usernameError = usernameErr
+              , passwordError = passwordErr
+              , feedbackMessage = Nothing
+              }
+  if hasErrors
+    then pure unit
+    else do
+      modify_ $ _ { submitting = true }
+      resp <- liftAff $ post string "/api/signin" (jsonRequestBody $ AuthRequestData { username: formData.username, password: formData.password })
+      either
+        (\_ -> modify_ $ _ { feedbackMessage = Just "Signin failed. Please try again.", submitting = false })
+        (\r ->
+          if statusOk r then do
+            modify_ $ _ { submitting = false }
+            raise SigninSucceeded
+          else
+            modify_ $ _ { feedbackMessage = Just (if String.length r.body > 0 then r.body else "Signin failed."), submitting = false })
+        resp
+signinHandleAction (SigninUsernameChanged newUsername) = do
+  modify_ $ _ { username = newUsername
+              , usernameError = validateUsername newUsername
+              , feedbackMessage = Nothing
+              }
+signinHandleAction (SigninPasswordChanged newPassword) = do
+  modify_ $ _ { password = newPassword
+              , passwordError = validatePassword newPassword
+              , feedbackMessage = Nothing
+              }
+signinHandleAction _ = pure unit
+
+signupRender :: forall m. AuthState -> H.ComponentHTML SignupAction () m
 signupRender state =
   div [ class_ "row justify-content-center mt-5" ]
     [ div [ class_ "col-12 col-md-8 col-lg-5" ]
@@ -344,7 +402,7 @@ signupRender state =
                      [ h1 [ class_ "h3 mb-1" ] [ text "Create your account" ]
                      , div [ class_ "text-muted" ] [ text "Signup to start using FAVS" ]
                      ]
-                 , form [ onSubmit Submit ]
+                 , form [ onSubmit SignupSubmit ]
                      ([ label [ class_ "form-label fw-semibold", for "signup-username" ] [ text "Username" ]
                       , input [ id "signup-username"
                               , type_ InputText
@@ -352,7 +410,7 @@ signupRender state =
                               , class_ "form-control"
                               , placeholder "Choose a username"
                               , value state.username
-                              , onValueChange UsernameChanged
+                              , onValueChange SignupUsernameChanged
                               ]
                       ]
                       <> maybe [] (\err -> [ div [ class_ "invalid-feedback d-block mb-2" ] [ text err ] ]) state.usernameError
@@ -363,7 +421,7 @@ signupRender state =
                                  , class_ "form-control"
                                  , placeholder "At least 12 characters"
                                  , value state.password
-                                 , onValueChange PasswordChanged
+                                 , onValueChange SignupPasswordChanged
                                  ]
                          ]
                       <> maybe [] (\err -> [ div [ class_ "invalid-feedback d-block mb-2" ] [ text err ] ]) state.passwordError
@@ -373,6 +431,51 @@ signupRender state =
                                   , disabled state.submitting
                                   ]
                                   [ text (if state.submitting then "Submitting..." else "Create account") ]
+                         ])
+                 ])
+            ]
+        ]
+    ]
+
+signinRender :: forall m. AuthState -> H.ComponentHTML SigninAction () m
+signinRender state =
+  div [ class_ "row justify-content-center mt-5" ]
+    [ div [ class_ "col-12 col-md-8 col-lg-5" ]
+        [ div [ class_ "card shadow-sm border-0" ]
+            [ div [ class_ "card-body p-4" ]
+                ([ div [ class_ "text-center mb-4" ]
+                     [ h1 [ class_ "h3 mb-1" ] [ text "Sign in" ]
+                     , div [ class_ "text-muted" ] [ text "Welcome back to FAVS" ]
+                     ]
+                 , form [ onSubmit SigninSubmit ]
+                     ([ label [ class_ "form-label fw-semibold", for "signin-username" ] [ text "Username" ]
+                      , input [ id "signin-username"
+                              , type_ InputText
+                              , name "username"
+                              , class_ "form-control"
+                              , placeholder "Your username"
+                              , value state.username
+                              , onValueChange SigninUsernameChanged
+                              ]
+                      ]
+                      <> maybe [] (\err -> [ div [ class_ "invalid-feedback d-block mb-2" ] [ text err ] ]) state.usernameError
+                      <> [ label [ class_ "form-label fw-semibold mt-2", for "signin-password" ] [ text "Password" ]
+                         , input [ id "signin-password"
+                                 , type_ InputPassword
+                                 , name "password"
+                                 , class_ "form-control"
+                                 , placeholder "Your password"
+                                 , value state.password
+                                 , onValueChange SigninPasswordChanged
+                                 ]
+                         ]
+                      <> maybe [] (\err -> [ div [ class_ "invalid-feedback d-block mb-2" ] [ text err ] ]) state.passwordError
+                      <> maybe [] (\msg -> [ div [ class_ "alert alert-secondary mt-3 mb-0" ] [ text msg ] ]) state.feedbackMessage
+                      <> [ button [ type_ ButtonSubmit
+                                  , class_ "btn btn-primary w-100 mt-3"
+                                  , disabled state.submitting
+                                  ]
+                                  [ text (if state.submitting then "Signing in..." else "Sign in") ]
                          ])
                  ])
             ]
