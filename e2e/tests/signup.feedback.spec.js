@@ -1,22 +1,23 @@
 const { test, expect } = require("@playwright/test");
+const { createAccountButton, signupPasswordInput, signupUsernameInput } = require("../support/ui");
 
 const STRONG_PASSWORD = "StrongPass123!";
 
 async function gotoSignup(page) {
   await page.goto("/signup");
-  await expect(page.locator("#signup-username")).toBeVisible();
+  await expect(signupUsernameInput(page)).toBeVisible();
 }
 
 test("signup form shows client-side validation feedback", async ({ page }) => {
   await gotoSignup(page);
 
-  await page.getByRole("button", { name: "Create account" }).click();
+  await createAccountButton(page).click();
   await expect(page.getByText("Username cannot be empty.")).toBeVisible();
   await expect(page.getByText("Password cannot be empty.")).toBeVisible();
 
-  await page.locator("#signup-username").fill("ab");
-  await page.locator("#signup-password").fill("short");
-  await page.getByRole("button", { name: "Create account" }).click();
+  await signupUsernameInput(page).fill("ab");
+  await signupPasswordInput(page).fill("short");
+  await createAccountButton(page).click();
 
   await expect(page.getByText("Username must be at least 3 characters.")).toBeVisible();
   await expect(page.getByText("Password must be at least 12 characters.")).toBeVisible();
@@ -34,9 +35,9 @@ test("signup form shows backend failure feedback for duplicate username", async 
   });
 
   await gotoSignup(page);
-  await page.locator("#signup-username").fill(username);
-  await page.locator("#signup-password").fill(STRONG_PASSWORD);
-  await page.getByRole("button", { name: "Create account" }).click();
+  await signupUsernameInput(page).fill(username);
+  await signupPasswordInput(page).fill(STRONG_PASSWORD);
+  await createAccountButton(page).click();
 
   await expect(page.getByText("Unable to create user")).toBeVisible();
 });

@@ -3,6 +3,7 @@ module App (component) where
 import Prelude hiding (div, (/))
 
 import Affjax.Web (Response, post, Error)
+import Affjax.Web as AffjaxWeb
 import Affjax.RequestBody (RequestBody(..))
 import Affjax.ResponseFormat (string)
 import Checklists (component) as Checklists
@@ -21,11 +22,12 @@ import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits as String
 import Data.String.Common as StringCommon
 import Data.String.Pattern (Pattern(..))
+import Effect (Effect)
 import Effect.Aff (Aff)
 import Effect.Aff.Class (liftAff)
 import Effect.Class (class MonadEffect)
 import Data.Newtype (unwrap)
-import Foreign (unsafeToForeign)
+import Foreign (Foreign, unsafeToForeign)
 import Halogen (Component, HalogenM, Slot, ComponentHTML, defaultEval, mkComponent, mkEval) as H
 import Halogen (HalogenM, liftEffect, subscribe)
 import Halogen.HTML (HTML, a, div, h1, nav, slot_, text, form, label, input, button)
@@ -89,10 +91,13 @@ subscribeToRouting nav = do
 
 data Action = RouteChanged Route
             | NavigateTo DefinedRoute
+            | SignOut
+            | RefreshAuthStatus
             | InitializeRouting
 type State =
   { currentRoute :: Route
   , nav :: Maybe PushStateInterface
+  , isAuthenticated :: Boolean
   }
 
 component :: forall q i. H.Component q i Void Aff
@@ -108,40 +113,70 @@ initialState :: forall i. i -> State
 initialState = const
   { currentRoute: Route Note
   , nav: Nothing
+  , isAuthenticated: false
   }
+
+historyState :: Foreign
+historyState = unsafeToForeign unit
+
+navigateWith
+  :: (PushStateInterface -> Foreign -> String -> Effect Unit)
+  -> Maybe PushStateInterface
+  -> DefinedRoute
+  -> H.HalogenM State Action ChildSlots Void Aff Unit
+navigateWith navFn maybeNav route =
+  case maybeNav of
+    Just nav -> liftEffect $ navFn nav historyState (print routeCodec route)
+    Nothing -> pure unit
+
+statusOk :: forall a. Response a -> Boolean
+statusOk r = unwrap r.status >= 200 && unwrap r.status < 300
+
+probeAuth :: forall state action slots. H.HalogenM state action slots Void Aff Boolean
+probeAuth = do
+  resp <- liftAff $ AffjaxWeb.get string "/api/note"
+  pure $ either (const false) statusOk resp
 
 handleAction :: Action -> H.HalogenM State Action ChildSlots Void Aff Unit
 handleAction (RouteChanged Root) = do
   st <- get
   modify_ _ { currentRoute = Route Note }
-  case st.nav of
-    Just nav -> liftEffect $ nav.replaceState (unsafeToForeign unit) (print routeCodec Note)
-    Nothing -> pure unit
+  navigateWith _.replaceState st.nav Note
 handleAction (RouteChanged route) =
   modify_ _ { currentRoute = route }
 handleAction (NavigateTo route) = do
   st <- get
   modify_ _ { currentRoute = Route route }
-  case st.nav of
-    Just nav -> liftEffect $ nav.pushState (unsafeToForeign unit) (print routeCodec route)
-    Nothing -> pure unit
+  navigateWith _.pushState st.nav route
+handleAction SignOut = do
+  st <- get
+  _ <- liftAff $ post string "/api/signout" Nothing
+  modify_ _ { isAuthenticated = false, currentRoute = Route Signup }
+  navigateWith _.pushState st.nav Signup
 handleAction InitializeRouting = do
   nav <- liftEffect makeInterface
   modify_ _ { nav = Just nav }
   subscribeToRouting nav
+  handleAction RefreshAuthStatus
+handleAction RefreshAuthStatus = do
+  authed <- probeAuth
+  modify_ _ { isAuthenticated = authed }
 
 render :: State -> H.ComponentHTML Action ChildSlots Aff
-render { currentRoute: Route route } =
+render { currentRoute: Route route, isAuthenticated } =
   div [ class_ "container" ]
-  ([ h1 [ class_ "text-center" ] [ text "FAVS" ]] <>
+  ([ h1 [ class_ "text-center" ] [ text "FAVS" ]
+   , authMenu isAuthenticated
+   ] <>
   (if route /= Signup then [ nav [ class_ "row nav nav-tabs" ] [ tab Note route, tab Checklist route ] ] else []) <>
   [ currentComponent route
   , div [ class_ "bottom-space" ] []
   ])
 render { currentRoute: Root } = text ""
-render { currentRoute: NotFound } =
+render { currentRoute: NotFound, isAuthenticated } =
   div [ class_ "container py-5" ]
-    [ div [ class_ "row justify-content-center" ]
+    [ authMenu isAuthenticated
+    , div [ class_ "row justify-content-center" ]
         [ div [ class_ "col-12 col-md-10 col-lg-7" ]
             [ div [ class_ "card shadow-sm border-0" ]
                 [ div [ class_ "card-body p-5 text-center" ]
@@ -156,6 +191,14 @@ render { currentRoute: NotFound } =
                 ]
             ]
         ]
+    ]
+
+authMenu :: forall w. Boolean -> HTML w Action
+authMenu isAuthenticated =
+  div [ class_ "auth-menu d-flex justify-content-end mb-2" ]
+    [ if isAuthenticated
+        then button [ class_ "btn btn-outline-secondary btn-sm", onClick (const SignOut) ] [ text "Se deconnecter" ]
+        else button [ class_ "btn btn-outline-secondary btn-sm", onClick (const $ NavigateTo Signup) ] [ text "Signup" ]
     ]
 
 currentComponent :: DefinedRoute -> H.ComponentHTML Action ChildSlots Aff

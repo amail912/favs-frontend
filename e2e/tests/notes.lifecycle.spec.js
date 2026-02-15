@@ -1,18 +1,19 @@
 const { test, expect } = require("../fixtures/authenticated");
+const { appTitle, createButton, notesTab } = require("../support/ui");
 
 test("notes lifecycle: create, edit, delete", async ({ authenticatedPage: page }) => {
   const title = `Note ${Date.now()}`;
   const content = `Content ${Date.now()}`;
 
-  await page.locator("a.nav-link", { hasText: "Notes" }).click();
-  await page.getByRole("button", { name: "+" }).click();
+  await notesTab(page).click();
+  await createButton(page).click();
 
   const titleInput = page.locator("input.title-input").first();
   await expect(titleInput).toBeVisible();
   await titleInput.click();
   await page.keyboard.press("Control+A");
   await page.keyboard.type(title, { delay: 10 });
-  await page.locator("h1", { hasText: "FAVS" }).click();
+  await appTitle(page).click();
 
   const row = page.locator("li", { has: page.locator(`h2:has-text("${title}")`) }).first();
   await expect(row).toBeVisible();
@@ -23,7 +24,7 @@ test("notes lifecycle: create, edit, delete", async ({ authenticatedPage: page }
   await contentInput.click();
   await page.keyboard.press("Control+A");
   await page.keyboard.type(content, { delay: 10 });
-  await page.locator("h1", { hasText: "FAVS" }).click();
+  await appTitle(page).click();
 
   await expect(row.locator(`text=${content}`).first()).toBeVisible();
 
