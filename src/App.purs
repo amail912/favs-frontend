@@ -85,7 +85,7 @@ render :: State -> H.ComponentHTML Action ChildSlots Aff
 render (CurrentRoute (Route route)) =
   div [ class_ "container" ]
     [ h1 [ class_ "text-center" ] [ text "FAVS" ]
-    , nav [ class_ "row nav nav-tabs" ] [ tab Note route, tab Checklist route, tab Signup route ]
+    , nav [ class_ "row nav nav-tabs" ] [ tab Note route, tab Checklist route ]
     , currentComponent route
     , div [ class_ "bottom-space" ] []
     ]
