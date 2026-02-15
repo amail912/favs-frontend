@@ -7,6 +7,7 @@ import Affjax.RequestBody (RequestBody(..))
 import Affjax.ResponseFormat (string)
 import Checklists (component) as Checklists
 import Control.Monad.RWS (get, modify_)
+import Data.Array (head)
 import DOM.HTML.Indexed.ButtonType (ButtonType(..))
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Data.Argonaut.Core (Json, jsonEmptyObject)
@@ -15,13 +16,16 @@ import Data.Char (toCharCode)
 import Data.Either (Either(..), either)
 import Data.Foldable (all)
 import Data.Generic.Rep (class Generic)
-import Data.Maybe (Maybe(..), maybe)
+import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits as String
+import Data.String.Common as StringCommon
+import Data.String.Pattern (Pattern(..))
 import Effect.Aff (Aff)
 import Effect.Aff.Class (liftAff)
 import Effect.Class (class MonadEffect)
 import Data.Newtype (unwrap)
+import Foreign (unsafeToForeign)
 import Halogen (Component, HalogenM, Slot, ComponentHTML, defaultEval, mkComponent, mkEval) as H
 import Halogen (HalogenM, liftEffect, subscribe)
 import Halogen.HTML (HTML, a, div, h1, nav, slot_, text, form, label, input, button)
@@ -29,10 +33,10 @@ import Halogen.HTML.Events (onClick, onValueChange, onSubmit)
 import Halogen.HTML.Properties (for, type_, name, placeholder, id, value, disabled)
 import Halogen.Subscription (create, notify)
 import Notes (component) as Notes
-import Routing.Duplex (RouteDuplex', root, parse)
+import Routing.Duplex (RouteDuplex', root, parse, print)
 import Routing.Duplex.Generic (noArgs, sum)
 import Routing.Duplex.Generic.Syntax ((/))
-import Routing.Hash (matchesWith)
+import Routing.PushState (PushStateInterface, makeInterface, matchesWith)
 import Type.Prelude (Proxy(..))
 import Utils (class_)
 import Web.Event.Event (Event, preventDefault)
@@ -50,7 +54,7 @@ derive instance definedRouteOrd :: Ord DefinedRoute
 instance showDefinedRoute :: Show DefinedRoute where
   show = genericShow
 
-data Route = Route DefinedRoute | NotFound
+data Route = Root | Route DefinedRoute | NotFound
 derive instance routeGeneric :: Generic Route _
 derive instance routeEq :: Eq Route
 derive instance ordRoute :: Ord Route
@@ -64,19 +68,32 @@ routeCodec = root $ sum
   , "Signup": "signup" / noArgs
   }
 
-subscribeToRouting :: forall state slots output m. MonadEffect m => H.HalogenM state Action slots output m Unit
-subscribeToRouting = do
+parseRouteString :: String -> Either Unit Route
+parseRouteString rawPath =
+  Right $
+    if path == "/" || path == "" then Root
+    else either (const NotFound) Route $ parse routeCodec path
+  where
+  withoutQuery = fromMaybe rawPath $ head $ StringCommon.split (Pattern "?") rawPath
+  path = fromMaybe withoutQuery $ head $ StringCommon.split (Pattern "#") withoutQuery
+
+subscribeToRouting :: forall state slots output m. MonadEffect m => PushStateInterface -> H.HalogenM state Action slots output m Unit
+subscribeToRouting nav = do
   {emitter, listener} <- liftEffect create
-  void $ liftEffect $ matchesWith (\s -> Right $ either (const NotFound) Route $ parse routeCodec s) \old new -> do
+  void $ subscribe emitter
+  void $ liftEffect $ matchesWith parseRouteString (\old new -> do
     when (old /= Just new) $ do
       notify listener $ RouteChanged new
-  _ <- subscribe emitter
+    ) nav
   pure unit
 
 data Action = RouteChanged Route
+            | NavigateTo DefinedRoute
             | InitializeRouting
-data State = CurrentRoute Route
-derive instance stateEqInstance :: Eq State
+type State =
+  { currentRoute :: Route
+  , nav :: Maybe PushStateInterface
+  }
 
 component :: forall q i. H.Component q i Void Aff
 component =
@@ -88,22 +105,58 @@ component =
     }
 
 initialState :: forall i. i -> State
-initialState = const $ CurrentRoute $ Route Note
+initialState = const
+  { currentRoute: Route Note
+  , nav: Nothing
+  }
 
 handleAction :: Action -> H.HalogenM State Action ChildSlots Void Aff Unit
-handleAction (RouteChanged route) = do
-  modify_ $ const $ CurrentRoute route
-handleAction InitializeRouting = subscribeToRouting
+handleAction (RouteChanged Root) = do
+  st <- get
+  modify_ _ { currentRoute = Route Note }
+  case st.nav of
+    Just nav -> liftEffect $ nav.replaceState (unsafeToForeign unit) (print routeCodec Note)
+    Nothing -> pure unit
+handleAction (RouteChanged route) =
+  modify_ _ { currentRoute = route }
+handleAction (NavigateTo route) = do
+  st <- get
+  modify_ _ { currentRoute = Route route }
+  case st.nav of
+    Just nav -> liftEffect $ nav.pushState (unsafeToForeign unit) (print routeCodec route)
+    Nothing -> pure unit
+handleAction InitializeRouting = do
+  nav <- liftEffect makeInterface
+  modify_ _ { nav = Just nav }
+  subscribeToRouting nav
 
 render :: State -> H.ComponentHTML Action ChildSlots Aff
-render (CurrentRoute (Route route)) =
+render { currentRoute: Route route } =
   div [ class_ "container" ]
   ([ h1 [ class_ "text-center" ] [ text "FAVS" ]] <>
   (if route /= Signup then [ nav [ class_ "row nav nav-tabs" ] [ tab Note route, tab Checklist route ] ] else []) <>
   [ currentComponent route
   , div [ class_ "bottom-space" ] []
   ])
-render (CurrentRoute NotFound) = text "Not Found"
+render { currentRoute: Root } = text ""
+render { currentRoute: NotFound } =
+  div [ class_ "container py-5" ]
+    [ div [ class_ "row justify-content-center" ]
+        [ div [ class_ "col-12 col-md-10 col-lg-7" ]
+            [ div [ class_ "card shadow-sm border-0" ]
+                [ div [ class_ "card-body p-5 text-center" ]
+                    [ div [ class_ "display-4 fw-bold mb-2" ] [ text "404" ]
+                    , h1 [ class_ "h4 mb-3" ] [ text "Page introuvable" ]
+                    , div [ class_ "text-muted mb-4" ] [ text "La route demandee n'existe pas ou n'est plus disponible." ]
+                    , div [ class_ "d-flex justify-content-center gap-2 flex-wrap" ]
+                        [ button [ class_ "btn btn-primary", onClick (const $ NavigateTo Note) ] [ text "Aller aux notes" ]
+                        , button [ class_ "btn btn-outline-secondary", onClick (const $ NavigateTo Signup) ] [ text "Se connecter / S'inscrire" ]
+                        ]
+                    ]
+                ]
+            ]
+        ]
+    ]
 
 currentComponent :: DefinedRoute -> H.ComponentHTML Action ChildSlots Aff
 currentComponent Note = slot_ (Proxy :: _ "notes") unit Notes.component unit
@@ -114,7 +167,7 @@ tab :: forall w. DefinedRoute -> DefinedRoute -> HTML w Action
 tab tabRoute activeRoute =
   div [ class_ "col text-center nav-item px-0" ]
     [ a [ class_ $ "nav-link" <> (if tabRoute == activeRoute then " active" else "")
-        , onClick (const $ RouteChanged (Route tabRoute))
+        , onClick (const $ NavigateTo tabRoute)
         ]
         [ text (tabLabel tabRoute) ]
     ]

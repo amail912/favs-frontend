@@ -5,7 +5,7 @@ const require = createRequire(import.meta.url);
 const { signupAndSignin } = require('../e2e/support/auth-session.js');
 
 const baseApi = process.env.BASE_API || 'http://localhost:1234/api';
-const baseUi = process.env.BASE_UI || 'http://localhost:1234/#/notes';
+const baseUi = process.env.BASE_UI || 'http://localhost:1234/notes';
 const keepAliveMs = Number(process.env.KEEP_ALIVE_MS || 30_000);
 const headless = process.env.HEADLESS ? process.env.HEADLESS === 'true' : !process.env.DISPLAY;
 

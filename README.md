@@ -57,7 +57,7 @@ npm run start-dev
 ## Architecture du code
 
 - `src/Main.purs` : point d’entrée Halogen
-- `src/App.purs` : composant racine + routing hash
+- `src/App.purs` : composant racine + routing browser (pushState)
 - `src/Notes.purs` : module Notes (affichage/édition/suppression)
 - `src/Checklists.purs` : module Checklists (affichage/édition/suppression)
 - `src/Utils.purs` : helpers UI (ex: classes CSS)
@@ -66,11 +66,12 @@ npm run start-dev
 
 ## Routing
 
-Le front utilise un routing hash avec ces routes :
+Le front utilise des routes navigateur (history API) :
 
-- `#/notes`
-- `#/checklists`
-- `#/signup`
+- `/` (redirection vers `/notes`)
+- `/notes`
+- `/checklists`
+- `/signup`
 
 ## API attendue
 
