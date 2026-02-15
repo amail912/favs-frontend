@@ -91,15 +91,25 @@ _label = lens' $ (\(ChecklistItem { label, checked }) -> Tuple label (\newLabel 
 
 instance checklistDecodeJsonInstance :: DecodeJson Checklist where
   decodeJson :: Json -> Either JsonDecodeError Checklist
-  decodeJson json = do
-    dec <- decodeJson json
-    content <- dec .: "content"
-    name <- content .: "name"
-    items <- content .: "items"
-    either (const $ pure $ NewChecklist { content: { name: name, items: items } })
-           (decodeServerChecklist name items)
-           (dec .: "storageId")
+  decodeJson json = decodeWrappedChecklist json <|> decodeFlatNewChecklist json
     where
+      decodeWrappedChecklist :: Json -> Either JsonDecodeError Checklist
+      decodeWrappedChecklist wrappedJson = do
+        dec <- decodeJson wrappedJson
+        content <- dec .: "content"
+        name <- content .: "name"
+        items <- content .: "items"
+        either (const $ pure $ NewChecklist { content: { name: name, items: items } })
+               (decodeServerChecklist name items)
+               (dec .: "storageId")
+
+      decodeFlatNewChecklist :: Json -> Either JsonDecodeError Checklist
+      decodeFlatNewChecklist flatJson = do
+        dec <- decodeJson flatJson
+        name <- dec .: "name"
+        items <- dec .: "items"
+        pure $ NewChecklist { content: { name: name, items: items } }
+
       decodeServerChecklist :: String -> Array ChecklistItem -> Object Json -> Either JsonDecodeError Checklist
       decodeServerChecklist name items storageIdObj = do
         version <- storageIdObj .: "version"
@@ -110,10 +120,7 @@ instance checklistDecodeJsonInstance :: DecodeJson Checklist where
 instance checklistEncodeJson :: EncodeJson Checklist where
   encodeJson :: Checklist -> Json
   encodeJson (NewChecklist { content: checklistContent }) =
-    cont ~> jsonEmptyObject
-    where
-      cont :: Tuple String Json
-      cont = "content" := encodeContentObj checklistContent
+    encodeContentObj checklistContent
   encodeJson (ServerChecklist { content: checklistContent, storageId: { version, id }}) =
     cont ~> storage ~> jsonEmptyObject
     where

@@ -84,15 +84,25 @@ _noteContent = _content <<< (lens _.noteContent $ _ { noteContent = _ })
 
 instance noteDecodeJsonInstance :: DecodeJson Note where
   decodeJson :: Json -> Either JsonDecodeError Note
-  decodeJson json = do
-    dec <- decodeJson json
-    content <- dec .: "content"
-    title <- content .: "title"
-    noteContent <- content .: "noteContent"
-    either (const $ pure $ NewNote { content: { title: title, noteContent: noteContent } })
-           (decodeServerNote title noteContent)
-           (dec .: "storageId")
+  decodeJson json = decodeWrappedNote json <|> decodeFlatNewNote json
     where
+      decodeWrappedNote :: Json -> Either JsonDecodeError Note
+      decodeWrappedNote wrappedJson = do
+        dec <- decodeJson wrappedJson
+        content <- dec .: "content"
+        title <- content .: "title"
+        noteContent <- content .: "noteContent"
+        either (const $ pure $ NewNote { content: { title: title, noteContent: noteContent } })
+               (decodeServerNote title noteContent)
+               (dec .: "storageId")
+
+      decodeFlatNewNote :: Json -> Either JsonDecodeError Note
+      decodeFlatNewNote flatJson = do
+        dec <- decodeJson flatJson
+        title <- dec .: "title"
+        noteContent <- dec .: "noteContent"
+        pure $ NewNote { content: { title: title, noteContent: noteContent } }
+
       decodeServerNote :: String -> String -> Object Json -> Either JsonDecodeError Note
       decodeServerNote title noteContent storageIdObj = do
         version <- storageIdObj .: "version"
@@ -103,10 +113,7 @@ instance noteDecodeJsonInstance :: DecodeJson Note where
 instance noteEncodeJson :: EncodeJson Note where
   encodeJson :: Note -> Json
   encodeJson (NewNote { content: { title, noteContent } }) =
-    cont ~> jsonEmptyObject
-    where
-      cont :: Tuple String Json
-      cont = "content" := encodeContentObj title noteContent
+    encodeContentObj title noteContent
   encodeJson (ServerNote { content: { title, noteContent }, storageId: { version, id }}) =
     cont ~> storage ~> jsonEmptyObject
     where

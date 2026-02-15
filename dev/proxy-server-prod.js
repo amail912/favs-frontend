@@ -6,6 +6,7 @@ app.use('/api', createProxyMiddleware({
   target: 'https://ns328297.ip-37-187-113.eu/',
   changeOrigin: true
 }));
+app.use('/static', express.static('static'));
 app.use(express.static('static'));
 
 app.listen(1234, () => {

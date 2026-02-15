@@ -6,6 +6,7 @@ app.use('/api', createProxyMiddleware({
   target: 'http://localhost:8081/',
   changeOrigin: true
 }));
+app.use('/static', express.static('static'));
 app.use(express.static('static'));
 
 app.listen(1234, () => {
