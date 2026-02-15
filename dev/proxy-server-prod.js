@@ -4,8 +4,7 @@ const app = express();
 
 app.use('/api', createProxyMiddleware({
   target: 'https://ns328297.ip-37-187-113.eu/',
-  changeOrigin: true,
-  pathRewrite: {'^/api': ''}
+  changeOrigin: true
 }));
 app.use(express.static('static'));
 
