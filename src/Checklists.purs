@@ -1,4 +1,4 @@
-module Checklists (component) where
+module Checklists (component, Checklist(..), ChecklistContent, ChecklistItem(..), StorageId, removeChecklistItem) where
 
 import Prelude hiding (div)
 
@@ -15,7 +15,7 @@ import Control.Monad.Trans.Class (lift)
 import Data.Argonaut.Core (Json, jsonEmptyObject)
 import Data.Argonaut.Decode (class DecodeJson, JsonDecodeError, decodeJson, (.:))
 import Data.Argonaut.Encode (class EncodeJson, encodeJson, (:=), (~>))
-import Data.Array (index, length, mapWithIndex, null, snoc)
+import Data.Array (deleteAt, index, length, mapWithIndex, null, snoc)
 import Data.Bifunctor (lmap)
 import Data.Either (Either, either)
 import Data.Generic.Rep (class Generic)
@@ -61,9 +61,11 @@ data Checklist = NewChecklist { content   :: ChecklistContent }
                        , storageId :: StorageId }
 
 derive instance checklistGenericInstance :: Generic Checklist _
+derive instance checklistEqInstance :: Eq Checklist
 instance checklistShowInstance :: Show Checklist where
   show = genericShow
 
+derive newtype instance checklistItemEqInstance :: Eq ChecklistItem
 derive newtype instance checklistItemShowInstance :: Show ChecklistItem
 
 _content  :: Lens' Checklist ChecklistContent
@@ -108,7 +110,10 @@ instance checklistDecodeJsonInstance :: DecodeJson Checklist where
 instance checklistEncodeJson :: EncodeJson Checklist where
   encodeJson :: Checklist -> Json
   encodeJson (NewChecklist { content: checklistContent }) =
-    encodeContentObj checklistContent
+    cont ~> jsonEmptyObject
+    where
+      cont :: Tuple String Json
+      cont = "content" := encodeContentObj checklistContent
   encodeJson (ServerChecklist { content: checklistContent, storageId: { version, id }}) =
     cont ~> storage ~> jsonEmptyObject
     where
@@ -247,7 +252,7 @@ handleAction action = handleError $
     Initialize -> refreshChecklists
     CreateNewChecklist -> do
       st <- get
-      H.put st { checklists = snoc st.checklists (NewChecklist { content: { name: "What's your new name?", items: [ChecklistItem { label: "What's your new name?", checked: false }] } })
+      H.put st { checklists = snoc st.checklists newChecklist
                , editingState = EditingChecklistName (length st.checklists)}
       goInput (length st.checklists)
     EditChecklistName idx -> do
@@ -266,7 +271,7 @@ handleAction action = handleError $
       checklists <- gets _.checklists
       let retrievedChecklist = checklists ^? ix checklistIdx
       maybe (throwError $ CustomFatalError ("Unable to retrieve checklist at index " <> show checklistIdx <> " while trying to delete one of its items"))
-            (\checklist -> deleteChecklistItem checklist itemIdx >>= (\_ -> refreshChecklists))
+            (deleteChecklistItem itemIdx)
             retrievedChecklist
 
 
@@ -275,9 +280,26 @@ handleError m = do
   res <- runExceptT m
   either logShow pure res
 
-deleteChecklistItem :: Checklist -> Int -> ErrorChecklistAppM Unit
-deleteChecklistItem (ServerChecklist _) _ = pure unit
-deleteChecklistItem (NewChecklist _) _ = pure unit
+deleteChecklistItem :: Int -> Checklist -> ErrorChecklistAppM Unit
+deleteChecklistItem itemIdx checklist =
+  maybe (throwError $ CustomFatalError ("Unable to remove checklist item at index " <> show itemIdx))
+        saveChecklistAndRefresh
+        (removeChecklistItem itemIdx checklist)
+
+removeChecklistItem :: Int -> Checklist -> Maybe Checklist
+removeChecklistItem itemIdx (NewChecklist { content: { name, items } }) = do
+  newItems <- deleteAt itemIdx items
+  pure $ NewChecklist { content: { name, items: newItems } }
+removeChecklistItem itemIdx (ServerChecklist { content: { name, items }, storageId }) = do
+  newItems <- deleteAt itemIdx items
+  pure $ ServerChecklist { content: { name, items: newItems }, storageId }
+
+saveChecklistAndRefresh :: Checklist -> ErrorChecklistAppM Unit
+saveChecklistAndRefresh checklist = do
+  resp <- writeToServer checklist
+  if unwrap resp.status >= 300 || unwrap resp.status < 200
+    then throwError $ CustomFatalError $ "Wrong status response for post checklist: " <> show resp.status
+    else refreshChecklists
 
 updateChecklistWithSaveAndRefreshChecklists :: forall a. Int -> Traversal' Checklist a -> a -> ErrorChecklistAppM Unit
 updateChecklistWithSaveAndRefreshChecklists idx lens_ newVal = do
@@ -290,10 +312,7 @@ updateChecklistWithSaveAndRefreshChecklists idx lens_ newVal = do
   where
     writeAndRefreshThenStopEditing :: Checklist -> ErrorChecklistAppM Unit
     writeAndRefreshThenStopEditing checklist = do
-      resp <- writeToServer checklist
-      if unwrap resp.status >= 300 || unwrap resp.status < 200
-        then throwError $ CustomFatalError $ "Wrong status response for post checklist: " <> show resp.status
-        else refreshChecklists
+      saveChecklistAndRefresh checklist
       lift $ modify_ \st -> st { editingState = None }
 
 goInput :: Int -> ErrorChecklistAppM Unit

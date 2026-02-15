@@ -1,4 +1,4 @@
-module Notes (component) where
+module Notes (component, Note(..), NoteContent, StorageId, newNote) where
 
 import Prelude hiding (div)
 
@@ -24,7 +24,6 @@ import Data.Lens (Lens', lens, lens', (.~), (^.))
 import Data.Maybe (Maybe, maybe)
 import Data.Newtype (unwrap, wrap)
 import Data.Show.Generic (genericShow)
-import Data.String (Pattern(Pattern), split) as Str
 import Data.Tuple (Tuple(..))
 import Effect.Aff (Aff)
 import Effect.Aff.Class (liftAff)
@@ -32,10 +31,9 @@ import Effect.Class (liftEffect)
 import Effect.Class.Console (log, logShow)
 import Foreign.Object (Object)
 import Halogen (Component, ComponentHTML, HalogenM, defaultEval, getRef, mkComponent, mkEval, put) as H
-import Halogen.HTML (HTML, button, div, h1, h2, header, i, input, li, nav, section, span, text, textarea, ul)
+import Halogen.HTML (HTML, button, div, h2, header, i, input, li, section, text, textarea, ul)
 import Halogen.HTML.Events (onBlur, onClick, onValueChange)
 import Halogen.HTML.Properties (ref, value)
-import Halogen.HTML.Properties as Properties
 import Utils (class_)
 import Web.DOM (Element)
 import Web.DOM.Element (getBoundingClientRect, getElementsByClassName)
@@ -62,6 +60,7 @@ data Note = NewNote { content   :: NoteContent }
                        , storageId :: StorageId }
 
 derive instance noteGenericInstance :: Generic Note _
+derive instance noteEqInstance :: Eq Note
 instance noteShowInstance :: Show Note where
   show = genericShow
 
@@ -104,7 +103,10 @@ instance noteDecodeJsonInstance :: DecodeJson Note where
 instance noteEncodeJson :: EncodeJson Note where
   encodeJson :: Note -> Json
   encodeJson (NewNote { content: { title, noteContent } }) =
-    encodeContentObj title noteContent
+    cont ~> jsonEmptyObject
+    where
+      cont :: Tuple String Json
+      cont = "content" := encodeContentObj title noteContent
   encodeJson (ServerNote { content: { title, noteContent }, storageId: { version, id }}) =
     cont ~> storage ~> jsonEmptyObject
     where
@@ -211,7 +213,7 @@ handleAction action = handleError $
     Initialize -> refreshNotes
     CreateNewNote -> do
       st <- get
-      H.put st { notes = snoc st.notes (NewNote { content: { title: "What's your new title?", noteContent: "What's your new title?" } })
+      H.put st { notes = snoc st.notes newNote
                , editingState = EditingNoteTitle (length st.notes)}
       goInput (length st.notes)
     EditNoteTitle idx -> do

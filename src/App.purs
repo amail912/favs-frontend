@@ -85,7 +85,7 @@ render :: State -> H.ComponentHTML Action ChildSlots Aff
 render (CurrentRoute (Route route)) =
   div [ class_ "container" ]
     [ h1 [ class_ "text-center" ] [ text "FAVS" ]
-    , nav [ class_ "row nav nav-tabs" ] [ tab "Notes" (route == Note), tab "Checklists" (route == Checklist)]
+    , nav [ class_ "row nav nav-tabs" ] [ tab Note route, tab Checklist route ]
     , currentComponent route
     , div [ class_ "bottom-space" ] []
     ]
@@ -96,10 +96,19 @@ currentComponent Note = slot_ (Proxy :: _ "notes") unit Notes.component unit
 currentComponent Checklist = slot_ (Proxy :: _ "checklists") unit Checklists.component unit
 currentComponent Signup = slot_ (Proxy :: _ "signup") unit signupComponent unit
 
-tab :: forall w. String -> Boolean -> HTML w Action
-tab title active =
+tab :: forall w. DefinedRoute -> DefinedRoute -> HTML w Action
+tab tabRoute activeRoute =
   div [ class_ "col text-center nav-item px-0" ]
-    [ a [ class_ $ "nav-link" <> (if active then " active" else ""), onClick (const $ RouteChanged (if title == "Notes" then Route Note else Route Checklist))] [ text title ] ]
+    [ a [ class_ $ "nav-link" <> (if tabRoute == activeRoute then " active" else "")
+        , onClick (const $ RouteChanged (Route tabRoute))
+        ]
+        [ text (tabLabel tabRoute) ]
+    ]
+
+tabLabel :: DefinedRoute -> String
+tabLabel Note = "Notes"
+tabLabel Checklist = "Checklists"
+tabLabel Signup = "Signup"
 
 data SignupAction = SignupInitialize
 type NoOutput = Void

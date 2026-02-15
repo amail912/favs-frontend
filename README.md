@@ -21,7 +21,7 @@ Application front-end en **PureScript + Halogen** pour gérer son quotidien
 Exemple d'installation globale des outils PureScript :
 
 ```bash
-npm install -g purescript spago-next
+npm install -g purescript spago
 ```
 
 ## Installation
