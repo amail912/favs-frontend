@@ -12,19 +12,25 @@ Application front-end en **PureScript + Halogen** pour gérer son quotidien
 
 ## Prérequis
 
-- Node.js (version LTS recommandée)
-- npm
-- Outils PureScript :
-  - `purescript`
-  - `spago`
-
-Exemple d'installation globale des outils PureScript :
-
-```bash
-npm install -g purescript spago
-```
+- Debian (ou Linux compatible) avec `git` installé
+- droits `sudo` (ou session root) pour l'installation automatique
 
 ## Installation
+
+### Installation recommandée (from scratch)
+
+```bash
+scripts/setup.sh
+```
+
+Ce script installe Node.js/npm via les dépôts Debian, les dépendances système Playwright, les dépendances npm du projet (dont `spago` et `purescript`), et Chromium pour les tests E2E.
+
+Documentation complète :
+
+- `docs/setup-debian-from-scratch.md`
+- `docs/setup-script-reference.md`
+
+### Installation manuelle (alternative)
 
 ```bash
 npm install
@@ -98,7 +104,7 @@ Le front appelle les endpoints suivants (préfixés localement par `/api` via le
 npm test
 ```
 
-> Cette commande nécessite `spago` installé sur la machine.
+> `spago` est installé localement via `npm ci` (pas besoin d'installation globale).
 
 ## Tests E2E (Playwright)
 
