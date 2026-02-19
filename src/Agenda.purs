@@ -6,6 +6,7 @@ module Agenda
   , ItemStatus(..)
   , ItemType(..)
   , ValidationError(..)
+  , applyOfflineMutation
   , detectConflictGroups
   , detectConflictIds
   , toNewIntention
@@ -27,12 +28,13 @@ import Data.Argonaut.Core (Json, jsonEmptyObject)
 import Data.Argonaut.Decode (class DecodeJson, decodeJson, (.:), (.:?))
 import Data.Argonaut.Decode.Error (JsonDecodeError(..))
 import Data.Argonaut.Encode (class EncodeJson, encodeJson, (:=), (~>))
-import Data.Array (elem, filter, find, length, mapMaybe, mapWithIndex, nub, null, uncons)
+import Data.Array (elem, filter, find, foldM, length, mapMaybe, mapWithIndex, nub, null, uncons)
 import Data.Bifunctor (lmap)
 import Data.Either (Either(..), either)
 import Data.Foldable (all, foldl)
 import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe(..), maybe)
+import Data.Newtype (unwrap)
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits as String
 import Data.String.Common as StringCommon
@@ -228,6 +230,9 @@ type State =
   , validationError :: Maybe ValidationError
   , showConflictsOnly :: Boolean
   , conflictResolution :: Maybe ConflictResolution
+  , offlineMode :: Boolean
+  , pendingSync :: Array CalendarItem
+  , syncConflict :: Maybe (Array CalendarItem)
   }
 
 data Action
@@ -238,10 +243,13 @@ data Action
   | SubmitIntention
   | PlanifyFrom String CalendarItemContent
   | ToggleConflictFilter
+  | ToggleOffline
   | OpenConflictResolution (Array String)
   | ChooseResolutionStrategy ResolutionStrategy
   | ConfirmResolution
   | CancelResolution
+  | ResolveSyncKeepLocal
+  | ResolveSyncDiscardLocal
 
 component :: forall q i. H.Component q i NoOutput Aff
 component =
@@ -260,6 +268,9 @@ initialState = const
   , validationError: Nothing
   , showConflictsOnly: false
   , conflictResolution: Nothing
+  , offlineMode: false
+  , pendingSync: []
+  , syncConflict: Nothing
   }
 
 handleAction :: Action -> AgendaAppM Unit
@@ -277,14 +288,37 @@ handleAction action = handleError $
       case validateIntention st.draft of
         Left err -> lift $ modify_ _ { validationError = Just err }
         Right validDraft -> do
-          _ <- createItem (toNewIntention validDraft)
-          lift $ modify_ _ { draft = emptyDraft, validationError = Nothing }
-          refreshItems
+          let item = toNewIntention validDraft
+          if st.offlineMode then do
+            let
+              result = applyOfflineMutation true item st.items st.pendingSync
+            lift $ modify_ _ { items = result.items
+                            , pendingSync = result.pending
+                            , draft = emptyDraft
+                            , validationError = Nothing
+                            }
+          else do
+            _ <- createItem item
+            lift $ modify_ _ { draft = emptyDraft, validationError = Nothing }
+            refreshItems
     PlanifyFrom sourceId content -> do
-      _ <- createItem (toScheduledBlock sourceId content)
-      refreshItems
+      st <- get
+      let item = toScheduledBlock sourceId content
+      if st.offlineMode then do
+        let
+          result = applyOfflineMutation true item st.items st.pendingSync
+        lift $ modify_ _ { items = result.items, pendingSync = result.pending }
+      else do
+        _ <- createItem item
+        refreshItems
     ToggleConflictFilter ->
       lift $ modify_ \st -> st { showConflictsOnly = not st.showConflictsOnly }
+    ToggleOffline -> do
+      st <- get
+      if st.offlineMode then do
+        lift $ modify_ _ { offlineMode = false }
+        syncPending
+      else lift $ modify_ _ { offlineMode = true }
     OpenConflictResolution groupIds ->
       lift $ modify_ \st -> st { conflictResolution = Just { groupIds, pendingStrategy: Nothing } }
     ChooseResolutionStrategy strategy ->
@@ -293,6 +327,11 @@ handleAction action = handleError $
       lift $ modify_ \st -> st { conflictResolution = Nothing }
     CancelResolution ->
       lift $ modify_ \st -> st { conflictResolution = Nothing }
+    ResolveSyncKeepLocal ->
+      lift $ modify_ \st -> st { syncConflict = Nothing, offlineMode = true }
+    ResolveSyncDiscardLocal -> do
+      lift $ modify_ \st -> st { syncConflict = Nothing, pendingSync = [] }
+      refreshItems
 
 handleError :: ErrorAgendaAppM Unit -> AgendaAppM Unit
 handleError m = do
@@ -308,8 +347,30 @@ refreshItems = do
 createItem :: CalendarItem -> ErrorAgendaAppM (Response Json)
 createItem item = withExceptT toFatalError $ ExceptT $ liftAff $ post json "/api/v1/calendar-items" (Just $ Json $ encodeJson item)
 
+statusOk :: forall a. Response a -> Boolean
+statusOk r = unwrap r.status >= 200 && unwrap r.status < 300
+
+syncPending :: ErrorAgendaAppM Unit
+syncPending = do
+  st <- get
+  if null st.pendingSync then refreshItems
+  else do
+    ok <- foldM
+      (\acc item ->
+        if not acc then pure false
+        else do
+          resp <- createItem item
+          pure (statusOk resp)
+      )
+      true
+      st.pendingSync
+    if ok then do
+      lift $ modify_ _ { pendingSync = [], syncConflict = Nothing }
+      refreshItems
+    else lift $ modify_ _ { syncConflict = Just st.pendingSync }
+
 render :: forall m. State -> H.ComponentHTML Action () m
-render { items, draft, validationError, showConflictsOnly, conflictResolution } =
+render { items, draft, validationError, showConflictsOnly, conflictResolution, offlineMode, syncConflict } =
   let
     conflictIds = detectConflictIds items
     conflictGroups = detectConflictGroups items
@@ -327,11 +388,13 @@ render { items, draft, validationError, showConflictsOnly, conflictResolution } 
             , onClick (const ToggleConflictFilter)
             ]
             [ text "Filtrer: en conflit" ]
+        , renderOfflineToggle offlineMode
         , renderConflictActions conflictGroups
         ]
     , renderForm draft validationError
     , if (null itemsToShow) then emptyAgenda else agendaList conflictIds itemsToShow
     , maybe (text "") (renderConflictResolution items) conflictResolution
+    , maybe (text "") renderSyncConflict syncConflict
     ]
 
 renderForm :: forall w. IntentionDraft -> Maybe ValidationError -> HTML w Action
@@ -429,6 +492,17 @@ derive instance resolutionStrategyEq :: Eq ResolutionStrategy
 instance resolutionStrategyShow :: Show ResolutionStrategy where
   show = genericShow
 
+type OfflineMutationResult =
+  { items :: Array CalendarItem
+  , pending :: Array CalendarItem
+  }
+
+applyOfflineMutation :: Boolean -> CalendarItem -> Array CalendarItem -> Array CalendarItem -> OfflineMutationResult
+applyOfflineMutation offline item items pending =
+  if offline
+    then { items: items <> [ item ], pending: pending <> [ item ] }
+    else { items, pending }
+
 detectConflictIds :: Array CalendarItem -> Array String
 detectConflictIds items =
   nub $ go (mapMaybe toConflictBlock items) []
@@ -516,6 +590,33 @@ renderConflictActions conflictGroups =
     case uncons groups of
       Just { head } -> head
       Nothing -> []
+
+renderOfflineToggle :: forall w. Boolean -> HTML w Action
+renderOfflineToggle offlineMode =
+  div [ class_ "agenda-offline-toggle" ]
+    [ button
+        [ class_ $ "btn btn-sm " <> if offlineMode then "btn-outline-warning" else "btn-outline-secondary"
+        , onClick (const ToggleOffline)
+        ]
+        [ text $ if offlineMode then "Mode hors ligne actif" else "Passer hors ligne" ]
+    ]
+
+renderSyncConflict :: forall w. Array CalendarItem -> HTML w Action
+renderSyncConflict pending =
+  div [ class_ "agenda-sync-conflict" ]
+    [ div [ class_ "agenda-conflict-title" ] [ text "Conflit de synchronisation" ]
+    , div [ class_ "agenda-conflict-subtitle" ]
+        [ text "Choisissez comment resoudre la synchronisation des changements locaux." ]
+    , ul [ class_ "agenda-conflict-list" ] (map (renderConflictItem pending) pendingIds)
+    , div [ class_ "agenda-conflict-confirmation-actions" ]
+        [ button [ class_ "btn btn-sm btn-danger", onClick (const ResolveSyncDiscardLocal) ] [ text "Abandonner local" ]
+        , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const ResolveSyncKeepLocal) ] [ text "Conserver local" ]
+        ]
+    ]
+  where
+  pendingIds = mapMaybe extractId pending
+  extractId (ServerCalendarItem { id }) = Just id
+  extractId _ = Nothing
 
 renderConflictResolution :: forall w. Array CalendarItem -> ConflictResolution -> HTML w Action
 renderConflictResolution items resolution =
