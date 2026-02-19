@@ -249,6 +249,12 @@ a.nav-link:hover {
   text-align: center;
 }
 
+.agenda-filter {
+  margin-top: 0.6rem;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
 .agenda-title {
   font-weight: 760;
   margin-bottom: 0.15rem;
@@ -306,6 +312,11 @@ a.nav-link:hover {
   margin-top: 0.6rem;
   border-radius: 999px;
   font-weight: 600;
+}
+
+.agenda-card--conflict {
+  border-color: #f2b5b5;
+  box-shadow: 0 10px 28px rgba(178, 34, 34, 0.15);
 }
 
 @media (max-width: 768px) {

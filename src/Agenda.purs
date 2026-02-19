@@ -6,6 +6,7 @@ module Agenda
   , ItemStatus(..)
   , ItemType(..)
   , ValidationError(..)
+  , detectConflictIds
   , toNewIntention
   , toScheduledBlock
   , validateIntention
@@ -25,10 +26,10 @@ import Data.Argonaut.Core (Json, jsonEmptyObject)
 import Data.Argonaut.Decode (class DecodeJson, decodeJson, (.:), (.:?))
 import Data.Argonaut.Decode.Error (JsonDecodeError(..))
 import Data.Argonaut.Encode (class EncodeJson, encodeJson, (:=), (~>))
-import Data.Array (mapWithIndex, null)
+import Data.Array (elem, filter, mapMaybe, mapWithIndex, nub, null, uncons)
 import Data.Bifunctor (lmap)
 import Data.Either (Either(..), either)
-import Data.Foldable (all)
+import Data.Foldable (all, foldl)
 import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe(..), maybe)
 import Data.Show.Generic (genericShow)
@@ -224,6 +225,7 @@ type State =
   { items :: Array CalendarItem
   , draft :: IntentionDraft
   , validationError :: Maybe ValidationError
+  , showConflictsOnly :: Boolean
   }
 
 data Action
@@ -233,6 +235,7 @@ data Action
   | DraftEndChanged String
   | SubmitIntention
   | PlanifyFrom String CalendarItemContent
+  | ToggleConflictFilter
 
 component :: forall q i. H.Component q i NoOutput Aff
 component =
@@ -249,6 +252,7 @@ initialState = const
   { items: []
   , draft: emptyDraft
   , validationError: Nothing
+  , showConflictsOnly: false
   }
 
 handleAction :: Action -> AgendaAppM Unit
@@ -272,6 +276,8 @@ handleAction action = handleError $
     PlanifyFrom sourceId content -> do
       _ <- createItem (toScheduledBlock sourceId content)
       refreshItems
+    ToggleConflictFilter ->
+      lift $ modify_ \st -> st { showConflictsOnly = not st.showConflictsOnly }
 
 handleError :: ErrorAgendaAppM Unit -> AgendaAppM Unit
 handleError m = do
@@ -288,14 +294,26 @@ createItem :: CalendarItem -> ErrorAgendaAppM (Response Json)
 createItem item = withExceptT toFatalError $ ExceptT $ liftAff $ post json "/api/v1/calendar-items" (Just $ Json $ encodeJson item)
 
 render :: forall m. State -> H.ComponentHTML Action () m
-render { items, draft, validationError } =
+render { items, draft, validationError, showConflictsOnly } =
+  let
+    conflictIds = detectConflictIds items
+    itemsToShow =
+      if showConflictsOnly
+        then filter (isConflict conflictIds) items
+        else items
+  in
   div [ class_ "entity-page agenda-page" ]
     [ section [ class_ "agenda-header" ]
         [ h2 [ class_ "agenda-title" ] [ text "Vue Jour" ]
         , div [ class_ "agenda-subtitle" ] [ text "Capture rapide des intentions a planifier." ]
+        , button
+            [ class_ $ "btn btn-sm agenda-filter" <> if showConflictsOnly then " btn-outline-primary" else " btn-outline-secondary"
+            , onClick (const ToggleConflictFilter)
+            ]
+            [ text "Filtrer: en conflit" ]
         ]
     , renderForm draft validationError
-    , if (null items) then emptyAgenda else agendaList items
+    , if (null itemsToShow) then emptyAgenda else agendaList conflictIds itemsToShow
     ]
 
 renderForm :: forall w. IntentionDraft -> Maybe ValidationError -> HTML w Action
@@ -344,16 +362,17 @@ emptyAgenda =
     , div [ class_ "entity-empty-subtitle" ] [ text "Ajoutez une intention pour demarrer votre journee." ]
     ]
 
-agendaList :: forall w. Array CalendarItem -> HTML w Action
-agendaList items =
-  ul [ class_ "list-group entity-list agenda-list" ] (mapWithIndex renderItem items)
+agendaList :: forall w. Array String -> Array CalendarItem -> HTML w Action
+agendaList conflictIds items =
+  ul [ class_ "list-group entity-list agenda-list" ] (mapWithIndex (renderItem conflictIds) items)
 
-renderItem :: forall w. Int -> CalendarItem -> HTML w Action
-renderItem _ item =
+renderItem :: forall w. Array String -> Int -> CalendarItem -> HTML w Action
+renderItem conflictIds _ item =
   let
     content = calendarItemContent item
+    conflictClass = if isConflict conflictIds item then " agenda-card--conflict" else ""
   in
-    li [ class_ "row list-group-item entity-card agenda-card" ]
+    li [ class_ $ "row list-group-item entity-card agenda-card" <> conflictClass ]
       [ div [ class_ "col entity-card-body" ]
           [ div [ class_ "agenda-card-title" ] [ text content.title ]
           , div [ class_ "agenda-card-window" ]
@@ -367,6 +386,38 @@ renderPlanifyAction (ServerCalendarItem { id, content }) _ | content.itemType ==
   button [ class_ "btn btn-sm btn-outline-primary agenda-planify", onClick (const $ PlanifyFrom id content) ]
     [ text "Planifier" ]
 renderPlanifyAction _ _ = text ""
+
+isConflict :: Array String -> CalendarItem -> Boolean
+isConflict conflictIds (ServerCalendarItem { id }) = elem id conflictIds
+isConflict _ _ = false
+
+detectConflictIds :: Array CalendarItem -> Array String
+detectConflictIds items =
+  nub $ go (mapMaybe toConflictBlock items) []
+  where
+  toConflictBlock :: CalendarItem -> Maybe { id :: String, start :: String, end :: String }
+  toConflictBlock (ServerCalendarItem { id, content }) | content.itemType == ScheduledBlock =
+    Just { id, start: content.windowStart, end: content.windowEnd }
+  toConflictBlock _ = Nothing
+
+  overlaps a b = a.start < b.end && b.start < a.end
+
+  go blocks acc =
+    case uncons blocks of
+      Nothing -> acc
+      Just { head: current, tail: rest } ->
+        let
+          acc' =
+            foldl
+              (\currentAcc other ->
+                if overlaps current other
+                  then currentAcc <> [ current.id, other.id ]
+                  else currentAcc
+              )
+              acc
+              rest
+        in
+          go rest acc'
 
 calendarItemContent :: CalendarItem -> CalendarItemContent
 calendarItemContent (NewCalendarItem { content }) = content
