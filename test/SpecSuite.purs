@@ -2,7 +2,7 @@ module Test.SpecSuite (runSpecSuite) where
 
 import Prelude
 
-import Agenda (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), RecurrenceRule(..), SortMode(..), ValidationError(..), applyOfflineMutation, detectConflictGroups, detectConflictIds, durationMinutesBetween, generateOccurrencesForMonth, sortItems, toNewIntention, validateIntention)
+import Agenda (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), RecurrenceRule(..), RoutineTemplate, SortMode(..), StepDependency(..), ValidationError(..), applyOfflineMutation, detectConflictGroups, detectConflictIds, durationMinutesBetween, generateOccurrencesForMonth, instantiateRoutine, sortItems, toNewIntention, validateIntention)
 import Checklists (Checklist(..), ChecklistItem(..), removeChecklistItem)
 import Data.Argonaut.Decode (decodeJson)
 import Data.Argonaut.Encode (encodeJson)
@@ -291,3 +291,32 @@ runSpecSuite = runSpec [ consoleReporter ] do
       let
         occurrences = generateOccurrencesForMonth RecurrenceWeekly [ "2026-02-19" ] "2026-02-05T09:00"
       occurrences `shouldEqual` [ "2026-02-05", "2026-02-12", "2026-02-26" ]
+
+    it "instantiates a routine with dependent steps" do
+      let
+        template :: RoutineTemplate
+        template =
+          { id: "r1"
+          , name: "Routine"
+          , steps:
+              [ { id: "a"
+                , title: "Etape A"
+                , windowStart: "2026-02-19T09:00"
+                , windowEnd: "2026-02-19T10:00"
+                , dependsOn: Nothing
+                }
+              , { id: "b"
+                , title: "Etape B"
+                , windowStart: "2026-02-19T10:00"
+                , windowEnd: "2026-02-19T10:30"
+                , dependsOn: Just (StartAfterEnd { stepId: "a", offsetMinutes: 15 })
+                }
+              ]
+          }
+        routineInstance = instantiateRoutine template
+      case routineInstance.steps of
+        [ stepA, stepB ] -> do
+          stepA.windowStart `shouldEqual` "2026-02-19T09:00"
+          stepB.windowStart `shouldEqual` "2026-02-19T10:15"
+          stepB.windowEnd `shouldEqual` "2026-02-19T10:45"
+        _ -> fail "Expected two routine steps"
