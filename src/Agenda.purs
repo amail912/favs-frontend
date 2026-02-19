@@ -6,11 +6,13 @@ module Agenda
   , ItemStatus(..)
   , ItemType(..)
   , SortMode(..)
+  , RecurrenceRule(..)
   , ValidationError(..)
   , applyOfflineMutation
   , durationMinutesBetween
   , detectConflictGroups
   , detectConflictIds
+  , generateOccurrencesForMonth
   , sortItems
   , toNewIntention
   , toScheduledBlock
@@ -38,17 +40,17 @@ import Data.Either (Either(..), either)
 import Data.Foldable (all, foldl)
 import Data.Generic.Rep (class Generic)
 import Data.Int as Int
-import Data.Maybe (Maybe(..), maybe)
+import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.Newtype (unwrap)
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits as String
 import Data.String.Common as StringCommon
 import DOM.HTML.Indexed.InputType (InputType(..))
-import Data.Date (exactDate)
-import Data.DateTime (DateTime(..), diff)
-import Data.Enum (toEnum)
+import Data.Date (canonicalDate, day, exactDate, month, year)
+import Data.DateTime (DateTime(..), adjust, date, diff)
+import Data.Enum (fromEnum, toEnum)
 import Data.Time (Time(..))
-import Data.Time.Duration (Minutes(..))
+import Data.Time.Duration (Days(..), Minutes(..))
 import Effect (Effect)
 import Effect.Aff (Aff)
 import Effect.Aff.Class (liftAff)
@@ -79,6 +81,18 @@ derive instance itemStatusEq :: Eq ItemStatus
 instance itemStatusShow :: Show ItemStatus where
   show = genericShow
 
+data RecurrenceRule
+  = RecurrenceDaily
+  | RecurrenceWeekly
+  | RecurrenceMonthly
+  | RecurrenceYearly
+  | RecurrenceEveryXDays Int
+
+derive instance recurrenceRuleGeneric :: Generic RecurrenceRule _
+derive instance recurrenceRuleEq :: Eq RecurrenceRule
+instance recurrenceRuleShow :: Show RecurrenceRule where
+  show = genericShow
+
 type CalendarItemContent =
   { itemType :: ItemType
   , title :: String
@@ -88,6 +102,8 @@ type CalendarItemContent =
   , sourceItemId :: Maybe String
   , actualDurationMinutes :: Maybe Int
   , category :: Maybe String
+  , recurrenceRule :: Maybe RecurrenceRule
+  , recurrenceExceptionDates :: Array String
   }
 
 data CalendarItem
@@ -137,6 +153,8 @@ toNewIntention { title, windowStart, windowEnd, category } =
         , sourceItemId: Nothing
         , actualDurationMinutes: Nothing
         , category: toOptional category
+        , recurrenceRule: Nothing
+        , recurrenceExceptionDates: []
         }
     }
   where
@@ -213,6 +231,34 @@ instance itemStatusDecodeJson :: DecodeJson ItemStatus where
       "ANNULE" -> pure Annule
       _ -> Left $ UnexpectedValue json
 
+instance recurrenceRuleEncodeJson :: EncodeJson RecurrenceRule where
+  encodeJson rule =
+    case rule of
+      RecurrenceDaily ->
+        "type" := "DAILY" ~> jsonEmptyObject
+      RecurrenceWeekly ->
+        "type" := "WEEKLY" ~> jsonEmptyObject
+      RecurrenceMonthly ->
+        "type" := "MONTHLY" ~> jsonEmptyObject
+      RecurrenceYearly ->
+        "type" := "YEARLY" ~> jsonEmptyObject
+      RecurrenceEveryXDays interval ->
+        "type" := "EVERY_X_DAYS"
+          ~> "interval_days" := interval
+          ~> jsonEmptyObject
+
+instance recurrenceRuleDecodeJson :: DecodeJson RecurrenceRule where
+  decodeJson json = do
+    obj <- decodeJson json
+    kind <- obj .: "type"
+    case kind of
+      "DAILY" -> pure RecurrenceDaily
+      "WEEKLY" -> pure RecurrenceWeekly
+      "MONTHLY" -> pure RecurrenceMonthly
+      "YEARLY" -> pure RecurrenceYearly
+      "EVERY_X_DAYS" -> RecurrenceEveryXDays <$> obj .: "interval_days"
+      _ -> Left $ UnexpectedValue json
+
 instance calendarItemDecodeJson :: DecodeJson CalendarItem where
   decodeJson json = do
     obj <- decodeJson json
@@ -224,7 +270,21 @@ instance calendarItemDecodeJson :: DecodeJson CalendarItem where
     sourceItemId <- obj .:? "source_item_id"
     actualDurationMinutes <- obj .:? "duree_reelle_minutes"
     category <- obj .:? "categorie"
-    let content = { itemType, title, windowStart, windowEnd, status, sourceItemId, actualDurationMinutes, category }
+    recurrenceRule <- obj .:? "recurrence_rule"
+    recurrenceExceptionDates <- obj .:? "recurrence_exception_dates"
+    let
+      content =
+        { itemType
+        , title
+        , windowStart
+        , windowEnd
+        , status
+        , sourceItemId
+        , actualDurationMinutes
+        , category
+        , recurrenceRule
+        , recurrenceExceptionDates: fromMaybe [] recurrenceExceptionDates
+        }
     either (const $ pure $ NewCalendarItem { content })
            (\id -> pure $ ServerCalendarItem { content, id })
            (obj .: "id")
@@ -237,8 +297,8 @@ instance calendarItemEncodeJson :: EncodeJson CalendarItem where
       ~> encodeCalendarContent content
 
 encodeCalendarContent :: CalendarItemContent -> Json
-encodeCalendarContent { itemType, title, windowStart, windowEnd, status, sourceItemId, actualDurationMinutes, category } =
-  withCategory $ withDuration $ withSourceItem $
+encodeCalendarContent { itemType, title, windowStart, windowEnd, status, sourceItemId, actualDurationMinutes, category, recurrenceRule, recurrenceExceptionDates } =
+  withRecurrence $ withCategory $ withDuration $ withSourceItem $
     "type" := itemType
       ~> "titre" := title
       ~> "fenetre_debut" := windowStart
@@ -257,6 +317,13 @@ encodeCalendarContent { itemType, title, windowStart, windowEnd, status, sourceI
   withCategory base =
     case category of
       Just value -> "categorie" := value ~> base
+      Nothing -> base
+  withRecurrence base =
+    case recurrenceRule of
+      Just rule ->
+        "recurrence_rule" := encodeJson rule
+          ~> "recurrence_exception_dates" := recurrenceExceptionDates
+          ~> base
       Nothing -> base
 
 type State =
@@ -709,6 +776,70 @@ parsePositiveInt :: String -> Maybe Int
 parsePositiveInt raw =
   Int.fromString (StringCommon.trim raw) >>= \val ->
     if val > 0 then Just val else Nothing
+
+generateOccurrencesForMonth :: RecurrenceRule -> Array String -> String -> Array String
+generateOccurrencesForMonth rule exceptions start =
+  case parseDateTimeLocal start of
+    Nothing -> []
+    Just startDt ->
+      let
+        targetMonth = month (date startDt)
+        targetYear = year (date startDt)
+        sameMonth dt = month (date dt) == targetMonth && year (date dt) == targetYear
+
+        collectOccurrences current acc =
+          if not (sameMonth current) then acc
+          else case nextOccurrence rule current of
+            Nothing -> acc <> [ current ]
+            Just next -> collectOccurrences next (acc <> [ current ])
+
+        occurrences = collectOccurrences startDt []
+      in
+        occurrences
+          # map formatDate
+          # filter (\dateStr -> not (elem dateStr exceptions))
+
+nextOccurrence :: RecurrenceRule -> DateTime -> Maybe DateTime
+nextOccurrence rule dt =
+  case rule of
+    RecurrenceDaily -> addDays 1 dt
+    RecurrenceWeekly -> addDays 7 dt
+    RecurrenceEveryXDays interval -> addDays interval dt
+    RecurrenceMonthly -> Just (addMonths 1 dt)
+    RecurrenceYearly -> Just (addMonths 12 dt)
+
+addDays :: Int -> DateTime -> Maybe DateTime
+addDays n dt = adjust (Days (Int.toNumber n)) dt
+
+addMonths :: Int -> DateTime -> DateTime
+addMonths n (DateTime d t) =
+  let
+    y = fromEnum (year d)
+    m = fromEnum (month d)
+    dNum = fromEnum (day d)
+    total = (m - 1) + n
+    newYear = y + Int.quot total 12
+    newMonth = (Int.rem total 12) + 1
+    newDate =
+      case { year: toEnum newYear, month: toEnum newMonth, day: toEnum dNum } of
+        { year: Just y', month: Just m', day: Just d' } -> canonicalDate y' m' d'
+        _ -> d
+  in
+    DateTime newDate t
+
+formatDate :: DateTime -> String
+formatDate dt =
+  let
+    y = Int.toStringAs Int.decimal (fromEnum (year (date dt)))
+    m = pad2 (fromEnum (month (date dt)))
+    d = pad2 (fromEnum (day (date dt)))
+  in
+    y <> "-" <> m <> "-" <> d
+
+pad2 :: Int -> String
+pad2 n =
+  let raw = Int.toStringAs Int.decimal n
+  in if String.length raw == 1 then "0" <> raw else raw
 
 detectConflictIds :: Array CalendarItem -> Array String
 detectConflictIds items =
