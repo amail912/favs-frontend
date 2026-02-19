@@ -2,7 +2,7 @@ module Test.SpecSuite (runSpecSuite) where
 
 import Prelude
 
-import Agenda (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), ValidationError(..), detectConflictGroups, detectConflictIds, toNewIntention, validateIntention)
+import Agenda (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), ValidationError(..), applyOfflineMutation, detectConflictGroups, detectConflictIds, toNewIntention, validateIntention)
 import Checklists (Checklist(..), ChecklistItem(..), removeChecklistItem)
 import Data.Argonaut.Decode (decodeJson)
 import Data.Argonaut.Encode (encodeJson)
@@ -198,3 +198,20 @@ runSpecSuite = runSpec [ consoleReporter ] do
                 }
             }
       detectConflictGroups [ itemA, itemB, itemC ] `shouldEqual` [ [ "a", "b", "c" ] ]
+
+    it "queues items locally when offline" do
+      let
+        item =
+          NewCalendarItem
+            { content:
+                { itemType: Intention
+                , title: "Offline"
+                , windowStart: "2026-02-19T09:00"
+                , windowEnd: "2026-02-19T10:00"
+                , status: Todo
+                , sourceItemId: Nothing
+                }
+            }
+        result = applyOfflineMutation true item [] []
+      result.items `shouldEqual` [ item ]
+      result.pending `shouldEqual` [ item ]
