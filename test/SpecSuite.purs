@@ -2,7 +2,7 @@ module Test.SpecSuite (runSpecSuite) where
 
 import Prelude
 
-import Agenda (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), ValidationError(..), applyOfflineMutation, detectConflictGroups, detectConflictIds, toNewIntention, validateIntention)
+import Agenda (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), ValidationError(..), applyOfflineMutation, detectConflictGroups, detectConflictIds, durationMinutesBetween, toNewIntention, validateIntention)
 import Checklists (Checklist(..), ChecklistItem(..), removeChecklistItem)
 import Data.Argonaut.Decode (decodeJson)
 import Data.Argonaut.Encode (encodeJson)
@@ -95,6 +95,7 @@ runSpecSuite = runSpec [ consoleReporter ] do
                 , windowEnd: "2026-02-19T12:00"
                 , status: Todo
                 , sourceItemId: Just "source-1"
+                , actualDurationMinutes: Nothing
                 }
             }
       case decodeJson (encodeJson scheduled) of
@@ -143,6 +144,7 @@ runSpecSuite = runSpec [ consoleReporter ] do
                 , windowEnd: "2026-02-19T10:00"
                 , status: Todo
                 , sourceItemId: Just "src-a"
+                , actualDurationMinutes: Nothing
                 }
             }
         itemB =
@@ -155,6 +157,7 @@ runSpecSuite = runSpec [ consoleReporter ] do
                 , windowEnd: "2026-02-19T10:30"
                 , status: Todo
                 , sourceItemId: Just "src-b"
+                , actualDurationMinutes: Nothing
                 }
             }
       detectConflictIds [ itemA, itemB ] `shouldEqual` [ "a", "b" ]
@@ -171,6 +174,7 @@ runSpecSuite = runSpec [ consoleReporter ] do
                 , windowEnd: "2026-02-19T10:00"
                 , status: Todo
                 , sourceItemId: Just "src-a"
+                , actualDurationMinutes: Nothing
                 }
             }
         itemB =
@@ -183,6 +187,7 @@ runSpecSuite = runSpec [ consoleReporter ] do
                 , windowEnd: "2026-02-19T10:30"
                 , status: Todo
                 , sourceItemId: Just "src-b"
+                , actualDurationMinutes: Nothing
                 }
             }
         itemC =
@@ -195,6 +200,7 @@ runSpecSuite = runSpec [ consoleReporter ] do
                 , windowEnd: "2026-02-19T11:00"
                 , status: Todo
                 , sourceItemId: Just "src-c"
+                , actualDurationMinutes: Nothing
                 }
             }
       detectConflictGroups [ itemA, itemB, itemC ] `shouldEqual` [ [ "a", "b", "c" ] ]
@@ -210,8 +216,12 @@ runSpecSuite = runSpec [ consoleReporter ] do
                 , windowEnd: "2026-02-19T10:00"
                 , status: Todo
                 , sourceItemId: Nothing
+                , actualDurationMinutes: Nothing
                 }
             }
         result = applyOfflineMutation true item [] []
       result.items `shouldEqual` [ item ]
       result.pending `shouldEqual` [ item ]
+
+    it "computes duration between window start and end" do
+      durationMinutesBetween "2026-02-19T09:00" "2026-02-19T10:30" `shouldEqual` Just 90

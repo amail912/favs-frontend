@@ -7,6 +7,7 @@ module Agenda
   , ItemType(..)
   , ValidationError(..)
   , applyOfflineMutation
+  , durationMinutesBetween
   , detectConflictGroups
   , detectConflictIds
   , toNewIntention
@@ -21,6 +22,7 @@ import Affjax.RequestBody (RequestBody(..))
 import Affjax.ResponseFormat (json)
 import Affjax.Web (Response, post)
 import Affjax.Web (get) as Affjax
+import Control.Alt ((<|>))
 import Control.Monad.Except (ExceptT(..), runExceptT, withExceptT)
 import Control.Monad.RWS (get, modify_)
 import Control.Monad.Trans.Class (lift)
@@ -33,15 +35,24 @@ import Data.Bifunctor (lmap)
 import Data.Either (Either(..), either)
 import Data.Foldable (all, foldl)
 import Data.Generic.Rep (class Generic)
+import Data.Int as Int
 import Data.Maybe (Maybe(..), maybe)
 import Data.Newtype (unwrap)
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits as String
 import Data.String.Common as StringCommon
 import DOM.HTML.Indexed.InputType (InputType(..))
+import Data.Date (exactDate)
+import Data.DateTime (DateTime(..), diff)
+import Data.Enum (toEnum)
+import Data.Time (Time(..))
+import Data.Time.Duration (Minutes(..))
+import Effect (Effect)
 import Effect.Aff (Aff)
 import Effect.Aff.Class (liftAff)
+import Effect.Class (liftEffect)
 import Effect.Class.Console (logShow)
+import Effect.Now (nowDateTime)
 import Halogen (Component, ComponentHTML, HalogenM, defaultEval, mkComponent, mkEval) as H
 import Halogen.HTML (HTML, button, div, h2, input, li, section, text, ul)
 import Halogen.HTML.Events (onClick, onValueChange)
@@ -71,6 +82,7 @@ type CalendarItemContent =
   , windowEnd :: String
   , status :: ItemStatus
   , sourceItemId :: Maybe String
+  , actualDurationMinutes :: Maybe Int
   }
 
 data CalendarItem
@@ -116,6 +128,7 @@ toNewIntention { title, windowStart, windowEnd } =
         , windowEnd
         , status: Todo
         , sourceItemId: Nothing
+        , actualDurationMinutes: Nothing
         }
     }
 
@@ -197,7 +210,8 @@ instance calendarItemDecodeJson :: DecodeJson CalendarItem where
     windowEnd <- obj .: "fenetre_fin"
     status <- obj .: "statut"
     sourceItemId <- obj .:? "source_item_id"
-    let content = { itemType, title, windowStart, windowEnd, status, sourceItemId }
+    actualDurationMinutes <- obj .:? "duree_reelle_minutes"
+    let content = { itemType, title, windowStart, windowEnd, status, sourceItemId, actualDurationMinutes }
     either (const $ pure $ NewCalendarItem { content })
            (\id -> pure $ ServerCalendarItem { content, id })
            (obj .: "id")
@@ -210,8 +224,8 @@ instance calendarItemEncodeJson :: EncodeJson CalendarItem where
       ~> encodeCalendarContent content
 
 encodeCalendarContent :: CalendarItemContent -> Json
-encodeCalendarContent { itemType, title, windowStart, windowEnd, status, sourceItemId } =
-  withSourceItem $
+encodeCalendarContent { itemType, title, windowStart, windowEnd, status, sourceItemId, actualDurationMinutes } =
+  withDuration $ withSourceItem $
     "type" := itemType
       ~> "titre" := title
       ~> "fenetre_debut" := windowStart
@@ -223,6 +237,10 @@ encodeCalendarContent { itemType, title, windowStart, windowEnd, status, sourceI
     case sourceItemId of
       Just sourceId -> "source_item_id" := sourceId ~> base
       Nothing -> base
+  withDuration base =
+    case actualDurationMinutes of
+      Just minutes -> "duree_reelle_minutes" := minutes ~> base
+      Nothing -> base
 
 type State =
   { items :: Array CalendarItem
@@ -233,6 +251,7 @@ type State =
   , offlineMode :: Boolean
   , pendingSync :: Array CalendarItem
   , syncConflict :: Maybe (Array CalendarItem)
+  , validationPanel :: Maybe ValidationPanel
   }
 
 data Action
@@ -244,6 +263,10 @@ data Action
   | PlanifyFrom String CalendarItemContent
   | ToggleConflictFilter
   | ToggleOffline
+  | OpenValidation String CalendarItemContent
+  | ValidationMinutesChanged String
+  | ConfirmValidation
+  | CancelValidation
   | OpenConflictResolution (Array String)
   | ChooseResolutionStrategy ResolutionStrategy
   | ConfirmResolution
@@ -271,6 +294,7 @@ initialState = const
   , offlineMode: false
   , pendingSync: []
   , syncConflict: Nothing
+  , validationPanel: Nothing
   }
 
 handleAction :: Action -> AgendaAppM Unit
@@ -319,6 +343,25 @@ handleAction action = handleError $
         lift $ modify_ _ { offlineMode = false }
         syncPending
       else lift $ modify_ _ { offlineMode = true }
+    OpenValidation itemId content -> do
+      suggested <- liftEffect $ suggestDurationMinutes content.windowStart
+      lift $ modify_ _ { validationPanel = Just { itemId, proposedMinutes: suggested, inputValue: "" } }
+    ValidationMinutesChanged raw ->
+      lift $ modify_ \st -> st { validationPanel = st.validationPanel <#> \panel -> panel { inputValue = raw } }
+    ConfirmValidation -> do
+      st <- get
+      case st.validationPanel of
+        Nothing -> pure unit
+        Just panel -> do
+          let duration = parsePositiveInt panel.inputValue <|> panel.proposedMinutes
+          case duration of
+            Nothing -> pure unit
+            Just minutes -> do
+              _ <- validateItem panel.itemId minutes
+              lift $ modify_ _ { validationPanel = Nothing }
+              refreshItems
+    CancelValidation ->
+      lift $ modify_ _ { validationPanel = Nothing }
     OpenConflictResolution groupIds ->
       lift $ modify_ \st -> st { conflictResolution = Just { groupIds, pendingStrategy: Nothing } }
     ChooseResolutionStrategy strategy ->
@@ -347,6 +390,12 @@ refreshItems = do
 createItem :: CalendarItem -> ErrorAgendaAppM (Response Json)
 createItem item = withExceptT toFatalError $ ExceptT $ liftAff $ post json "/api/v1/calendar-items" (Just $ Json $ encodeJson item)
 
+validateItem :: String -> Int -> ErrorAgendaAppM (Response Json)
+validateItem itemId minutes =
+  withExceptT toFatalError $ ExceptT $ liftAff $
+    post json ("/api/v1/calendar-items/" <> itemId <> "/validate")
+      (Just $ Json $ "duree_reelle_minutes" := minutes ~> jsonEmptyObject)
+
 statusOk :: forall a. Response a -> Boolean
 statusOk r = unwrap r.status >= 200 && unwrap r.status < 300
 
@@ -370,7 +419,7 @@ syncPending = do
     else lift $ modify_ _ { syncConflict = Just st.pendingSync }
 
 render :: forall m. State -> H.ComponentHTML Action () m
-render { items, draft, validationError, showConflictsOnly, conflictResolution, offlineMode, syncConflict } =
+render { items, draft, validationError, showConflictsOnly, conflictResolution, offlineMode, syncConflict, validationPanel } =
   let
     conflictIds = detectConflictIds items
     conflictGroups = detectConflictGroups items
@@ -395,6 +444,7 @@ render { items, draft, validationError, showConflictsOnly, conflictResolution, o
     , if (null itemsToShow) then emptyAgenda else agendaList conflictIds itemsToShow
     , maybe (text "") (renderConflictResolution items) conflictResolution
     , maybe (text "") renderSyncConflict syncConflict
+    , maybe (text "") renderValidationPanel validationPanel
     ]
 
 renderForm :: forall w. IntentionDraft -> Maybe ValidationError -> HTML w Action
@@ -458,6 +508,7 @@ renderItem conflictIds _ item =
           [ div [ class_ "agenda-card-title" ] [ text content.title ]
           , div [ class_ "agenda-card-window" ]
               [ text $ content.windowStart <> " → " <> content.windowEnd ]
+          , renderValidationAction item content
           , renderPlanifyAction item content
           ]
       ]
@@ -467,6 +518,12 @@ renderPlanifyAction (ServerCalendarItem { id, content }) _ | content.itemType ==
   button [ class_ "btn btn-sm btn-outline-primary agenda-planify", onClick (const $ PlanifyFrom id content) ]
     [ text "Planifier" ]
 renderPlanifyAction _ _ = text ""
+
+renderValidationAction :: forall w. CalendarItem -> CalendarItemContent -> HTML w Action
+renderValidationAction (ServerCalendarItem { id, content }) _ | content.status /= Fait =
+  button [ class_ "btn btn-sm btn-outline-success agenda-validate", onClick (const $ OpenValidation id content) ]
+    [ text "Valider" ]
+renderValidationAction _ _ = text ""
 
 isConflict :: Array String -> CalendarItem -> Boolean
 isConflict conflictIds (ServerCalendarItem { id }) = elem id conflictIds
@@ -481,6 +538,12 @@ type ConflictBlock =
 type ConflictResolution =
   { groupIds :: Array String
   , pendingStrategy :: Maybe ResolutionStrategy
+  }
+
+type ValidationPanel =
+  { itemId :: String
+  , proposedMinutes :: Maybe Int
+  , inputValue :: String
   }
 
 data ResolutionStrategy
@@ -502,6 +565,51 @@ applyOfflineMutation offline item items pending =
   if offline
     then { items: items <> [ item ], pending: pending <> [ item ] }
     else { items, pending }
+
+durationMinutesBetween :: String -> String -> Maybe Int
+durationMinutesBetween start end = do
+  startDt <- parseDateTimeLocal start
+  endDt <- parseDateTimeLocal end
+  let Minutes n = diff endDt startDt
+      minutes = Int.floor n
+  pure $ max 1 minutes
+
+suggestDurationMinutes :: String -> Effect (Maybe Int)
+suggestDurationMinutes start = do
+  now <- nowDateTime
+  pure $ durationMinutesBetweenDateTime start now
+
+durationMinutesBetweenDateTime :: String -> DateTime -> Maybe Int
+durationMinutesBetweenDateTime start now = do
+  startDt <- parseDateTimeLocal start
+  let Minutes n = diff now startDt
+      minutes = Int.floor n
+  pure $ max 1 minutes
+
+parseDateTimeLocal :: String -> Maybe DateTime
+parseDateTimeLocal raw = do
+  year <- parseInt (slice 0 4)
+  monthNum <- parseInt (slice 5 7)
+  dayNum <- parseInt (slice 8 10)
+  hourNum <- parseInt (slice 11 13)
+  minuteNum <- parseInt (slice 14 16)
+  month <- toEnum monthNum
+  day <- toEnum dayNum
+  hour <- toEnum hourNum
+  minute <- toEnum minuteNum
+  yearEnum <- toEnum year
+  date <- exactDate yearEnum month day
+  second <- toEnum 0
+  millisecond <- toEnum 0
+  pure $ DateTime date (Time hour minute second millisecond)
+  where
+  slice start end = String.slice start end raw
+  parseInt str = Int.fromString str
+
+parsePositiveInt :: String -> Maybe Int
+parsePositiveInt raw =
+  Int.fromString (StringCommon.trim raw) >>= \val ->
+    if val > 0 then Just val else Nothing
 
 detectConflictIds :: Array CalendarItem -> Array String
 detectConflictIds items =
@@ -617,6 +725,25 @@ renderSyncConflict pending =
   pendingIds = mapMaybe extractId pending
   extractId (ServerCalendarItem { id }) = Just id
   extractId _ = Nothing
+
+renderValidationPanel :: forall w. ValidationPanel -> HTML w Action
+renderValidationPanel panel =
+  div [ class_ "agenda-validation-panel" ]
+    [ div [ class_ "agenda-conflict-title" ] [ text "Valider la tache" ]
+    , div [ class_ "agenda-conflict-subtitle" ]
+        [ text "Saisissez la duree reelle (minutes) ou acceptez la proposition." ]
+    , maybe (text "") (\minutes -> div [ class_ "agenda-validation-proposal" ] [ text $ "Proposition: " <> show minutes <> " min" ]) panel.proposedMinutes
+    , input
+        [ class_ "form-control agenda-input"
+        , placeholder "Duree reelle (minutes)"
+        , onValueChange ValidationMinutesChanged
+        , value panel.inputValue
+        ]
+    , div [ class_ "agenda-conflict-confirmation-actions" ]
+        [ button [ class_ "btn btn-sm btn-success", onClick (const ConfirmValidation) ] [ text "Confirmer" ]
+        , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const CancelValidation) ] [ text "Annuler" ]
+        ]
+    ]
 
 renderConflictResolution :: forall w. Array CalendarItem -> ConflictResolution -> HTML w Action
 renderConflictResolution items resolution =
