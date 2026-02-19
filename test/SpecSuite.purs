@@ -2,7 +2,7 @@ module Test.SpecSuite (runSpecSuite) where
 
 import Prelude
 
-import Agenda (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), ValidationError(..), toNewIntention, validateIntention)
+import Agenda (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), ValidationError(..), detectConflictIds, toNewIntention, validateIntention)
 import Checklists (Checklist(..), ChecklistItem(..), removeChecklistItem)
 import Data.Argonaut.Decode (decodeJson)
 import Data.Argonaut.Encode (encodeJson)
@@ -130,3 +130,31 @@ runSpecSuite = runSpec [ consoleReporter ] do
           , windowEnd: "2026-02-19T10:00"
           }
       validateIntention draft `shouldEqual` Right draft
+
+    it "flags conflicts between scheduled blocks" do
+      let
+        itemA =
+          ServerCalendarItem
+            { id: "a"
+            , content:
+                { itemType: ScheduledBlock
+                , title: "A"
+                , windowStart: "2026-02-19T09:00"
+                , windowEnd: "2026-02-19T10:00"
+                , status: Todo
+                , sourceItemId: Just "src-a"
+                }
+            }
+        itemB =
+          ServerCalendarItem
+            { id: "b"
+            , content:
+                { itemType: ScheduledBlock
+                , title: "B"
+                , windowStart: "2026-02-19T09:30"
+                , windowEnd: "2026-02-19T10:30"
+                , status: Todo
+                , sourceItemId: Just "src-b"
+                }
+            }
+      detectConflictIds [ itemA, itemB ] `shouldEqual` [ "a", "b" ]
