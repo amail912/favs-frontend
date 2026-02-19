@@ -2,7 +2,7 @@ module Test.SpecSuite (runSpecSuite) where
 
 import Prelude
 
-import Agenda (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), SortMode(..), ValidationError(..), applyOfflineMutation, detectConflictGroups, detectConflictIds, durationMinutesBetween, sortItems, toNewIntention, validateIntention)
+import Agenda (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), RecurrenceRule(..), SortMode(..), ValidationError(..), applyOfflineMutation, detectConflictGroups, detectConflictIds, durationMinutesBetween, generateOccurrencesForMonth, sortItems, toNewIntention, validateIntention)
 import Checklists (Checklist(..), ChecklistItem(..), removeChecklistItem)
 import Data.Argonaut.Decode (decodeJson)
 import Data.Argonaut.Encode (encodeJson)
@@ -98,6 +98,8 @@ runSpecSuite = runSpec [ consoleReporter ] do
                 , sourceItemId: Just "source-1"
                 , actualDurationMinutes: Nothing
                 , category: Nothing
+                , recurrenceRule: Nothing
+                , recurrenceExceptionDates: []
                 }
             }
       case decodeJson (encodeJson scheduled) of
@@ -151,6 +153,8 @@ runSpecSuite = runSpec [ consoleReporter ] do
                 , sourceItemId: Just "src-a"
                 , actualDurationMinutes: Nothing
                 , category: Nothing
+                , recurrenceRule: Nothing
+                , recurrenceExceptionDates: []
                 }
             }
         itemB =
@@ -165,6 +169,8 @@ runSpecSuite = runSpec [ consoleReporter ] do
                 , sourceItemId: Just "src-b"
                 , actualDurationMinutes: Nothing
                 , category: Nothing
+                , recurrenceRule: Nothing
+                , recurrenceExceptionDates: []
                 }
             }
       detectConflictIds [ itemA, itemB ] `shouldEqual` [ "a", "b" ]
@@ -183,6 +189,8 @@ runSpecSuite = runSpec [ consoleReporter ] do
                 , sourceItemId: Just "src-a"
                 , actualDurationMinutes: Nothing
                 , category: Nothing
+                , recurrenceRule: Nothing
+                , recurrenceExceptionDates: []
                 }
             }
         itemB =
@@ -197,6 +205,8 @@ runSpecSuite = runSpec [ consoleReporter ] do
                 , sourceItemId: Just "src-b"
                 , actualDurationMinutes: Nothing
                 , category: Nothing
+                , recurrenceRule: Nothing
+                , recurrenceExceptionDates: []
                 }
             }
         itemC =
@@ -211,6 +221,8 @@ runSpecSuite = runSpec [ consoleReporter ] do
                 , sourceItemId: Just "src-c"
                 , actualDurationMinutes: Nothing
                 , category: Nothing
+                , recurrenceRule: Nothing
+                , recurrenceExceptionDates: []
                 }
             }
       detectConflictGroups [ itemA, itemB, itemC ] `shouldEqual` [ [ "a", "b", "c" ] ]
@@ -228,6 +240,8 @@ runSpecSuite = runSpec [ consoleReporter ] do
                 , sourceItemId: Nothing
                 , actualDurationMinutes: Nothing
                 , category: Nothing
+                , recurrenceRule: Nothing
+                , recurrenceExceptionDates: []
                 }
             }
         result = applyOfflineMutation true item [] []
@@ -251,6 +265,8 @@ runSpecSuite = runSpec [ consoleReporter ] do
                 , sourceItemId: Just "src-todo"
                 , actualDurationMinutes: Nothing
                 , category: Nothing
+                , recurrenceRule: Nothing
+                , recurrenceExceptionDates: []
                 }
             }
         itemDone =
@@ -265,6 +281,13 @@ runSpecSuite = runSpec [ consoleReporter ] do
                 , sourceItemId: Just "src-done"
                 , actualDurationMinutes: Nothing
                 , category: Nothing
+                , recurrenceRule: Nothing
+                , recurrenceExceptionDates: []
                 }
             }
       sortItems SortByStatus [] [ itemDone, itemTodo ] `shouldEqual` [ itemTodo, itemDone ]
+
+    it "generates weekly occurrences and skips exceptions" do
+      let
+        occurrences = generateOccurrencesForMonth RecurrenceWeekly [ "2026-02-19" ] "2026-02-05T09:00"
+      occurrences `shouldEqual` [ "2026-02-05", "2026-02-12", "2026-02-26" ]
