@@ -7,12 +7,18 @@ module Agenda
   , ItemType(..)
   , SortMode(..)
   , RecurrenceRule(..)
+  , StepDependency(..)
+  , RoutineTemplate
+  , RoutineTemplateStep
+  , RoutineInstance
+  , RoutineInstanceStep
   , ValidationError(..)
   , applyOfflineMutation
   , durationMinutesBetween
   , detectConflictGroups
   , detectConflictIds
   , generateOccurrencesForMonth
+  , instantiateRoutine
   , sortItems
   , toNewIntention
   , toScheduledBlock
@@ -47,9 +53,9 @@ import Data.String.CodeUnits as String
 import Data.String.Common as StringCommon
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Data.Date (canonicalDate, day, exactDate, month, year)
-import Data.DateTime (DateTime(..), adjust, date, diff)
+import Data.DateTime (DateTime(..), adjust, date, diff, time)
 import Data.Enum (fromEnum, toEnum)
-import Data.Time (Time(..))
+import Data.Time (Time(..), hour, minute)
 import Data.Time.Duration (Days(..), Minutes(..))
 import Effect (Effect)
 import Effect.Aff (Aff)
@@ -92,6 +98,42 @@ derive instance recurrenceRuleGeneric :: Generic RecurrenceRule _
 derive instance recurrenceRuleEq :: Eq RecurrenceRule
 instance recurrenceRuleShow :: Show RecurrenceRule where
   show = genericShow
+
+data StepDependency
+  = StartAfterEnd { stepId :: String, offsetMinutes :: Int }
+  | StartBeforeStart { stepId :: String, offsetMinutes :: Int }
+
+derive instance stepDependencyGeneric :: Generic StepDependency _
+derive instance stepDependencyEq :: Eq StepDependency
+instance stepDependencyShow :: Show StepDependency where
+  show = genericShow
+
+type RoutineTemplate =
+  { id :: String
+  , name :: String
+  , steps :: Array RoutineTemplateStep
+  }
+
+type RoutineTemplateStep =
+  { id :: String
+  , title :: String
+  , windowStart :: String
+  , windowEnd :: String
+  , dependsOn :: Maybe StepDependency
+  }
+
+type RoutineInstance =
+  { templateId :: String
+  , steps :: Array RoutineInstanceStep
+  }
+
+type RoutineInstanceStep =
+  { id :: String
+  , title :: String
+  , windowStart :: String
+  , windowEnd :: String
+  , sourceStepId :: String
+  }
 
 type CalendarItemContent =
   { itemType :: ItemType
@@ -799,6 +841,61 @@ generateOccurrencesForMonth rule exceptions start =
           # map formatDate
           # filter (\dateStr -> not (elem dateStr exceptions))
 
+instantiateRoutine :: RoutineTemplate -> RoutineInstance
+instantiateRoutine template =
+  let
+    steps = map toInstance template.steps
+    withDeps = applyDependencies template.steps steps
+  in
+    { templateId: template.id
+    , steps: withDeps
+    }
+  where
+  toInstance step =
+    { id: step.id
+    , title: step.title
+    , windowStart: step.windowStart
+    , windowEnd: step.windowEnd
+    , sourceStepId: step.id
+    }
+
+applyDependencies :: Array RoutineTemplateStep -> Array RoutineInstanceStep -> Array RoutineInstanceStep
+applyDependencies templateSteps instanceSteps =
+  map (applyDependency templateSteps instanceSteps) instanceSteps
+
+applyDependency :: Array RoutineTemplateStep -> Array RoutineInstanceStep -> RoutineInstanceStep -> RoutineInstanceStep
+applyDependency templateSteps instanceSteps step =
+  case find (\templateStep -> templateStep.id == step.sourceStepId) templateSteps of
+    Nothing -> step
+    Just templateStep ->
+      case templateStep.dependsOn of
+        Nothing -> step
+        Just dependency ->
+          case dependency of
+            StartAfterEnd { stepId, offsetMinutes } ->
+              updateFromBase stepId offsetMinutes _.windowEnd
+            StartBeforeStart { stepId, offsetMinutes } ->
+              updateFromBase stepId (-offsetMinutes) _.windowStart
+  where
+  updateFromBase baseId offset selectBase =
+    case find (\candidate -> candidate.id == baseId) instanceSteps of
+      Nothing -> step
+      Just base ->
+        let
+          duration = durationMinutesBetween step.windowStart step.windowEnd
+          newStart = shiftMinutes offset (selectBase base)
+          newEnd = newStart >>= \start -> duration >>= \mins -> shiftMinutes mins start
+        in
+          case { start: newStart, end: newEnd } of
+            { start: Just start, end: Just end } -> step { windowStart = start, windowEnd = end }
+            _ -> step
+
+shiftMinutes :: Int -> String -> Maybe String
+shiftMinutes offset start = do
+  dt <- parseDateTimeLocal start
+  newDt <- adjust (Minutes (Int.toNumber offset)) dt
+  pure $ formatDateTimeLocal newDt
+
 nextOccurrence :: RecurrenceRule -> DateTime -> Maybe DateTime
 nextOccurrence rule dt =
   case rule of
@@ -835,6 +932,18 @@ formatDate dt =
     d = pad2 (fromEnum (day (date dt)))
   in
     y <> "-" <> m <> "-" <> d
+
+formatDateTimeLocal :: DateTime -> String
+formatDateTimeLocal dt =
+  formatDate dt <> "T" <> formatTime (time dt)
+
+formatTime :: Time -> String
+formatTime t =
+  let
+    h = pad2 (fromEnum (hour t))
+    m = pad2 (fromEnum (minute t))
+  in
+    h <> ":" <> m
 
 pad2 :: Int -> String
 pad2 n =
