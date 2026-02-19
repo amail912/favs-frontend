@@ -2,7 +2,7 @@ module Test.SpecSuite (runSpecSuite) where
 
 import Prelude
 
-import Agenda (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), ValidationError(..), detectConflictIds, toNewIntention, validateIntention)
+import Agenda (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), ValidationError(..), detectConflictGroups, detectConflictIds, toNewIntention, validateIntention)
 import Checklists (Checklist(..), ChecklistItem(..), removeChecklistItem)
 import Data.Argonaut.Decode (decodeJson)
 import Data.Argonaut.Encode (encodeJson)
@@ -158,3 +158,43 @@ runSpecSuite = runSpec [ consoleReporter ] do
                 }
             }
       detectConflictIds [ itemA, itemB ] `shouldEqual` [ "a", "b" ]
+
+    it "groups chained conflicts into a single group" do
+      let
+        itemA =
+          ServerCalendarItem
+            { id: "a"
+            , content:
+                { itemType: ScheduledBlock
+                , title: "A"
+                , windowStart: "2026-02-19T09:00"
+                , windowEnd: "2026-02-19T10:00"
+                , status: Todo
+                , sourceItemId: Just "src-a"
+                }
+            }
+        itemB =
+          ServerCalendarItem
+            { id: "b"
+            , content:
+                { itemType: ScheduledBlock
+                , title: "B"
+                , windowStart: "2026-02-19T09:30"
+                , windowEnd: "2026-02-19T10:30"
+                , status: Todo
+                , sourceItemId: Just "src-b"
+                }
+            }
+        itemC =
+          ServerCalendarItem
+            { id: "c"
+            , content:
+                { itemType: ScheduledBlock
+                , title: "C"
+                , windowStart: "2026-02-19T10:15"
+                , windowEnd: "2026-02-19T11:00"
+                , status: Todo
+                , sourceItemId: Just "src-c"
+                }
+            }
+      detectConflictGroups [ itemA, itemB, itemC ] `shouldEqual` [ [ "a", "b", "c" ] ]

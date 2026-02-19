@@ -255,6 +255,15 @@ a.nav-link:hover {
   font-weight: 600;
 }
 
+.agenda-conflict-actions {
+  margin-top: 0.6rem;
+}
+
+.agenda-conflict-button {
+  border-radius: 999px;
+  font-weight: 600;
+}
+
 .agenda-title {
   font-weight: 760;
   margin-bottom: 0.15rem;
@@ -317,6 +326,66 @@ a.nav-link:hover {
 .agenda-card--conflict {
   border-color: #f2b5b5;
   box-shadow: 0 10px 28px rgba(178, 34, 34, 0.15);
+}
+
+.agenda-conflict-panel {
+  border: 1px solid #f2b5b5;
+  background: rgba(255, 245, 245, 0.9);
+  border-radius: 16px;
+  padding: 1rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.agenda-conflict-title {
+  font-weight: 700;
+}
+
+.agenda-conflict-subtitle {
+  color: var(--app-muted);
+}
+
+.agenda-conflict-list {
+  list-style: none;
+  padding-left: 0;
+  margin-bottom: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.agenda-conflict-item {
+  padding: 0.6rem 0.75rem;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid #f2b5b5;
+}
+
+.agenda-conflict-item-title {
+  font-weight: 600;
+}
+
+.agenda-conflict-item-window {
+  color: var(--app-muted);
+  font-size: 0.9rem;
+}
+
+.agenda-conflict-strategies {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.agenda-conflict-confirmation {
+  border: 1px dashed #f2b5b5;
+  border-radius: 12px;
+  padding: 0.6rem 0.75rem;
+}
+
+.agenda-conflict-confirmation-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.4rem;
 }
 
 @media (max-width: 768px) {

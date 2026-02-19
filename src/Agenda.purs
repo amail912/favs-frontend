@@ -6,6 +6,7 @@ module Agenda
   , ItemStatus(..)
   , ItemType(..)
   , ValidationError(..)
+  , detectConflictGroups
   , detectConflictIds
   , toNewIntention
   , toScheduledBlock
@@ -26,7 +27,7 @@ import Data.Argonaut.Core (Json, jsonEmptyObject)
 import Data.Argonaut.Decode (class DecodeJson, decodeJson, (.:), (.:?))
 import Data.Argonaut.Decode.Error (JsonDecodeError(..))
 import Data.Argonaut.Encode (class EncodeJson, encodeJson, (:=), (~>))
-import Data.Array (elem, filter, mapMaybe, mapWithIndex, nub, null, uncons)
+import Data.Array (elem, filter, find, length, mapMaybe, mapWithIndex, nub, null, uncons)
 import Data.Bifunctor (lmap)
 import Data.Either (Either(..), either)
 import Data.Foldable (all, foldl)
@@ -226,6 +227,7 @@ type State =
   , draft :: IntentionDraft
   , validationError :: Maybe ValidationError
   , showConflictsOnly :: Boolean
+  , conflictResolution :: Maybe ConflictResolution
   }
 
 data Action
@@ -236,6 +238,10 @@ data Action
   | SubmitIntention
   | PlanifyFrom String CalendarItemContent
   | ToggleConflictFilter
+  | OpenConflictResolution (Array String)
+  | ChooseResolutionStrategy ResolutionStrategy
+  | ConfirmResolution
+  | CancelResolution
 
 component :: forall q i. H.Component q i NoOutput Aff
 component =
@@ -253,6 +259,7 @@ initialState = const
   , draft: emptyDraft
   , validationError: Nothing
   , showConflictsOnly: false
+  , conflictResolution: Nothing
   }
 
 handleAction :: Action -> AgendaAppM Unit
@@ -278,6 +285,14 @@ handleAction action = handleError $
       refreshItems
     ToggleConflictFilter ->
       lift $ modify_ \st -> st { showConflictsOnly = not st.showConflictsOnly }
+    OpenConflictResolution groupIds ->
+      lift $ modify_ \st -> st { conflictResolution = Just { groupIds, pendingStrategy: Nothing } }
+    ChooseResolutionStrategy strategy ->
+      lift $ modify_ \st -> st { conflictResolution = st.conflictResolution <#> \res -> res { pendingStrategy = Just strategy } }
+    ConfirmResolution ->
+      lift $ modify_ \st -> st { conflictResolution = Nothing }
+    CancelResolution ->
+      lift $ modify_ \st -> st { conflictResolution = Nothing }
 
 handleError :: ErrorAgendaAppM Unit -> AgendaAppM Unit
 handleError m = do
@@ -294,9 +309,10 @@ createItem :: CalendarItem -> ErrorAgendaAppM (Response Json)
 createItem item = withExceptT toFatalError $ ExceptT $ liftAff $ post json "/api/v1/calendar-items" (Just $ Json $ encodeJson item)
 
 render :: forall m. State -> H.ComponentHTML Action () m
-render { items, draft, validationError, showConflictsOnly } =
+render { items, draft, validationError, showConflictsOnly, conflictResolution } =
   let
     conflictIds = detectConflictIds items
+    conflictGroups = detectConflictGroups items
     itemsToShow =
       if showConflictsOnly
         then filter (isConflict conflictIds) items
@@ -311,9 +327,11 @@ render { items, draft, validationError, showConflictsOnly } =
             , onClick (const ToggleConflictFilter)
             ]
             [ text "Filtrer: en conflit" ]
+        , renderConflictActions conflictGroups
         ]
     , renderForm draft validationError
     , if (null itemsToShow) then emptyAgenda else agendaList conflictIds itemsToShow
+    , maybe (text "") (renderConflictResolution items) conflictResolution
     ]
 
 renderForm :: forall w. IntentionDraft -> Maybe ValidationError -> HTML w Action
@@ -391,11 +409,31 @@ isConflict :: Array String -> CalendarItem -> Boolean
 isConflict conflictIds (ServerCalendarItem { id }) = elem id conflictIds
 isConflict _ _ = false
 
+type ConflictBlock =
+  { id :: String
+  , start :: String
+  , end :: String
+  }
+
+type ConflictResolution =
+  { groupIds :: Array String
+  , pendingStrategy :: Maybe ResolutionStrategy
+  }
+
+data ResolutionStrategy
+  = StrategyShift30
+  | StrategySwap
+
+derive instance resolutionStrategyGeneric :: Generic ResolutionStrategy _
+derive instance resolutionStrategyEq :: Eq ResolutionStrategy
+instance resolutionStrategyShow :: Show ResolutionStrategy where
+  show = genericShow
+
 detectConflictIds :: Array CalendarItem -> Array String
 detectConflictIds items =
   nub $ go (mapMaybe toConflictBlock items) []
   where
-  toConflictBlock :: CalendarItem -> Maybe { id :: String, start :: String, end :: String }
+  toConflictBlock :: CalendarItem -> Maybe ConflictBlock
   toConflictBlock (ServerCalendarItem { id, content }) | content.itemType == ScheduledBlock =
     Just { id, start: content.windowStart, end: content.windowEnd }
   toConflictBlock _ = Nothing
@@ -418,6 +456,119 @@ detectConflictIds items =
               rest
         in
           go rest acc'
+
+detectConflictGroups :: Array CalendarItem -> Array (Array String)
+detectConflictGroups items =
+  filter (\group -> length group > 1) $ components allIds []
+  where
+  blocks = mapMaybe toConflictBlock items
+  allIds = map _.id blocks
+
+  toConflictBlock :: CalendarItem -> Maybe ConflictBlock
+  toConflictBlock (ServerCalendarItem { id, content }) | content.itemType == ScheduledBlock =
+    Just { id, start: content.windowStart, end: content.windowEnd }
+  toConflictBlock _ = Nothing
+
+  components ids visited =
+    case uncons ids of
+      Nothing -> []
+      Just { head: current, tail } ->
+        if elem current visited then components tail visited
+        else
+          let
+            group = bfs [ current ] []
+            newVisited = visited <> group
+          in
+            [ group ] <> components tail newVisited
+
+  bfs queue visited =
+    case uncons queue of
+      Nothing -> visited
+      Just { head: current, tail } ->
+        if elem current visited then bfs tail visited
+        else
+          let
+            next = neighbors current
+          in
+            bfs (tail <> next) (visited <> [ current ])
+
+  neighbors id =
+    case find (\block -> block.id == id) blocks of
+      Nothing -> []
+      Just current ->
+        map _.id $ filter (\block -> block.id /= id && overlaps current block) blocks
+
+  overlaps a b = a.start < b.end && b.start < a.end
+
+renderConflictActions :: forall w. Array (Array String) -> HTML w Action
+renderConflictActions conflictGroups =
+  if null conflictGroups then text ""
+  else
+    div [ class_ "agenda-conflict-actions" ]
+      [ button
+          [ class_ "btn btn-sm btn-outline-danger agenda-conflict-button"
+          , onClick (const $ OpenConflictResolution (headOrEmpty conflictGroups))
+          ]
+          [ text "Resoudre un conflit" ]
+      ]
+  where
+  headOrEmpty groups =
+    case uncons groups of
+      Just { head } -> head
+      Nothing -> []
+
+renderConflictResolution :: forall w. Array CalendarItem -> ConflictResolution -> HTML w Action
+renderConflictResolution items resolution =
+  div [ class_ "agenda-conflict-panel" ]
+    [ div [ class_ "agenda-conflict-title" ] [ text "Resolution de conflit" ]
+    , div [ class_ "agenda-conflict-subtitle" ] [ text "Choisissez une strategie puis confirmez." ]
+    , ul [ class_ "agenda-conflict-list" ] (map (renderConflictItem items) resolution.groupIds)
+    , div [ class_ "agenda-conflict-strategies" ]
+        [ button
+            [ class_ "btn btn-sm btn-outline-primary"
+            , onClick (const $ ChooseResolutionStrategy StrategyShift30)
+            ]
+            [ text "Decaler de 30 min" ]
+        , button
+            [ class_ "btn btn-sm btn-outline-primary"
+            , onClick (const $ ChooseResolutionStrategy StrategySwap)
+            ]
+            [ text "Echanger" ]
+        ]
+    , renderConfirmation resolution.pendingStrategy
+    , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const CancelResolution) ] [ text "Fermer" ]
+    ]
+
+renderConflictItem :: forall w. Array CalendarItem -> String -> HTML w Action
+renderConflictItem items itemId =
+  case find (matchId itemId) items of
+    Just item ->
+      let
+        content = calendarItemContent item
+      in
+        li [ class_ "agenda-conflict-item" ]
+          [ div [ class_ "agenda-conflict-item-title" ] [ text content.title ]
+          , div [ class_ "agenda-conflict-item-window" ]
+              [ text $ content.windowStart <> " → " <> content.windowEnd ]
+          ]
+    Nothing -> text ""
+  where
+  matchId id (ServerCalendarItem { id: candidate }) = id == candidate
+  matchId _ _ = false
+
+renderConfirmation :: forall w. Maybe ResolutionStrategy -> HTML w Action
+renderConfirmation pending =
+  case pending of
+    Nothing -> text ""
+    Just strategy ->
+      div [ class_ "agenda-conflict-confirmation" ]
+        [ div [ class_ "agenda-conflict-confirmation-text" ]
+            [ text $ "Confirmer la strategie: " <> show strategy <> " ?" ]
+        , div [ class_ "agenda-conflict-confirmation-actions" ]
+            [ button [ class_ "btn btn-sm btn-danger", onClick (const ConfirmResolution) ] [ text "Confirmer" ]
+            , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const CancelResolution) ] [ text "Annuler" ]
+            ]
+        ]
 
 calendarItemContent :: CalendarItem -> CalendarItemContent
 calendarItemContent (NewCalendarItem { content }) = content
