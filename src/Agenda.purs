@@ -7,6 +7,7 @@ module Agenda
   , ItemType(..)
   , ValidationError(..)
   , toNewIntention
+  , toScheduledBlock
   , validateIntention
   ) where
 
@@ -21,7 +22,7 @@ import Control.Monad.Except (ExceptT(..), runExceptT, withExceptT)
 import Control.Monad.RWS (get, modify_)
 import Control.Monad.Trans.Class (lift)
 import Data.Argonaut.Core (Json, jsonEmptyObject)
-import Data.Argonaut.Decode (class DecodeJson, decodeJson, (.:))
+import Data.Argonaut.Decode (class DecodeJson, decodeJson, (.:), (.:?))
 import Data.Argonaut.Decode.Error (JsonDecodeError(..))
 import Data.Argonaut.Encode (class EncodeJson, encodeJson, (:=), (~>))
 import Data.Array (mapWithIndex, null)
@@ -65,6 +66,7 @@ type CalendarItemContent =
   , windowStart :: String
   , windowEnd :: String
   , status :: ItemStatus
+  , sourceItemId :: Maybe String
   }
 
 data CalendarItem
@@ -109,7 +111,19 @@ toNewIntention { title, windowStart, windowEnd } =
         , windowStart
         , windowEnd
         , status: Todo
+        , sourceItemId: Nothing
         }
+    }
+
+toScheduledBlock :: String -> CalendarItemContent -> CalendarItem
+toScheduledBlock sourceId content =
+  NewCalendarItem
+    { content:
+        content
+          { itemType = ScheduledBlock
+          , status = Todo
+          , sourceItemId = Just sourceId
+          }
     }
 
 validateIntention :: IntentionDraft -> Either ValidationError IntentionDraft
@@ -178,7 +192,8 @@ instance calendarItemDecodeJson :: DecodeJson CalendarItem where
     windowStart <- obj .: "fenetre_debut"
     windowEnd <- obj .: "fenetre_fin"
     status <- obj .: "statut"
-    let content = { itemType, title, windowStart, windowEnd, status }
+    sourceItemId <- obj .:? "source_item_id"
+    let content = { itemType, title, windowStart, windowEnd, status, sourceItemId }
     either (const $ pure $ NewCalendarItem { content })
            (\id -> pure $ ServerCalendarItem { content, id })
            (obj .: "id")
@@ -191,13 +206,19 @@ instance calendarItemEncodeJson :: EncodeJson CalendarItem where
       ~> encodeCalendarContent content
 
 encodeCalendarContent :: CalendarItemContent -> Json
-encodeCalendarContent { itemType, title, windowStart, windowEnd, status } =
-  "type" := itemType
-    ~> "titre" := title
-    ~> "fenetre_debut" := windowStart
-    ~> "fenetre_fin" := windowEnd
-    ~> "statut" := status
-    ~> jsonEmptyObject
+encodeCalendarContent { itemType, title, windowStart, windowEnd, status, sourceItemId } =
+  withSourceItem $
+    "type" := itemType
+      ~> "titre" := title
+      ~> "fenetre_debut" := windowStart
+      ~> "fenetre_fin" := windowEnd
+      ~> "statut" := status
+      ~> jsonEmptyObject
+  where
+  withSourceItem base =
+    case sourceItemId of
+      Just sourceId -> "source_item_id" := sourceId ~> base
+      Nothing -> base
 
 type State =
   { items :: Array CalendarItem
@@ -211,6 +232,7 @@ data Action
   | DraftStartChanged String
   | DraftEndChanged String
   | SubmitIntention
+  | PlanifyFrom String CalendarItemContent
 
 component :: forall q i. H.Component q i NoOutput Aff
 component =
@@ -247,6 +269,9 @@ handleAction action = handleError $
           _ <- createItem (toNewIntention validDraft)
           lift $ modify_ _ { draft = emptyDraft, validationError = Nothing }
           refreshItems
+    PlanifyFrom sourceId content -> do
+      _ <- createItem (toScheduledBlock sourceId content)
+      refreshItems
 
 handleError :: ErrorAgendaAppM Unit -> AgendaAppM Unit
 handleError m = do
@@ -333,8 +358,15 @@ renderItem _ item =
           [ div [ class_ "agenda-card-title" ] [ text content.title ]
           , div [ class_ "agenda-card-window" ]
               [ text $ content.windowStart <> " → " <> content.windowEnd ]
+          , renderPlanifyAction item content
           ]
       ]
+
+renderPlanifyAction :: forall w. CalendarItem -> CalendarItemContent -> HTML w Action
+renderPlanifyAction (ServerCalendarItem { id, content }) _ | content.itemType == Intention =
+  button [ class_ "btn btn-sm btn-outline-primary agenda-planify", onClick (const $ PlanifyFrom id content) ]
+    [ text "Planifier" ]
+renderPlanifyAction _ _ = text ""
 
 calendarItemContent :: CalendarItem -> CalendarItemContent
 calendarItemContent (NewCalendarItem { content }) = content
