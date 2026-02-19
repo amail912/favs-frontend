@@ -2,6 +2,7 @@ module Test.SpecSuite (runSpecSuite) where
 
 import Prelude
 
+import Agenda (IntentionDraft, ValidationError(..), toNewIntention, validateIntention)
 import Checklists (Checklist(..), ChecklistItem(..), removeChecklistItem)
 import Data.Argonaut.Decode (decodeJson)
 import Data.Argonaut.Encode (encodeJson)
@@ -68,3 +69,47 @@ runSpecSuite = runSpec [ consoleReporter ] do
             Just (ChecklistItem { label }) -> label `shouldEqual` "B"
             Nothing -> fail "Expected one checklist item after deletion"
         _ -> fail "Checklist item removal returned unexpected result"
+
+  describe "Agenda intentions" do
+    it "round-trips a new intention" do
+      let
+        draft :: IntentionDraft
+        draft =
+          { title: "Deep work"
+          , windowStart: "2026-02-19T09:00"
+          , windowEnd: "2026-02-19T10:00"
+          }
+        newItem = toNewIntention draft
+      case decodeJson (encodeJson newItem) of
+        Right decoded -> decoded `shouldEqual` newItem
+        Left err -> fail $ "Decoding encoded intention failed: " <> show err
+
+    it "fails validation when the title is empty" do
+      let
+        draft :: IntentionDraft
+        draft =
+          { title: "   "
+          , windowStart: "2026-02-19T09:00"
+          , windowEnd: "2026-02-19T10:00"
+          }
+      validateIntention draft `shouldEqual` Left TitleEmpty
+
+    it "fails validation when the end is before start" do
+      let
+        draft :: IntentionDraft
+        draft =
+          { title: "Focus"
+          , windowStart: "2026-02-19T10:00"
+          , windowEnd: "2026-02-19T09:00"
+          }
+      validateIntention draft `shouldEqual` Left WindowOrderInvalid
+
+    it "accepts a valid intention" do
+      let
+        draft :: IntentionDraft
+        draft =
+          { title: "Sprint"
+          , windowStart: "2026-02-19T09:00"
+          , windowEnd: "2026-02-19T10:00"
+          }
+      validateIntention draft `shouldEqual` Right draft

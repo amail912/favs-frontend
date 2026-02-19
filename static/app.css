@@ -240,6 +240,68 @@ a.nav-link:hover {
   color: var(--app-muted) !important;
 }
 
+.agenda-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.agenda-header {
+  text-align: center;
+}
+
+.agenda-title {
+  font-weight: 760;
+  margin-bottom: 0.15rem;
+}
+
+.agenda-subtitle {
+  color: var(--app-muted);
+}
+
+.agenda-form {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--app-border);
+  box-shadow: 0 10px 24px rgba(20, 37, 68, 0.08);
+}
+
+.agenda-time-row {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.agenda-input {
+  border-radius: 12px;
+}
+
+.agenda-submit {
+  border-radius: 999px;
+  font-weight: 650;
+}
+
+.agenda-error {
+  color: #b42318;
+  background: rgba(254, 228, 226, 0.6);
+  border: 1px solid rgba(254, 188, 188, 0.8);
+  border-radius: 12px;
+  padding: 0.6rem 0.75rem;
+}
+
+.agenda-card-title {
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+.agenda-card-window {
+  color: var(--app-muted);
+  font-size: 0.95rem;
+  margin-top: 0.2rem;
+}
+
 @media (max-width: 768px) {
   .container {
     padding-inline: 0.8rem;
