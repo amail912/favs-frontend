@@ -2,7 +2,7 @@ module Test.SpecSuite (runSpecSuite) where
 
 import Prelude
 
-import Agenda (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), ValidationError(..), applyOfflineMutation, detectConflictGroups, detectConflictIds, durationMinutesBetween, toNewIntention, validateIntention)
+import Agenda (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), SortMode(..), ValidationError(..), applyOfflineMutation, detectConflictGroups, detectConflictIds, durationMinutesBetween, sortItems, toNewIntention, validateIntention)
 import Checklists (Checklist(..), ChecklistItem(..), removeChecklistItem)
 import Data.Argonaut.Decode (decodeJson)
 import Data.Argonaut.Encode (encodeJson)
@@ -78,6 +78,7 @@ runSpecSuite = runSpec [ consoleReporter ] do
           { title: "Deep work"
           , windowStart: "2026-02-19T09:00"
           , windowEnd: "2026-02-19T10:00"
+          , category: ""
           }
         newItem = toNewIntention draft
       case decodeJson (encodeJson newItem) of
@@ -96,6 +97,7 @@ runSpecSuite = runSpec [ consoleReporter ] do
                 , status: Todo
                 , sourceItemId: Just "source-1"
                 , actualDurationMinutes: Nothing
+                , category: Nothing
                 }
             }
       case decodeJson (encodeJson scheduled) of
@@ -109,6 +111,7 @@ runSpecSuite = runSpec [ consoleReporter ] do
           { title: "   "
           , windowStart: "2026-02-19T09:00"
           , windowEnd: "2026-02-19T10:00"
+          , category: ""
           }
       validateIntention draft `shouldEqual` Left TitleEmpty
 
@@ -119,6 +122,7 @@ runSpecSuite = runSpec [ consoleReporter ] do
           { title: "Focus"
           , windowStart: "2026-02-19T10:00"
           , windowEnd: "2026-02-19T09:00"
+          , category: ""
           }
       validateIntention draft `shouldEqual` Left WindowOrderInvalid
 
@@ -129,6 +133,7 @@ runSpecSuite = runSpec [ consoleReporter ] do
           { title: "Sprint"
           , windowStart: "2026-02-19T09:00"
           , windowEnd: "2026-02-19T10:00"
+          , category: ""
           }
       validateIntention draft `shouldEqual` Right draft
 
@@ -145,6 +150,7 @@ runSpecSuite = runSpec [ consoleReporter ] do
                 , status: Todo
                 , sourceItemId: Just "src-a"
                 , actualDurationMinutes: Nothing
+                , category: Nothing
                 }
             }
         itemB =
@@ -158,6 +164,7 @@ runSpecSuite = runSpec [ consoleReporter ] do
                 , status: Todo
                 , sourceItemId: Just "src-b"
                 , actualDurationMinutes: Nothing
+                , category: Nothing
                 }
             }
       detectConflictIds [ itemA, itemB ] `shouldEqual` [ "a", "b" ]
@@ -175,6 +182,7 @@ runSpecSuite = runSpec [ consoleReporter ] do
                 , status: Todo
                 , sourceItemId: Just "src-a"
                 , actualDurationMinutes: Nothing
+                , category: Nothing
                 }
             }
         itemB =
@@ -188,6 +196,7 @@ runSpecSuite = runSpec [ consoleReporter ] do
                 , status: Todo
                 , sourceItemId: Just "src-b"
                 , actualDurationMinutes: Nothing
+                , category: Nothing
                 }
             }
         itemC =
@@ -201,6 +210,7 @@ runSpecSuite = runSpec [ consoleReporter ] do
                 , status: Todo
                 , sourceItemId: Just "src-c"
                 , actualDurationMinutes: Nothing
+                , category: Nothing
                 }
             }
       detectConflictGroups [ itemA, itemB, itemC ] `shouldEqual` [ [ "a", "b", "c" ] ]
@@ -217,6 +227,7 @@ runSpecSuite = runSpec [ consoleReporter ] do
                 , status: Todo
                 , sourceItemId: Nothing
                 , actualDurationMinutes: Nothing
+                , category: Nothing
                 }
             }
         result = applyOfflineMutation true item [] []
@@ -225,3 +236,35 @@ runSpecSuite = runSpec [ consoleReporter ] do
 
     it "computes duration between window start and end" do
       durationMinutesBetween "2026-02-19T09:00" "2026-02-19T10:30" `shouldEqual` Just 90
+
+    it "sorts items by status" do
+      let
+        itemTodo =
+          ServerCalendarItem
+            { id: "todo"
+            , content:
+                { itemType: ScheduledBlock
+                , title: "Todo"
+                , windowStart: "2026-02-19T09:00"
+                , windowEnd: "2026-02-19T10:00"
+                , status: Todo
+                , sourceItemId: Just "src-todo"
+                , actualDurationMinutes: Nothing
+                , category: Nothing
+                }
+            }
+        itemDone =
+          ServerCalendarItem
+            { id: "done"
+            , content:
+                { itemType: ScheduledBlock
+                , title: "Done"
+                , windowStart: "2026-02-19T11:00"
+                , windowEnd: "2026-02-19T12:00"
+                , status: Fait
+                , sourceItemId: Just "src-done"
+                , actualDurationMinutes: Nothing
+                , category: Nothing
+                }
+            }
+      sortItems SortByStatus [] [ itemDone, itemTodo ] `shouldEqual` [ itemTodo, itemDone ]

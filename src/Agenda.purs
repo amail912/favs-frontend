@@ -5,11 +5,13 @@ module Agenda
   , IntentionDraft
   , ItemStatus(..)
   , ItemType(..)
+  , SortMode(..)
   , ValidationError(..)
   , applyOfflineMutation
   , durationMinutesBetween
   , detectConflictGroups
   , detectConflictIds
+  , sortItems
   , toNewIntention
   , toScheduledBlock
   , validateIntention
@@ -30,7 +32,7 @@ import Data.Argonaut.Core (Json, jsonEmptyObject)
 import Data.Argonaut.Decode (class DecodeJson, decodeJson, (.:), (.:?))
 import Data.Argonaut.Decode.Error (JsonDecodeError(..))
 import Data.Argonaut.Encode (class EncodeJson, encodeJson, (:=), (~>))
-import Data.Array (elem, filter, find, foldM, length, mapMaybe, mapWithIndex, nub, null, uncons)
+import Data.Array (elem, filter, find, foldM, index, length, mapMaybe, mapWithIndex, nub, null, sortBy, uncons)
 import Data.Bifunctor (lmap)
 import Data.Either (Either(..), either)
 import Data.Foldable (all, foldl)
@@ -54,10 +56,12 @@ import Effect.Class (liftEffect)
 import Effect.Class.Console (logShow)
 import Effect.Now (nowDateTime)
 import Halogen (Component, ComponentHTML, HalogenM, defaultEval, mkComponent, mkEval) as H
-import Halogen.HTML (HTML, button, div, h2, input, li, section, text, ul)
-import Halogen.HTML.Events (onClick, onValueChange)
-import Halogen.HTML.Properties (placeholder, type_, value)
+import Halogen.HTML (HTML, button, div, h2, input, li, option, section, select, text, ul)
+import Halogen.HTML.Events (onClick, onDragEnd, onDragOver, onDragStart, onDrop, onValueChange)
+import Halogen.HTML.Properties (IProp, draggable, placeholder, type_, value)
 import Utils (class_)
+import Web.Event.Event (preventDefault)
+import Web.HTML.Event.DragEvent (DragEvent, toEvent)
 
 type NoOutput = Void
 type AgendaAppM = H.HalogenM State Action () NoOutput Aff
@@ -83,6 +87,7 @@ type CalendarItemContent =
   , status :: ItemStatus
   , sourceItemId :: Maybe String
   , actualDurationMinutes :: Maybe Int
+  , category :: Maybe String
   }
 
 data CalendarItem
@@ -98,6 +103,7 @@ type IntentionDraft =
   { title :: String
   , windowStart :: String
   , windowEnd :: String
+  , category :: String
   }
 
 data ValidationError
@@ -116,10 +122,11 @@ emptyDraft =
   { title: ""
   , windowStart: ""
   , windowEnd: ""
+  , category: ""
   }
 
 toNewIntention :: IntentionDraft -> CalendarItem
-toNewIntention { title, windowStart, windowEnd } =
+toNewIntention { title, windowStart, windowEnd, category } =
   NewCalendarItem
     { content:
         { itemType: Intention
@@ -129,8 +136,13 @@ toNewIntention { title, windowStart, windowEnd } =
         , status: Todo
         , sourceItemId: Nothing
         , actualDurationMinutes: Nothing
+        , category: toOptional category
         }
     }
+  where
+  toOptional raw =
+    let trimmed = StringCommon.trim raw
+    in if trimmed == "" then Nothing else Just trimmed
 
 toScheduledBlock :: String -> CalendarItemContent -> CalendarItem
 toScheduledBlock sourceId content =
@@ -211,7 +223,8 @@ instance calendarItemDecodeJson :: DecodeJson CalendarItem where
     status <- obj .: "statut"
     sourceItemId <- obj .:? "source_item_id"
     actualDurationMinutes <- obj .:? "duree_reelle_minutes"
-    let content = { itemType, title, windowStart, windowEnd, status, sourceItemId, actualDurationMinutes }
+    category <- obj .:? "categorie"
+    let content = { itemType, title, windowStart, windowEnd, status, sourceItemId, actualDurationMinutes, category }
     either (const $ pure $ NewCalendarItem { content })
            (\id -> pure $ ServerCalendarItem { content, id })
            (obj .: "id")
@@ -224,8 +237,8 @@ instance calendarItemEncodeJson :: EncodeJson CalendarItem where
       ~> encodeCalendarContent content
 
 encodeCalendarContent :: CalendarItemContent -> Json
-encodeCalendarContent { itemType, title, windowStart, windowEnd, status, sourceItemId, actualDurationMinutes } =
-  withDuration $ withSourceItem $
+encodeCalendarContent { itemType, title, windowStart, windowEnd, status, sourceItemId, actualDurationMinutes, category } =
+  withCategory $ withDuration $ withSourceItem $
     "type" := itemType
       ~> "titre" := title
       ~> "fenetre_debut" := windowStart
@@ -241,6 +254,10 @@ encodeCalendarContent { itemType, title, windowStart, windowEnd, status, sourceI
     case actualDurationMinutes of
       Just minutes -> "duree_reelle_minutes" := minutes ~> base
       Nothing -> base
+  withCategory base =
+    case category of
+      Just value -> "categorie" := value ~> base
+      Nothing -> base
 
 type State =
   { items :: Array CalendarItem
@@ -252,6 +269,8 @@ type State =
   , pendingSync :: Array CalendarItem
   , syncConflict :: Maybe (Array CalendarItem)
   , validationPanel :: Maybe ValidationPanel
+  , sortMode :: SortMode
+  , draggingId :: Maybe String
   }
 
 data Action
@@ -259,10 +278,16 @@ data Action
   | DraftTitleChanged String
   | DraftStartChanged String
   | DraftEndChanged String
+  | DraftCategoryChanged String
   | SubmitIntention
   | PlanifyFrom String CalendarItemContent
   | ToggleConflictFilter
   | ToggleOffline
+  | SortChanged String
+  | DragStart String
+  | DragOver String DragEvent
+  | DropOn String
+  | DragEnd
   | OpenValidation String CalendarItemContent
   | ValidationMinutesChanged String
   | ConfirmValidation
@@ -295,6 +320,8 @@ initialState = const
   , pendingSync: []
   , syncConflict: Nothing
   , validationPanel: Nothing
+  , sortMode: SortByTime
+  , draggingId: Nothing
   }
 
 handleAction :: Action -> AgendaAppM Unit
@@ -307,6 +334,8 @@ handleAction action = handleError $
       lift $ modify_ \st -> st { draft = st.draft { windowStart = windowStart }, validationError = Nothing }
     DraftEndChanged windowEnd ->
       lift $ modify_ \st -> st { draft = st.draft { windowEnd = windowEnd }, validationError = Nothing }
+    DraftCategoryChanged category ->
+      lift $ modify_ \st -> st { draft = st.draft { category = category }, validationError = Nothing }
     SubmitIntention -> do
       st <- get
       case validateIntention st.draft of
@@ -343,6 +372,21 @@ handleAction action = handleError $
         lift $ modify_ _ { offlineMode = false }
         syncPending
       else lift $ modify_ _ { offlineMode = true }
+    SortChanged raw ->
+      lift $ modify_ \st -> st { sortMode = parseSortMode raw }
+    DragStart itemId ->
+      lift $ modify_ _ { draggingId = Just itemId }
+    DragOver _ ev ->
+      liftEffect $ preventDefault (toEvent ev)
+    DropOn targetId -> do
+      st <- get
+      case st.draggingId of
+        Nothing -> pure unit
+        Just draggingId -> do
+          let reordered = moveItemBefore draggingId targetId st.items
+          lift $ modify_ _ { items = reordered, draggingId = Nothing }
+    DragEnd ->
+      lift $ modify_ _ { draggingId = Nothing }
     OpenValidation itemId content -> do
       suggested <- liftEffect $ suggestDurationMinutes content.windowStart
       lift $ modify_ _ { validationPanel = Just { itemId, proposedMinutes: suggested, inputValue: "" } }
@@ -419,7 +463,7 @@ syncPending = do
     else lift $ modify_ _ { syncConflict = Just st.pendingSync }
 
 render :: forall m. State -> H.ComponentHTML Action () m
-render { items, draft, validationError, showConflictsOnly, conflictResolution, offlineMode, syncConflict, validationPanel } =
+render { items, draft, validationError, showConflictsOnly, conflictResolution, offlineMode, syncConflict, validationPanel, sortMode } =
   let
     conflictIds = detectConflictIds items
     conflictGroups = detectConflictGroups items
@@ -427,6 +471,7 @@ render { items, draft, validationError, showConflictsOnly, conflictResolution, o
       if showConflictsOnly
         then filter (isConflict conflictIds) items
         else items
+    sortedItems = sortItems sortMode conflictIds itemsToShow
   in
   div [ class_ "entity-page agenda-page" ]
     [ section [ class_ "agenda-header" ]
@@ -438,10 +483,11 @@ render { items, draft, validationError, showConflictsOnly, conflictResolution, o
             ]
             [ text "Filtrer: en conflit" ]
         , renderOfflineToggle offlineMode
+        , renderSortPicker sortMode
         , renderConflictActions conflictGroups
         ]
     , renderForm draft validationError
-    , if (null itemsToShow) then emptyAgenda else agendaList conflictIds itemsToShow
+    , if (null sortedItems) then emptyAgenda else agendaList conflictIds sortedItems
     , maybe (text "") (renderConflictResolution items) conflictResolution
     , maybe (text "") renderSyncConflict syncConflict
     , maybe (text "") renderValidationPanel validationPanel
@@ -471,6 +517,12 @@ renderForm draft validationError =
             , onValueChange DraftEndChanged
             , value draft.windowEnd
             ]
+        ]
+    , input
+        [ class_ "form-control agenda-input"
+        , placeholder "Categorie (optionnelle)"
+        , onValueChange DraftCategoryChanged
+        , value draft.category
         ]
     , maybe (text "") renderValidationError validationError
     , button [ class_ "btn btn-primary agenda-submit", onClick (const SubmitIntention) ] [ text "Creer l'intention" ]
@@ -502,12 +554,15 @@ renderItem conflictIds _ item =
   let
     content = calendarItemContent item
     conflictClass = if isConflict conflictIds item then " agenda-card--conflict" else ""
+    dragProps = dragHandlers item
   in
-    li [ class_ $ "row list-group-item entity-card agenda-card" <> conflictClass ]
+    li ([ class_ $ "row list-group-item entity-card agenda-card" <> conflictClass ] <> dragProps)
       [ div [ class_ "col entity-card-body" ]
-          [ div [ class_ "agenda-card-title" ] [ text content.title ]
+          [ div [ class_ "agenda-card-time" ] [ text (timeLabel content.windowStart) ]
+          , div [ class_ "agenda-card-title" ] [ text content.title ]
           , div [ class_ "agenda-card-window" ]
               [ text $ content.windowStart <> " → " <> content.windowEnd ]
+          , renderCategory content.category
           , renderValidationAction item content
           , renderPlanifyAction item content
           ]
@@ -524,6 +579,39 @@ renderValidationAction (ServerCalendarItem { id, content }) _ | content.status /
   button [ class_ "btn btn-sm btn-outline-success agenda-validate", onClick (const $ OpenValidation id content) ]
     [ text "Valider" ]
 renderValidationAction _ _ = text ""
+
+renderCategory :: forall w. Maybe String -> HTML w Action
+renderCategory category =
+  case category of
+    Nothing -> text ""
+    Just value -> div [ class_ "agenda-card-category" ] [ text value ]
+
+timeLabel :: String -> String
+timeLabel raw =
+  if String.length raw >= 16 then String.slice 11 16 raw else raw
+
+dragHandlers ::
+  forall r.
+  CalendarItem ->
+  Array
+    (IProp
+       ( draggable :: Boolean
+       , onDragStart :: DragEvent
+       , onDragOver :: DragEvent
+       , onDrop :: DragEvent
+       , onDragEnd :: DragEvent
+       | r
+       )
+       Action
+    )
+dragHandlers (ServerCalendarItem { id }) =
+  [ draggable true
+  , onDragStart (const $ DragStart id)
+  , onDragOver (\ev -> DragOver id ev)
+  , onDrop (const $ DropOn id)
+  , onDragEnd (const DragEnd)
+  ]
+dragHandlers _ = []
 
 isConflict :: Array String -> CalendarItem -> Boolean
 isConflict conflictIds (ServerCalendarItem { id }) = elem id conflictIds
@@ -553,6 +641,17 @@ data ResolutionStrategy
 derive instance resolutionStrategyGeneric :: Generic ResolutionStrategy _
 derive instance resolutionStrategyEq :: Eq ResolutionStrategy
 instance resolutionStrategyShow :: Show ResolutionStrategy where
+  show = genericShow
+
+data SortMode
+  = SortByTime
+  | SortByStatus
+  | SortByCategory
+  | SortByConflict
+
+derive instance sortModeGeneric :: Generic SortMode _
+derive instance sortModeEq :: Eq SortMode
+instance sortModeShow :: Show SortMode where
   show = genericShow
 
 type OfflineMutationResult =
@@ -708,6 +807,101 @@ renderOfflineToggle offlineMode =
         ]
         [ text $ if offlineMode then "Mode hors ligne actif" else "Passer hors ligne" ]
     ]
+
+renderSortPicker :: forall w. SortMode -> HTML w Action
+renderSortPicker sortMode =
+  div [ class_ "agenda-sort" ]
+    [ text "Trier:"
+    , select
+        [ class_ "form-select agenda-sort-select"
+        , onValueChange SortChanged
+        , value (sortModeValue sortMode)
+        ]
+        [ option [ value "time" ] [ text "Horaire" ]
+        , option [ value "status" ] [ text "Statut" ]
+        , option [ value "category" ] [ text "Categorie" ]
+        , option [ value "conflict" ] [ text "Conflit" ]
+        ]
+    ]
+
+sortModeValue :: SortMode -> String
+sortModeValue SortByTime = "time"
+sortModeValue SortByStatus = "status"
+sortModeValue SortByCategory = "category"
+sortModeValue SortByConflict = "conflict"
+
+parseSortMode :: String -> SortMode
+parseSortMode raw =
+  case raw of
+    "status" -> SortByStatus
+    "category" -> SortByCategory
+    "conflict" -> SortByConflict
+    _ -> SortByTime
+
+sortItems :: SortMode -> Array String -> Array CalendarItem -> Array CalendarItem
+sortItems mode conflictIds items =
+  case mode of
+    SortByStatus -> sortBy compareStatus items
+    SortByCategory -> sortBy compareCategory items
+    SortByConflict -> sortBy (compareConflict conflictIds) items
+    SortByTime -> sortBy compareTime items
+  where
+  compareTime a b = compare (calendarItemContent a).windowStart (calendarItemContent b).windowStart
+
+  compareStatus a b = compare (statusRank (calendarItemContent a).status) (statusRank (calendarItemContent b).status)
+
+  compareCategory a b = compare (categoryKey (calendarItemContent a).category) (categoryKey (calendarItemContent b).category)
+
+  compareConflict ids a b = compare (conflictRank ids a) (conflictRank ids b)
+
+  conflictRank ids item = if isConflict ids item then 0 else 1
+
+  statusRank Todo = 0
+  statusRank EnCours = 1
+  statusRank Fait = 2
+  statusRank Annule = 3
+
+  categoryKey Nothing = "~~~"
+  categoryKey (Just value) = value
+
+moveItemBefore :: String -> String -> Array CalendarItem -> Array CalendarItem
+moveItemBefore dragId targetId items =
+  case { from: indexOf dragId items, to: indexOf targetId items } of
+    { from: Just fromIdx, to: Just toIdx } ->
+      let
+        without = deleteAtIndex fromIdx items
+        adjustedTo = if fromIdx < toIdx then toIdx - 1 else toIdx
+        draggedItem = index items fromIdx
+      in
+        insertAtIndex adjustedTo draggedItem without
+    _ -> items
+  where
+  indexOf id = findIndex (matchesId id)
+  matchesId id (ServerCalendarItem { id: candidate }) = id == candidate
+  matchesId _ _ = false
+
+  findIndex predicate arr =
+    case uncons arr of
+      Nothing -> Nothing
+      Just { head, tail } ->
+        if predicate head then Just 0
+        else map (_ + 1) (findIndex predicate tail)
+
+  deleteAtIndex idx arr =
+    case uncons arr of
+      Nothing -> []
+      Just { head, tail } ->
+        if idx == 0 then tail
+        else [ head ] <> deleteAtIndex (idx - 1) tail
+
+  insertAtIndex idx maybeItem arr =
+    case maybeItem of
+      Nothing -> arr
+      Just item ->
+        if idx <= 0 then [ item ] <> arr
+        else case uncons arr of
+          Nothing -> [ item ]
+          Just { head, tail } -> [ head ] <> insertAtIndex (idx - 1) (Just item) tail
 
 renderSyncConflict :: forall w. Array CalendarItem -> HTML w Action
 renderSyncConflict pending =
