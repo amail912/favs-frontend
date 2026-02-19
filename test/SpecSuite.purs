@@ -2,7 +2,7 @@ module Test.SpecSuite (runSpecSuite) where
 
 import Prelude
 
-import Agenda (IntentionDraft, ValidationError(..), toNewIntention, validateIntention)
+import Agenda (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), ValidationError(..), toNewIntention, validateIntention)
 import Checklists (Checklist(..), ChecklistItem(..), removeChecklistItem)
 import Data.Argonaut.Decode (decodeJson)
 import Data.Argonaut.Encode (encodeJson)
@@ -83,6 +83,23 @@ runSpecSuite = runSpec [ consoleReporter ] do
       case decodeJson (encodeJson newItem) of
         Right decoded -> decoded `shouldEqual` newItem
         Left err -> fail $ "Decoding encoded intention failed: " <> show err
+
+    it "round-trips a scheduled block with source item id" do
+      let
+        scheduled =
+          NewCalendarItem
+            { content:
+                { itemType: ScheduledBlock
+                , title: "Planifie"
+                , windowStart: "2026-02-19T11:00"
+                , windowEnd: "2026-02-19T12:00"
+                , status: Todo
+                , sourceItemId: Just "source-1"
+                }
+            }
+      case decodeJson (encodeJson scheduled) of
+        Right decoded -> decoded `shouldEqual` scheduled
+        Left err -> fail $ "Decoding encoded scheduled block failed: " <> show err
 
     it "fails validation when the title is empty" do
       let

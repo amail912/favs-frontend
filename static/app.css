@@ -302,6 +302,12 @@ a.nav-link:hover {
   margin-top: 0.2rem;
 }
 
+.agenda-planify {
+  margin-top: 0.6rem;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
 @media (max-width: 768px) {
   .container {
     padding-inline: 0.8rem;
