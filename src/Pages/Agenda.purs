@@ -20,22 +20,17 @@ module Pages.Agenda
 
 import Prelude hiding (div)
 
-import Affjax (Error, printError)
-import Affjax.RequestBody (RequestBody(..))
-import Affjax.ResponseFormat (json)
-import Affjax.Web (Response, post)
-import Affjax.Web (get) as Affjax
+import Affjax.Web (Response)
+import Api.Agenda (createItemResponse, getItemsResponse, validateItemResponse)
 import Control.Alt ((<|>))
-import Control.Monad.Except (ExceptT(..), runExceptT, withExceptT)
+import Control.Monad.Except (ExceptT(..), withExceptT)
 import Control.Monad.RWS (get, modify_)
 import Control.Monad.Trans.Class (lift)
-import Data.Argonaut.Core (Json, jsonEmptyObject)
+import Data.Argonaut.Core (Json)
 import Data.Argonaut.Decode (decodeJson)
-import Data.Argonaut.Decode.Error (JsonDecodeError)
-import Data.Argonaut.Encode (encodeJson, (:=), (~>))
 import Data.Array (catMaybes, elem, filter, find, foldM, index, length, mapMaybe, mapWithIndex, nub, null, sortBy, uncons)
 import Data.Bifunctor (lmap)
-import Data.Either (Either(..), either)
+import Data.Either (Either(..))
 import Data.Foldable (all, foldl)
 import Data.Generic.Rep (class Generic)
 import Data.Int as Int
@@ -54,12 +49,13 @@ import Effect (Effect)
 import Effect.Aff (Aff)
 import Effect.Aff.Class (liftAff)
 import Effect.Class (liftEffect)
-import Effect.Class.Console (logShow)
+import Ui.Errors (FatalError, handleError, toFatalError)
 import Effect.Now (nowDateTime)
 import Halogen (Component, ComponentHTML, HalogenM, defaultEval, mkComponent, mkEval) as H
 import Halogen.HTML (HTML, button, div, h2, input, li, option, section, select, text, textarea, ul)
 import Halogen.HTML.Events (onClick, onDragEnd, onDragOver, onDragStart, onDrop, onValueChange)
 import Halogen.HTML.Properties (IProp, draggable, placeholder, type_, value)
+import Ui.AgendaRender (renderPanelHeader)
 import Ui.Utils (class_)
 import Web.Event.Event (preventDefault)
 import Web.HTML.Event.DragEvent (DragEvent, toEvent)
@@ -607,25 +603,18 @@ handleAction action = handleError $
     FocusDateChanged raw ->
       lift $ modify_ \st -> st { focusDate = raw }
 
-handleError :: ErrorAgendaAppM Unit -> AgendaAppM Unit
-handleError m = do
-  res <- runExceptT m
-  either logShow pure res
-
 refreshItems :: ErrorAgendaAppM Unit
 refreshItems = do
-  jsonResponse <- withExceptT toFatalError $ ExceptT $ liftAff $ Affjax.get json "/api/v1/calendar-items"
+  jsonResponse <- withExceptT toFatalError $ ExceptT $ liftAff getItemsResponse
   items <- (_.body >>> decodeJson >>> lmap toFatalError >>> pure >>> ExceptT) jsonResponse
   lift $ modify_ \st -> st { items = items }
 
 createItem :: CalendarItem -> ErrorAgendaAppM (Response Json)
-createItem item = withExceptT toFatalError $ ExceptT $ liftAff $ post json "/api/v1/calendar-items" (Just $ Json $ encodeJson item)
+createItem item = withExceptT toFatalError $ ExceptT $ liftAff $ createItemResponse item
 
 validateItem :: String -> Int -> ErrorAgendaAppM (Response Json)
 validateItem itemId minutes =
-  withExceptT toFatalError $ ExceptT $ liftAff $
-    post json ("/api/v1/calendar-items/" <> itemId <> "/validate")
-      (Just $ Json $ "duree_reelle_minutes" := minutes ~> jsonEmptyObject)
+  withExceptT toFatalError $ ExceptT $ liftAff $ validateItemResponse itemId minutes
 
 statusOk :: forall a. Response a -> Boolean
 statusOk r = unwrap r.status >= 200 && unwrap r.status < 300
@@ -828,12 +817,11 @@ renderNotificationsPanel isOpen defaults overrides editor intentions =
   if null intentions then text ""
   else
     section [ class_ "agenda-notifications" ]
-      [ div [ class_ "agenda-notifications-header" ]
-          [ div []
-              [ div [ class_ "agenda-notifications-title" ] [ text "Rappels des intentions non planifiees" ]
-              , div [ class_ "agenda-notifications-subtitle" ] [ text "Les rappels par defaut s'appliquent aux intentions non planifiees." ]
-              ]
-          , button
+      [ renderPanelHeader
+          "agenda-notifications"
+          "Rappels des intentions non planifiees"
+          "Les rappels par defaut s'appliquent aux intentions non planifiees."
+          [ button
               [ class_ $ "btn btn-sm agenda-notifications-toggle" <> if isOpen then " btn-outline-primary" else " btn-outline-secondary"
               , onClick (const ToggleNotificationPanel)
               ]
@@ -946,10 +934,11 @@ renderNotificationEditor itemId editor =
 renderTemplatesPanel :: forall w. Array TaskTemplate -> TemplateDraft -> Maybe String -> HTML w Action
 renderTemplatesPanel templates draft editingId =
   section [ class_ "agenda-templates" ]
-    [ div [ class_ "agenda-templates-header" ]
-        [ div [ class_ "agenda-templates-title" ] [ text "Templates de taches" ]
-        , div [ class_ "agenda-templates-subtitle" ] [ text "Creez des templates reutilisables pour accelerer la saisie." ]
-        ]
+    [ renderPanelHeader
+        "agenda-templates"
+        "Templates de taches"
+        "Creez des templates reutilisables pour accelerer la saisie."
+        []
     , div [ class_ "agenda-templates-form" ]
         [ input
             [ class_ "form-control agenda-input"
@@ -1013,11 +1002,11 @@ renderTemplateCard template =
 renderCsvImportPanel :: forall w. String -> Maybe CsvImportResult -> HTML w Action
 renderCsvImportPanel csvInput result =
   section [ class_ "agenda-import" ]
-    [ div [ class_ "agenda-import-header" ]
-        [ div [ class_ "agenda-import-title" ] [ text "Import CSV" ]
-        , div [ class_ "agenda-import-subtitle" ]
-            [ text "Colonnes minimales: type, titre, fenetre_debut, fenetre_fin." ]
-        ]
+    [ renderPanelHeader
+        "agenda-import"
+        "Import CSV"
+        "Colonnes minimales: type, titre, fenetre_debut, fenetre_fin."
+        []
     , textarea
         [ class_ "form-control agenda-import-textarea"
         , placeholder "Collez votre CSV ici..."
@@ -1057,11 +1046,11 @@ renderCsvImportError err =
 renderIcsImportPanel :: forall w. String -> Maybe IcsImportResult -> HTML w Action
 renderIcsImportPanel icsInput result =
   section [ class_ "agenda-import" ]
-    [ div [ class_ "agenda-import-header" ]
-        [ div [ class_ "agenda-import-title" ] [ text "Import ICS" ]
-        , div [ class_ "agenda-import-subtitle" ]
-            [ text "Support basique: SUMMARY, DTSTART, DTEND." ]
-        ]
+    [ renderPanelHeader
+        "agenda-import"
+        "Import ICS"
+        "Support basique: SUMMARY, DTSTART, DTEND."
+        []
     , textarea
         [ class_ "form-control agenda-import-textarea"
         , placeholder "Collez votre fichier ICS ici..."
@@ -1110,11 +1099,11 @@ renderExportPanel
   -> HTML w Action
 renderExportPanel format typeFilter statusFilter categoryFilter startDate endDate output =
   section [ class_ "agenda-export" ]
-    [ div [ class_ "agenda-export-header" ]
-        [ div [ class_ "agenda-export-title" ] [ text "Export" ]
-        , div [ class_ "agenda-export-subtitle" ]
-            [ text "Filtres: type, categorie, statut, periode." ]
-        ]
+    [ renderPanelHeader
+        "agenda-export"
+        "Export"
+        "Filtres: type, categorie, statut, periode."
+        []
     , div [ class_ "agenda-export-controls" ]
         [ div [ class_ "agenda-export-control" ]
             [ div [ class_ "agenda-notifications-label" ] [ text "Format" ]
@@ -1959,22 +1948,3 @@ renderConfirmation pending =
 calendarItemContent :: CalendarItem -> CalendarItemContent
 calendarItemContent (NewCalendarItem { content }) = content
 calendarItemContent (ServerCalendarItem { content }) = content
-
-data FatalError
-  = DecodeError JsonDecodeError
-  | NetworkError Error
-  | CustomFatalError String
-
-instance fatalErrorShowInstance :: Show FatalError where
-  show (DecodeError err) = "DecodeError: " <> show err
-  show (NetworkError err) = "NetworkError: " <> printError err
-  show (CustomFatalError err) = "CustomError: " <> err
-
-class ToFatalError a where
-  toFatalError :: a -> FatalError
-
-instance jsonDecodeErrorToFatalErrorInstance :: ToFatalError JsonDecodeError where
-  toFatalError = DecodeError
-
-instance affjaxErrorToFatalErrorInstance :: ToFatalError Error where
-  toFatalError = NetworkError
