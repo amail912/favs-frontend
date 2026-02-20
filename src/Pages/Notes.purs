@@ -1,48 +1,35 @@
-module Pages.Notes (component, Note(..), NoteContent, StorageId, newNote) where
+module Pages.Notes (component, module Domain.Notes) where
 
 import Prelude hiding (div)
 
-import Affjax (Error, printError)
-import Affjax.RequestBody (RequestBody(..))
-import Affjax.ResponseFormat (json)
-import Affjax.Web (Response, delete, post, put)
-import Affjax.Web (get) as Affjax
-import Control.Alt ((<|>))
+import Affjax.Web (Response)
+import Api.Notes (deleteNoteResponse, getNotesResponse, writeNoteResponse)
 import Control.Monad.Error.Class (throwError)
-import Control.Monad.Except (ExceptT(..), runExceptT, withExceptT)
+import Control.Monad.Except (ExceptT(..), withExceptT)
 import Control.Monad.RWS (get, gets, modify_)
 import Control.Monad.Trans.Class (lift)
-import Data.Argonaut.Core (Json, jsonEmptyObject)
-import Data.Argonaut.Decode (class DecodeJson, JsonDecodeError, decodeJson, (.:))
-import Data.Argonaut.Encode (class EncodeJson, encodeJson, (:=), (~>))
-import Data.Array (index, length, mapWithIndex, null, snoc)
+import Data.Argonaut.Core (Json)
+import Data.Argonaut.Decode (decodeJson)
+import Data.Array (length, mapWithIndex, null, snoc)
 import Data.Bifunctor (lmap)
-import Data.Either (Either, either)
-import Data.Generic.Rep (class Generic)
-import Data.Int (floor, toNumber)
 import Data.Lens (Lens', lens, lens', (.~), (^.))
-import Data.Maybe (Maybe, maybe)
+import Data.Maybe (maybe)
 import Data.Newtype (unwrap, wrap)
-import Data.Show.Generic (genericShow)
 import Data.Tuple (Tuple(..))
 import Effect.Aff (Aff)
 import Effect.Aff.Class (liftAff)
 import Effect.Class (liftEffect)
-import Effect.Class.Console (log, logShow)
-import Foreign.Object (Object)
+import Domain.Notes (Note(..), NoteContent, StorageId, newNote)
 import Halogen (Component, ComponentHTML, HalogenM, defaultEval, getRef, mkComponent, mkEval, put) as H
 import Halogen.HTML (HTML, button, div, h2, header, i, input, li, section, text, textarea, ul)
 import Halogen.HTML.Events (onBlur, onClick, onValueChange)
 import Halogen.HTML.Properties (ref, value)
+import Ui.ErrorMessages (cannotConvertElement, cannotGetRef, unableToGetElement, unableToGetInputElement, wrongStatusDelete)
+import Ui.Errors (FatalError(..), handleError, toFatalError)
+import Ui.Focus (findElementByClassNames, focusElement, scrollToCenter, selectInputElement)
+import Ui.PageFlow (saveAndRefresh, updateAtWithDefault)
 import Ui.Utils (class_)
 import Web.DOM (Element)
-import Web.DOM.Element (getBoundingClientRect, getElementsByClassName)
-import Web.DOM.HTMLCollection (item)
-import Web.HTML (window)
-import Web.HTML.HTMLElement (focus, fromElement) as HTMLElement
-import Web.HTML.HTMLInputElement (fromElement) as InputElement
-import Web.HTML.HTMLInputElement (select)
-import Web.HTML.Window (innerHeight, scroll)
 
 type NoOutput = Void
 type NoteAppM = H.HalogenM State Action () NoOutput Aff
@@ -54,15 +41,6 @@ type State = { notes :: Array Note
 data EditingState = None
                   | EditingNoteTitle Int
                   | EditingNoteContent Int
-
-data Note = NewNote { content   :: NoteContent }
-          | ServerNote { content   :: NoteContent
-                       , storageId :: StorageId }
-
-derive instance noteGenericInstance :: Generic Note _
-derive instance noteEqInstance :: Eq Note
-instance noteShowInstance :: Show Note where
-  show = genericShow
 
 _content :: Lens' Note NoteContent
 _content = lens' $ (\note -> Tuple (getContent note) (setContent note))
@@ -81,64 +59,6 @@ _title = _content <<< (lens _.title $ _ { title = _ })
 
 _noteContent :: Lens' Note String
 _noteContent = _content <<< (lens _.noteContent $ _ { noteContent = _ })
-
-instance noteDecodeJsonInstance :: DecodeJson Note where
-  decodeJson :: Json -> Either JsonDecodeError Note
-  decodeJson json = decodeWrappedNote json <|> decodeFlatNewNote json
-    where
-      decodeWrappedNote :: Json -> Either JsonDecodeError Note
-      decodeWrappedNote wrappedJson = do
-        dec <- decodeJson wrappedJson
-        content <- dec .: "content"
-        title <- content .: "title"
-        noteContent <- content .: "noteContent"
-        either (const $ pure $ NewNote { content: { title: title, noteContent: noteContent } })
-               (decodeServerNote title noteContent)
-               (dec .: "storageId")
-
-      decodeFlatNewNote :: Json -> Either JsonDecodeError Note
-      decodeFlatNewNote flatJson = do
-        dec <- decodeJson flatJson
-        title <- dec .: "title"
-        noteContent <- dec .: "noteContent"
-        pure $ NewNote { content: { title: title, noteContent: noteContent } }
-
-      decodeServerNote :: String -> String -> Object Json -> Either JsonDecodeError Note
-      decodeServerNote title noteContent storageIdObj = do
-        version <- storageIdObj .: "version"
-        id <- storageIdObj .: "id"
-        pure $ ServerNote { content: { title: title, noteContent: noteContent }
-                          , storageId: { version: version, id: id }}
-
-instance noteEncodeJson :: EncodeJson Note where
-  encodeJson :: Note -> Json
-  encodeJson (NewNote { content: { title, noteContent } }) =
-    encodeContentObj title noteContent
-  encodeJson (ServerNote { content: { title, noteContent }, storageId: { version, id }}) =
-    cont ~> storage ~> jsonEmptyObject
-    where
-      cont :: Tuple String Json
-      cont = "content" := encodeContentObj title noteContent
-      storage :: Tuple String Json
-      storage = "storageId" := encodeStorageIdObj id version
-
-encodeContentObj :: String -> String -> Json
-encodeContentObj title noteContent =
-  "title" := title
-    ~> "noteContent" := noteContent
-    ~> jsonEmptyObject
-
-encodeStorageIdObj :: String -> String -> Json
-encodeStorageIdObj id version =
-  "id" := id
-    ~> "version" := version
-    ~> jsonEmptyObject
-
-type NoteId = Maybe { version :: String, id :: String }
-             -- ^ The Nothing value represents the id of the NewNote
-type NoteContent = { noteContent :: String, title :: String }
-
-type StorageId = { version :: String, id :: String }
 
 data Action = Initialize
             | CreateNewNote
@@ -161,9 +81,6 @@ component =
 
 initialState :: forall i. i -> State
 initialState = const { notes: [], editingState: None }
-
-newNote :: Note
-newNote = NewNote { content: { title: "What's your new title?", noteContent: "What's your new content?" } }
 
 -- ==================================== RENDERING ===========================================
 
@@ -240,44 +157,28 @@ handleAction action = handleError $
       deleteNote storageId
       refreshNotes
 
-handleError :: ErrorNoteAppM Unit -> NoteAppM Unit
-handleError m = do
-  res <- runExceptT m
-  either logShow pure res
-
 updateNoteWithSaveAndRefreshNotes :: forall a. Int -> Lens' Note a -> a -> ErrorNoteAppM Unit
 updateNoteWithSaveAndRefreshNotes idx lens_ newVal = do
   oldNotes <- gets _.notes
   let
-    modifiedNote = index (snoc oldNotes newNote) idx >>= ((lens_ .~ newVal) >>> pure)
+    modifiedNote = updateAtWithDefault idx newNote (lens_ .~ newVal) oldNotes
   maybe (throwError $ CustomFatalError "Unable to modify note at index ")
         writeAndRefreshThenStopEditing
         modifiedNote
   where
     writeAndRefreshThenStopEditing :: Note -> ErrorNoteAppM Unit
     writeAndRefreshThenStopEditing note = do
-      resp <- writeToServer note
-      if unwrap resp.status >= 300 || unwrap resp.status < 200
-        then throwError $ CustomFatalError $ "Wrong status response for post note: " <> show resp.status
-        else refreshNotes
+      saveAndRefresh writeToServer refreshNotes "note" note
       lift $ modify_ \st -> st { editingState = None }
 
 goInput :: Int -> ErrorNoteAppM Unit
 goInput idx = do
   noteElem <- getRef $ "note-" <> show idx
-  scrollTo noteElem
+  liftEffect $ scrollToCenter noteElem
   titleElem <- focusTitle noteElem
-  maybe (throwError $ CustomFatalError $ "unable to get input element from title element") (liftEffect <<< select) $ InputElement.fromElement titleElem
-
-scrollTo :: Element -> ErrorNoteAppM Unit
-scrollTo e = do
-  w <- liftEffect window
-  rect <- liftEffect $ getBoundingClientRect e
-  liftEffect $ log $ "client rect: " <> show rect.y
-  let elemMiddle = floor $ rect.y + rect.height / toNumber 2
-  vh <- liftEffect $ innerHeight w
-  liftEffect $ log $ "scrolling to " <> show (elemMiddle - vh / 2)
-  liftEffect $ scroll 0 (max 0 (elemMiddle - vh / 2)) w
+  ok <- liftEffect $ selectInputElement titleElem
+  if ok then pure unit
+  else throwError $ CustomFatalError $ unableToGetInputElement "title"
 
 refreshNotes :: ErrorNoteAppM Unit
 refreshNotes = do
@@ -286,64 +187,29 @@ refreshNotes = do
 
 getNotes :: ErrorNoteAppM (Array Note)
 getNotes = do
-  jsonResponse <- withExceptT toFatalError $ ExceptT $ liftAff $ Affjax.get json "/api/note"
+  jsonResponse <- withExceptT toFatalError $ ExceptT $ liftAff getNotesResponse
   (_.body >>> decodeJson >>> lmap toFatalError >>> pure >>> ExceptT) jsonResponse
 
 deleteNote :: StorageId -> ErrorNoteAppM Unit
-deleteNote { id } = do
-  jsonResponse <- withExceptT toFatalError $ ExceptT $ liftAff $ delete json ("/api/note/" <> id)
+deleteNote storageId@{ id } = do
+  jsonResponse <- withExceptT toFatalError $ ExceptT $ liftAff $ deleteNoteResponse storageId
   if unwrap jsonResponse.status < 200 || unwrap jsonResponse.status >= 300
-    then (throwError $ CustomFatalError $ "Wrong status code when deleting note " <> id <> ": " <> show jsonResponse.status)
+    then throwError $ CustomFatalError $ wrongStatusDelete "note" id jsonResponse.status
     else pure unit
 
-isCreate :: Note -> Boolean
-isCreate (NewNote _) = true
-isCreate (ServerNote _) = false
-
 writeToServer :: Note -> ErrorNoteAppM (Response Json)
-writeToServer note = withExceptT toFatalError $ ExceptT $ liftAff $ writeFunc json "/api/note" ((pure <<< Json <<< encodeJson) note)
-  where
-    writeFunc = if isCreate note then post else put
-
--- ====================== ERRORS ==============================================
-data FatalError = DecodeError JsonDecodeError
-                | NetworkError Error
-                | CustomFatalError String
-
-instance fatalErrorShowInstance :: Show FatalError where
-  show (DecodeError err) = "DecodeError: " <> show err
-  show (NetworkError err) = "NetworkError: " <> printError err
-  show (CustomFatalError err) = "CustomError: " <> err
-
-instance fatalErrorSemigroupInstance :: Semigroup FatalError where
-  append _ last = last
-
-instance jsonDecodeErrorToFatalErrorInstance :: ToFatalError JsonDecodeError where
-  toFatalError = DecodeError
-
-instance affjaxErrorToFatalErrorInstance :: ToFatalError Error where
-  toFatalError = NetworkError
-
-class ToFatalError a where
-  toFatalError :: a -> FatalError
+writeToServer note = withExceptT toFatalError $ ExceptT $ liftAff $ writeNoteResponse note
 
 -- ============================  Web manipulation wrapper ==================================
 getRef :: String -> ErrorNoteAppM Element
 getRef refStr = do
   ref <- lift $ H.getRef (wrap refStr) 
-  maybe (throwError $ CustomFatalError $ "cannot get ref " <> refStr) pure ref
+  maybe (throwError $ CustomFatalError $ cannotGetRef refStr) pure ref
 
 focusTitle :: Element -> ErrorNoteAppM Element
 focusTitle noteElem = do
-  title <- (getElementByClassName "title-input" noteElem) <|> (getElementByClassName "content-input" noteElem)
-  focusElement title
-  pure title
-
-getElementByClassName :: String -> Element -> ErrorNoteAppM Element
-getElementByClassName className element = do
-  title <- liftEffect $ getElementsByClassName className element >>= item 0
-  maybe (throwError $ CustomFatalError $ "unable to get note title") pure title
-
-focusElement :: Element -> ErrorNoteAppM Unit
-focusElement elem =
-  maybe (throwError $ CustomFatalError $ "cannot convert element to HTML element") liftEffect $ (HTMLElement.fromElement elem >>= (pure <<< HTMLElement.focus))
+  title <- liftEffect $ findElementByClassNames [ "title-input", "content-input" ] noteElem
+  elem <- maybe (throwError $ CustomFatalError $ unableToGetElement "note title") pure title
+  ok <- liftEffect $ focusElement elem
+  if ok then pure elem
+  else throwError $ CustomFatalError cannotConvertElement

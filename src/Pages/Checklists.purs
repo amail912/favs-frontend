@@ -1,49 +1,36 @@
-module Pages.Checklists (component, Checklist(..), ChecklistContent, ChecklistItem(..), StorageId, removeChecklistItem) where
+module Pages.Checklists (component, removeChecklistItem, module Domain.Checklists) where
 
 import Prelude hiding (div)
 
-import Affjax (Error, printError)
-import Affjax.RequestBody (RequestBody(..))
-import Affjax.ResponseFormat (json)
-import Affjax.Web (Response, delete, post, put)
-import Affjax.Web (get) as Affjax
-import Control.Alt ((<|>))
+import Affjax.Web (Response)
+import Api.Checklists (deleteChecklistResponse, getChecklistsResponse, writeChecklistResponse)
 import Control.Monad.Error.Class (throwError)
-import Control.Monad.Except (ExceptT(..), runExceptT, withExceptT)
+import Control.Monad.Except (ExceptT(..), withExceptT)
 import Control.Monad.RWS (get, gets, modify_)
 import Control.Monad.Trans.Class (lift)
-import Data.Argonaut.Core (Json, jsonEmptyObject)
-import Data.Argonaut.Decode (class DecodeJson, JsonDecodeError, decodeJson, (.:))
-import Data.Argonaut.Encode (class EncodeJson, encodeJson, (:=), (~>))
-import Data.Array (deleteAt, index, length, mapWithIndex, null, snoc)
+import Data.Argonaut.Core (Json)
+import Data.Argonaut.Decode (decodeJson)
+import Data.Array (deleteAt, length, mapWithIndex, null, snoc)
 import Data.Bifunctor (lmap)
-import Data.Either (Either, either)
-import Data.Generic.Rep (class Generic)
-import Data.Int (floor, toNumber)
 import Data.Lens (Lens', Traversal', lens, lens', (.~), (^.), (^?))
 import Data.Lens.Index (ix)
 import Data.Maybe (Maybe, maybe)
 import Data.Newtype (unwrap, wrap)
-import Data.Show.Generic (genericShow)
 import Data.Tuple (Tuple(..))
 import Effect.Aff (Aff)
 import Effect.Aff.Class (liftAff)
 import Effect.Class (liftEffect)
-import Effect.Class.Console (log, logShow)
-import Foreign.Object (Object)
+import Domain.Checklists (Checklist(..), ChecklistContent, ChecklistItem(..), StorageId, newChecklist)
 import Halogen (Component, ComponentHTML, HalogenM, defaultEval, getRef, mkComponent, mkEval, put) as H
 import Halogen.HTML (HTML, button, div, h2, header, i, input, li, section, span, text, ul)
 import Halogen.HTML.Events (onBlur, onClick, onValueChange)
 import Halogen.HTML.Properties (ButtonType(..), ref, type_, value)
+import Ui.ErrorMessages (cannotConvertElement, cannotGetRef, unableToGetElement, unableToGetInputElement, wrongStatusDelete)
+import Ui.Errors (FatalError(..), handleError, toFatalError)
+import Ui.Focus (findElementByClassNames, focusElement, scrollToCenter, selectInputElement)
+import Ui.PageFlow (saveAndRefresh, updateAtWithDefault)
 import Ui.Utils (class_)
 import Web.DOM (Element)
-import Web.DOM.Element (getBoundingClientRect, getElementsByClassName)
-import Web.DOM.HTMLCollection (item)
-import Web.HTML (window)
-import Web.HTML.HTMLElement (focus, fromElement) as HTMLElement
-import Web.HTML.HTMLInputElement (fromElement) as InputElement
-import Web.HTML.HTMLInputElement (select)
-import Web.HTML.Window (innerHeight, scroll)
 
 type NoOutput = Void
 type ChecklistAppM = H.HalogenM State Action () NoOutput Aff
@@ -55,18 +42,6 @@ type State = { checklists :: Array Checklist
 data EditingState = None
                   | EditingChecklistName Int
                   | EditingChecklistContent Int Int
-
-data Checklist = NewChecklist { content   :: ChecklistContent }
-          | ServerChecklist { content   :: ChecklistContent
-                       , storageId :: StorageId }
-
-derive instance checklistGenericInstance :: Generic Checklist _
-derive instance checklistEqInstance :: Eq Checklist
-instance checklistShowInstance :: Show Checklist where
-  show = genericShow
-
-derive newtype instance checklistItemEqInstance :: Eq ChecklistItem
-derive newtype instance checklistItemShowInstance :: Show ChecklistItem
 
 _content  :: Lens' Checklist ChecklistContent
 _content = lens' $ (\checklist -> Tuple (getContent checklist) (setContent checklist))
@@ -88,86 +63,6 @@ _checklistItems = _content <<< (lens _.items $ _ { items = _ })
 
 _label :: Lens' ChecklistItem String
 _label = lens' $ (\(ChecklistItem { label, checked }) -> Tuple label (\newLabel -> ChecklistItem { label: newLabel, checked: checked }))
-
-instance checklistDecodeJsonInstance :: DecodeJson Checklist where
-  decodeJson :: Json -> Either JsonDecodeError Checklist
-  decodeJson json = decodeWrappedChecklist json <|> decodeFlatNewChecklist json
-    where
-      decodeWrappedChecklist :: Json -> Either JsonDecodeError Checklist
-      decodeWrappedChecklist wrappedJson = do
-        dec <- decodeJson wrappedJson
-        content <- dec .: "content"
-        name <- content .: "name"
-        items <- content .: "items"
-        either (const $ pure $ NewChecklist { content: { name: name, items: items } })
-               (decodeServerChecklist name items)
-               (dec .: "storageId")
-
-      decodeFlatNewChecklist :: Json -> Either JsonDecodeError Checklist
-      decodeFlatNewChecklist flatJson = do
-        dec <- decodeJson flatJson
-        name <- dec .: "name"
-        items <- dec .: "items"
-        pure $ NewChecklist { content: { name: name, items: items } }
-
-      decodeServerChecklist :: String -> Array ChecklistItem -> Object Json -> Either JsonDecodeError Checklist
-      decodeServerChecklist name items storageIdObj = do
-        version <- storageIdObj .: "version"
-        id <- storageIdObj .: "id"
-        pure $ ServerChecklist { content: { name: name, items: items }
-                          , storageId: { version: version, id: id }}
-
-instance checklistEncodeJson :: EncodeJson Checklist where
-  encodeJson :: Checklist -> Json
-  encodeJson (NewChecklist { content: checklistContent }) =
-    encodeContentObj checklistContent
-  encodeJson (ServerChecklist { content: checklistContent, storageId: { version, id }}) =
-    cont ~> storage ~> jsonEmptyObject
-    where
-      cont :: Tuple String Json
-      cont = "content" := encodeContentObj checklistContent
-      storage :: Tuple String Json
-      storage = "storageId" := encodeStorageIdObj id version
-
-instance checklistItemEncodeJson :: EncodeJson ChecklistItem where
-  encodeJson :: ChecklistItem -> Json
-  encodeJson (ChecklistItem { label, checked }) = 
-    "label" := label
-      ~> "checked" := checked
-      ~> jsonEmptyObject
-
-instance checklistItemDecodeJson :: DecodeJson ChecklistItem where
-  decodeJson :: Json -> Either JsonDecodeError ChecklistItem 
-  decodeJson json = do
-    dec <- decodeJson json
-    label <- dec .: "label"
-    checked <- dec .: "checked"
-    pure $ ChecklistItem { label: label, checked: checked }
-
-encodeContentObj :: ChecklistContent -> Json
-encodeContentObj { name, items } =
-  "name" := name
-    ~> "items" := items
-    ~> jsonEmptyObject
-
-encodeStorageIdObj :: String -> String -> Json
-encodeStorageIdObj id version =
-  "id" := id
-    ~> "version" := version
-    ~> jsonEmptyObject
-
-type ChecklistId = Maybe { version :: String, id :: String }
-             -- ^ The Nothing value represents the id of the NewChecklist
-type ChecklistContent = { name  :: String
-                        , items :: Array ChecklistItem
-                        }
-
-newtype ChecklistItem = ChecklistItem { label   :: String
-                                      , checked :: Boolean
-                                      }
-
-
-type StorageId = { version :: String, id :: String }
 
 data Action = Initialize
             | CreateNewChecklist
@@ -191,10 +86,6 @@ component =
 
 initialState :: forall i. i -> State
 initialState = const { checklists: [], editingState: None }
-
-newChecklist :: Checklist
-newChecklist = NewChecklist { content: { name: "What's your new name?", items: [ ChecklistItem { label: "What's your new label?"
-                                                                                               , checked: false } ] } }
 
 -- ==================================== RENDERING ===========================================
 
@@ -286,11 +177,6 @@ handleAction action = handleError $
             retrievedChecklist
 
 
-handleError :: ErrorChecklistAppM Unit -> ChecklistAppM Unit
-handleError m = do
-  res <- runExceptT m
-  either logShow pure res
-
 deleteChecklistItem :: Int -> Checklist -> ErrorChecklistAppM Unit
 deleteChecklistItem itemIdx checklist =
   maybe (throwError $ CustomFatalError ("Unable to remove checklist item at index " <> show itemIdx))
@@ -306,17 +192,14 @@ removeChecklistItem itemIdx (ServerChecklist { content: { name, items }, storage
   pure $ ServerChecklist { content: { name, items: newItems }, storageId }
 
 saveChecklistAndRefresh :: Checklist -> ErrorChecklistAppM Unit
-saveChecklistAndRefresh checklist = do
-  resp <- writeToServer checklist
-  if unwrap resp.status >= 300 || unwrap resp.status < 200
-    then throwError $ CustomFatalError $ "Wrong status response for post checklist: " <> show resp.status
-    else refreshChecklists
+saveChecklistAndRefresh checklist =
+  saveAndRefresh writeToServer refreshChecklists "checklist" checklist
 
 updateChecklistWithSaveAndRefreshChecklists :: forall a. Int -> Traversal' Checklist a -> a -> ErrorChecklistAppM Unit
 updateChecklistWithSaveAndRefreshChecklists idx lens_ newVal = do
   oldChecklists <- gets _.checklists
   let
-    modifiedChecklist = index (snoc oldChecklists newChecklist) idx >>= ((lens_ .~ newVal) >>> pure)
+    modifiedChecklist = updateAtWithDefault idx newChecklist (lens_ .~ newVal) oldChecklists
   maybe (throwError $ CustomFatalError "Unable to modify checklist at index ")
         writeAndRefreshThenStopEditing
         modifiedChecklist
@@ -329,19 +212,11 @@ updateChecklistWithSaveAndRefreshChecklists idx lens_ newVal = do
 goInput :: Int -> ErrorChecklistAppM Unit
 goInput idx = do
   checklistElem <- getRef $ "checklist-" <> show idx
-  scrollTo checklistElem
+  liftEffect $ scrollToCenter checklistElem
   nameElem <- focusName checklistElem
-  maybe (throwError $ CustomFatalError $ "unable to get input element from name element") (liftEffect <<< select) $ InputElement.fromElement nameElem
-
-scrollTo :: Element -> ErrorChecklistAppM Unit
-scrollTo e = do
-  w <- liftEffect window
-  rect <- liftEffect $ getBoundingClientRect e
-  liftEffect $ log $ "client rect: " <> show rect.y
-  let elemMiddle = floor $ rect.y + rect.height / toNumber 2
-  vh <- liftEffect $ innerHeight w
-  liftEffect $ log $ "scrolling to " <> show (elemMiddle - vh / 2)
-  liftEffect $ scroll 0 (max 0 (elemMiddle - vh / 2)) w
+  ok <- liftEffect $ selectInputElement nameElem
+  if ok then pure unit
+  else throwError $ CustomFatalError $ unableToGetInputElement "name"
 
 refreshChecklists :: ErrorChecklistAppM Unit
 refreshChecklists = do
@@ -350,64 +225,29 @@ refreshChecklists = do
 
 getChecklists :: ErrorChecklistAppM (Array Checklist)
 getChecklists = do
-  jsonResponse <- withExceptT toFatalError $ ExceptT $ liftAff $ Affjax.get json "/api/checklist"
+  jsonResponse <- withExceptT toFatalError $ ExceptT $ liftAff getChecklistsResponse
   (_.body >>> decodeJson >>> lmap toFatalError >>> pure >>> ExceptT) jsonResponse
 
 deleteChecklist :: StorageId -> ErrorChecklistAppM Unit
-deleteChecklist { id } = do
-  jsonResponse <- withExceptT toFatalError $ ExceptT $ liftAff $ delete json ("/api/checklist/" <> id)
+deleteChecklist storageId@{ id } = do
+  jsonResponse <- withExceptT toFatalError $ ExceptT $ liftAff $ deleteChecklistResponse storageId
   if unwrap jsonResponse.status < 200 || unwrap jsonResponse.status >= 300
-    then (throwError $ CustomFatalError $ "Wrong status code when deleting checklist " <> id <> ": " <> show jsonResponse.status)
+    then throwError $ CustomFatalError $ wrongStatusDelete "checklist" id jsonResponse.status
     else pure unit
 
-isCreate :: Checklist -> Boolean
-isCreate (NewChecklist _) = true
-isCreate (ServerChecklist _) = false
-
 writeToServer :: Checklist -> ErrorChecklistAppM (Response Json)
-writeToServer checklist = withExceptT toFatalError $ ExceptT $ liftAff $ writeFunc json "/api/checklist" ((pure <<< Json <<< encodeJson) checklist)
-  where
-    writeFunc = if isCreate checklist then post else put
-
--- ====================== ERRORS ==============================================
-data FatalError = DecodeError JsonDecodeError
-                | NetworkError Error
-                | CustomFatalError String
-
-instance fatalErrorShowInstance :: Show FatalError where
-  show (DecodeError err) = "DecodeError: " <> show err
-  show (NetworkError err) = "NetworkError: " <> printError err
-  show (CustomFatalError err) = "CustomError: " <> err
-
-instance fatalErrorSemigroupInstance :: Semigroup FatalError where
-  append _ last = last
-
-instance jsonDecodeErrorToFatalErrorInstance :: ToFatalError JsonDecodeError where
-  toFatalError = DecodeError
-
-instance affjaxErrorToFatalErrorInstance :: ToFatalError Error where
-  toFatalError = NetworkError
-
-class ToFatalError a where
-  toFatalError :: a -> FatalError
+writeToServer checklist = withExceptT toFatalError $ ExceptT $ liftAff $ writeChecklistResponse checklist
 
 -- ============================  Web manipulation wrapper ==================================
 getRef :: String -> ErrorChecklistAppM Element
 getRef refStr = do
   ref <- lift $ H.getRef (wrap refStr) 
-  maybe (throwError $ CustomFatalError $ "cannot get ref " <> refStr) pure ref
+  maybe (throwError $ CustomFatalError $ cannotGetRef refStr) pure ref
 
 focusName :: Element -> ErrorChecklistAppM Element
 focusName checklistElem = do
-  name <- (getElementByClassName "name-input" checklistElem) <|> (getElementByClassName "content-input" checklistElem)
-  focusElement name
-  pure name
-
-getElementByClassName :: String -> Element -> ErrorChecklistAppM Element
-getElementByClassName className element = do
-  name <- liftEffect $ getElementsByClassName className element >>= item 0
-  maybe (throwError $ CustomFatalError $ "unable to get checklist name") pure name
-
-focusElement :: Element -> ErrorChecklistAppM Unit
-focusElement elem =
-  maybe (throwError $ CustomFatalError $ "cannot convert element to HTML element") liftEffect $ (HTMLElement.fromElement elem >>= (pure <<< HTMLElement.focus))
+  name <- liftEffect $ findElementByClassNames [ "name-input", "content-input" ] checklistElem
+  elem <- maybe (throwError $ CustomFatalError $ unableToGetElement "checklist name") pure name
+  ok <- liftEffect $ focusElement elem
+  if ok then pure elem
+  else throwError $ CustomFatalError cannotConvertElement
