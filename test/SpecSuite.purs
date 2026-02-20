@@ -2,7 +2,7 @@ module Test.SpecSuite (runSpecSuite) where
 
 import Prelude
 
-import Agenda (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), RecurrenceRule(..), RoutineTemplate, SortMode(..), StepDependency(..), ValidationError(..), applyOfflineMutation, detectConflictGroups, detectConflictIds, durationMinutesBetween, generateOccurrencesForMonth, instantiateRoutine, sortItems, toNewIntention, validateIntention)
+import Agenda (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), RecurrenceRule(..), RoutineTemplate, SortMode(..), StepDependency(..), ValidationError(..), applyOfflineMutation, defaultNotificationDefaults, detectConflictGroups, detectConflictIds, durationMinutesBetween, generateOccurrencesForMonth, instantiateRoutine, reminderTimesForIntention, sortItems, toNewIntention, validateIntention)
 import Checklists (Checklist(..), ChecklistItem(..), removeChecklistItem)
 import Data.Argonaut.Decode (decodeJson)
 import Data.Argonaut.Encode (encodeJson)
@@ -250,6 +250,52 @@ runSpecSuite = runSpec [ consoleReporter ] do
 
     it "computes duration between window start and end" do
       durationMinutesBetween "2026-02-19T09:00" "2026-02-19T10:30" `shouldEqual` Just 90
+
+    it "computes default reminders for an intention" do
+      let
+        content =
+          { itemType: Intention
+          , title: "Notif"
+          , windowStart: "2026-02-19T09:00"
+          , windowEnd: "2026-02-20T12:00"
+          , status: Todo
+          , sourceItemId: Nothing
+          , actualDurationMinutes: Nothing
+          , category: Nothing
+          , recurrenceRule: Nothing
+          , recurrenceExceptionDates: []
+          }
+        reminders = reminderTimesForIntention defaultNotificationDefaults Nothing content
+      reminders `shouldEqual`
+        [ { label: "Jour de debut", at: "2026-02-19T06:00" }
+        , { label: "24h avant fin", at: "2026-02-19T12:00" }
+        ]
+
+    it "computes overridden reminders for an intention" do
+      let
+        content =
+          { itemType: Intention
+          , title: "Notif"
+          , windowStart: "2026-02-19T09:00"
+          , windowEnd: "2026-02-20T12:00"
+          , status: Todo
+          , sourceItemId: Nothing
+          , actualDurationMinutes: Nothing
+          , category: Nothing
+          , recurrenceRule: Nothing
+          , recurrenceExceptionDates: []
+          }
+        override =
+          Just
+            { itemId: "x"
+            , startDayTime: Just "08:30"
+            , beforeEndHours: Just 12
+            }
+        reminders = reminderTimesForIntention defaultNotificationDefaults override content
+      reminders `shouldEqual`
+        [ { label: "Jour de debut", at: "2026-02-19T08:30" }
+        , { label: "12h avant fin", at: "2026-02-20T00:00" }
+        ]
 
     it "sorts items by status" do
       let
