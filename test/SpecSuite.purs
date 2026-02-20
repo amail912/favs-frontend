@@ -2,7 +2,7 @@ module Test.SpecSuite (runSpecSuite) where
 
 import Prelude
 
-import Agenda (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), RecurrenceRule(..), RoutineTemplate, SortMode(..), StepDependency(..), ValidationError(..), applyOfflineMutation, defaultNotificationDefaults, detectConflictGroups, detectConflictIds, durationMinutesBetween, generateOccurrencesForMonth, instantiateRoutine, reminderTimesForIntention, sortItems, toNewIntention, validateIntention)
+import Agenda (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), RecurrenceRule(..), RoutineTemplate, SortMode(..), StepDependency(..), ValidationError(..), addTemplate, applyOfflineMutation, applyTemplateToDraft, defaultNotificationDefaults, detectConflictGroups, detectConflictIds, durationMinutesBetween, generateOccurrencesForMonth, instantiateRoutine, reminderTimesForIntention, removeTemplate, sortItems, templateSummary, toNewIntention, updateTemplate, validateIntention)
 import Checklists (Checklist(..), ChecklistItem(..), removeChecklistItem)
 import Data.Argonaut.Decode (decodeJson)
 import Data.Argonaut.Encode (encodeJson)
@@ -296,6 +296,50 @@ runSpecSuite = runSpec [ consoleReporter ] do
         [ { label: "Jour de debut", at: "2026-02-19T08:30" }
         , { label: "12h avant fin", at: "2026-02-20T00:00" }
         ]
+
+    it "applies a template to a draft" do
+      let
+        template =
+          { id: "tpl-1"
+          , title: "Template"
+          , durationMinutes: 45
+          , category: "Deep"
+          }
+        draft = applyTemplateToDraft template "2026-02-19T09:00" "2026-02-19T09:45"
+      draft.title `shouldEqual` "Template"
+      draft.category `shouldEqual` "Deep"
+      draft.windowStart `shouldEqual` "2026-02-19T09:00"
+      draft.windowEnd `shouldEqual` "2026-02-19T09:45"
+
+    it "adds, updates, and removes templates" do
+      let
+        template =
+          { id: ""
+          , title: "Morning"
+          , durationMinutes: 30
+          , category: "Rituel"
+          }
+        added = addTemplate template []
+      case head added of
+        Just first -> do
+          first.id `shouldEqual` "tpl-1"
+          let
+            updated = updateTemplate (first { title = "Updated" }) added
+          case head updated of
+            Just updatedFirst -> updatedFirst.title `shouldEqual` "Updated"
+            Nothing -> fail "Expected updated template"
+          removeTemplate first.id updated `shouldEqual` []
+        Nothing -> fail "Expected added template"
+
+    it "summarizes a template" do
+      let
+        template =
+          { id: "tpl-1"
+          , title: "Summary"
+          , durationMinutes: 90
+          , category: "Focus"
+          }
+      templateSummary template `shouldEqual` "90 min • Focus"
 
     it "sorts items by status" do
       let
