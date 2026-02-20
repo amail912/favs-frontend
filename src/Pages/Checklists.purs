@@ -1,4 +1,4 @@
-module Checklists (component, Checklist(..), ChecklistContent, ChecklistItem(..), StorageId, removeChecklistItem) where
+module Pages.Checklists (component, Checklist(..), ChecklistContent, ChecklistItem(..), StorageId, removeChecklistItem) where
 
 import Prelude hiding (div)
 
@@ -35,7 +35,7 @@ import Halogen (Component, ComponentHTML, HalogenM, defaultEval, getRef, mkCompo
 import Halogen.HTML (HTML, button, div, h2, header, i, input, li, section, span, text, ul)
 import Halogen.HTML.Events (onBlur, onClick, onValueChange)
 import Halogen.HTML.Properties (ButtonType(..), ref, type_, value)
-import Utils (class_)
+import Ui.Utils (class_)
 import Web.DOM (Element)
 import Web.DOM.Element (getBoundingClientRect, getElementsByClassName)
 import Web.DOM.HTMLCollection (item)

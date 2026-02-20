@@ -1,4 +1,4 @@
-module App (component) where
+module Pages.App (component) where
 
 import Prelude hiding (div, (/))
 
@@ -6,8 +6,8 @@ import Affjax.Web (Response, post)
 import Affjax.Web as AffjaxWeb
 import Affjax.RequestBody (RequestBody(..))
 import Affjax.ResponseFormat (string)
-import Agenda (component) as Agenda
-import Checklists (component) as Checklists
+import Pages.Agenda (component) as Agenda
+import Pages.Checklists (component) as Checklists
 import Control.Monad.RWS (get, modify_)
 import Data.Array (head)
 import DOM.HTML.Indexed.ButtonType (ButtonType(..))
@@ -35,13 +35,13 @@ import Halogen.HTML (HTML, a, div, h1, nav, slot, slot_, text, form, label, inpu
 import Halogen.HTML.Events (onClick, onValueChange, onSubmit)
 import Halogen.HTML.Properties (for, type_, name, placeholder, id, value, disabled)
 import Halogen.Subscription (create, notify)
-import Notes (component) as Notes
+import Pages.Notes (component) as Notes
 import Routing.Duplex (RouteDuplex', root, parse, print)
 import Routing.Duplex.Generic (noArgs, sum)
 import Routing.Duplex.Generic.Syntax ((/))
 import Routing.PushState (PushStateInterface, makeInterface, matchesWith)
 import Type.Prelude (Proxy(..))
-import Utils (class_)
+import Ui.Utils (class_)
 import Web.Event.Event (Event, preventDefault)
 
 type OpaqueSlot slot = forall query. H.Slot query Void slot

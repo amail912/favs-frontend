@@ -1,4 +1,4 @@
-module Notes (component, Note(..), NoteContent, StorageId, newNote) where
+module Pages.Notes (component, Note(..), NoteContent, StorageId, newNote) where
 
 import Prelude hiding (div)
 
@@ -34,7 +34,7 @@ import Halogen (Component, ComponentHTML, HalogenM, defaultEval, getRef, mkCompo
 import Halogen.HTML (HTML, button, div, h2, header, i, input, li, section, text, textarea, ul)
 import Halogen.HTML.Events (onBlur, onClick, onValueChange)
 import Halogen.HTML.Properties (ref, value)
-import Utils (class_)
+import Ui.Utils (class_)
 import Web.DOM (Element)
 import Web.DOM.Element (getBoundingClientRect, getElementsByClassName)
 import Web.DOM.HTMLCollection (item)

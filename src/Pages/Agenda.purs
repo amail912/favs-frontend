@@ -1,47 +1,16 @@
-module Agenda
+module Pages.Agenda
   ( component
-  , CalendarItem(..)
-  , CalendarItemContent
-  , IntentionDraft
-  , ItemStatus(..)
-  , ItemType(..)
-  , NotificationDefaults
-  , NotificationOverride
-  , ReminderTime
-  , TaskTemplate
-  , TemplateDraft
-  , CsvImportError
-  , CsvImportResult
-  , IcsImportError
-  , IcsImportResult
-  , ExportFormat(..)
-  , ExportFilter
-  , SortMode(..)
-  , RecurrenceRule(..)
-  , StepDependency(..)
-  , RoutineTemplate
-  , RoutineTemplateStep
-  , RoutineInstance
-  , RoutineInstanceStep
-  , ValidationError(..)
   , applyOfflineMutation
   , durationMinutesBetween
   , detectConflictGroups
   , detectConflictIds
   , generateOccurrencesForMonth
   , instantiateRoutine
-  , defaultNotificationDefaults
-  , emptyTemplateDraft
   , applyTemplateToDraft
   , addTemplate
   , updateTemplate
   , removeTemplate
   , templateSummary
-  , parseCsvImport
-  , parseIcsImport
-  , filterItemsForExport
-  , exportItemsToCsv
-  , exportItemsToIcs
   , reminderTimesForIntention
   , sortItems
   , toNewIntention
@@ -61,10 +30,10 @@ import Control.Monad.Except (ExceptT(..), runExceptT, withExceptT)
 import Control.Monad.RWS (get, modify_)
 import Control.Monad.Trans.Class (lift)
 import Data.Argonaut.Core (Json, jsonEmptyObject)
-import Data.Argonaut.Decode (class DecodeJson, decodeJson, (.:), (.:?))
-import Data.Argonaut.Decode.Error (JsonDecodeError(..))
-import Data.Argonaut.Encode (class EncodeJson, encodeJson, (:=), (~>))
-import Data.Array (catMaybes, elem, filter, find, findIndex, foldM, index, last, length, mapMaybe, mapWithIndex, nub, null, sortBy, uncons)
+import Data.Argonaut.Decode (decodeJson)
+import Data.Argonaut.Decode.Error (JsonDecodeError)
+import Data.Argonaut.Encode (encodeJson, (:=), (~>))
+import Data.Array (catMaybes, elem, filter, find, foldM, index, length, mapMaybe, mapWithIndex, nub, null, sortBy, uncons)
 import Data.Bifunctor (lmap)
 import Data.Either (Either(..), either)
 import Data.Foldable (all, foldl)
@@ -75,8 +44,6 @@ import Data.Newtype (unwrap)
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits as String
 import Data.String.Common as StringCommon
-import Data.String (toLower)
-import Data.String.Pattern (Pattern(..))
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Data.Date (Date, canonicalDate, day, exactDate, month, year)
 import Data.DateTime (DateTime(..), adjust, date, diff, time)
@@ -93,189 +60,52 @@ import Halogen (Component, ComponentHTML, HalogenM, defaultEval, mkComponent, mk
 import Halogen.HTML (HTML, button, div, h2, input, li, option, section, select, text, textarea, ul)
 import Halogen.HTML.Events (onClick, onDragEnd, onDragOver, onDragStart, onDrop, onValueChange)
 import Halogen.HTML.Properties (IProp, draggable, placeholder, type_, value)
-import Utils (class_)
+import Ui.Utils (class_)
 import Web.Event.Event (preventDefault)
 import Web.HTML.Event.DragEvent (DragEvent, toEvent)
+import Agenda.Model
+  ( AgendaView(..)
+  , CalendarItem(..)
+  , CalendarItemContent
+  , CsvImportError
+  , CsvImportResult
+  , ExportFormat(..)
+  , IcsImportError
+  , IcsImportResult
+  , IntentionDraft
+  , ItemStatus(..)
+  , ItemType(..)
+  , NotificationDefaults
+  , NotificationOverride
+  , RecurrenceRule(..)
+  , ReminderTime
+  , RoutineInstance
+  , RoutineInstanceStep
+  , RoutineTemplate
+  , RoutineTemplateStep
+  , SortMode(..)
+  , StepDependency(..)
+  , TaskTemplate
+  , TemplateDraft
+  , ValidationError(..)
+  , defaultNotificationDefaults
+  , emptyTemplateDraft
+  )
+import Agenda.Imports (parseCsvImport, parseIcsImport)
+import Agenda.Exports
+  ( exportFormatValue
+  , parseExportFormat
+  , parseExportItemType
+  , parseExportStatus
+  , filterItemsForExport
+  , exportItemsToCsv
+  , exportItemsToIcs
+  )
 
 type NoOutput = Void
 type AgendaAppM = H.HalogenM State Action () NoOutput Aff
 type ErrorAgendaAppM = ExceptT FatalError AgendaAppM
 
-data ItemType = Intention | ScheduledBlock
-derive instance itemTypeGeneric :: Generic ItemType _
-derive instance itemTypeEq :: Eq ItemType
-instance itemTypeShow :: Show ItemType where
-  show = genericShow
-
-data ItemStatus = Todo | EnCours | Fait | Annule
-derive instance itemStatusGeneric :: Generic ItemStatus _
-derive instance itemStatusEq :: Eq ItemStatus
-instance itemStatusShow :: Show ItemStatus where
-  show = genericShow
-
-data RecurrenceRule
-  = RecurrenceDaily
-  | RecurrenceWeekly
-  | RecurrenceMonthly
-  | RecurrenceYearly
-  | RecurrenceEveryXDays Int
-
-derive instance recurrenceRuleGeneric :: Generic RecurrenceRule _
-derive instance recurrenceRuleEq :: Eq RecurrenceRule
-instance recurrenceRuleShow :: Show RecurrenceRule where
-  show = genericShow
-
-data StepDependency
-  = StartAfterEnd { stepId :: String, offsetMinutes :: Int }
-  | StartBeforeStart { stepId :: String, offsetMinutes :: Int }
-
-derive instance stepDependencyGeneric :: Generic StepDependency _
-derive instance stepDependencyEq :: Eq StepDependency
-instance stepDependencyShow :: Show StepDependency where
-  show = genericShow
-
-type RoutineTemplate =
-  { id :: String
-  , name :: String
-  , steps :: Array RoutineTemplateStep
-  }
-
-type RoutineTemplateStep =
-  { id :: String
-  , title :: String
-  , windowStart :: String
-  , windowEnd :: String
-  , dependsOn :: Maybe StepDependency
-  }
-
-type RoutineInstance =
-  { templateId :: String
-  , steps :: Array RoutineInstanceStep
-  }
-
-type RoutineInstanceStep =
-  { id :: String
-  , title :: String
-  , windowStart :: String
-  , windowEnd :: String
-  , sourceStepId :: String
-  }
-
-type CalendarItemContent =
-  { itemType :: ItemType
-  , title :: String
-  , windowStart :: String
-  , windowEnd :: String
-  , status :: ItemStatus
-  , sourceItemId :: Maybe String
-  , actualDurationMinutes :: Maybe Int
-  , category :: Maybe String
-  , recurrenceRule :: Maybe RecurrenceRule
-  , recurrenceExceptionDates :: Array String
-  }
-
-type NotificationDefaults =
-  { startDayTime :: String
-  , beforeEndHours :: Int
-  }
-
-type NotificationOverride =
-  { itemId :: String
-  , startDayTime :: Maybe String
-  , beforeEndHours :: Maybe Int
-  }
-
-type ReminderTime =
-  { label :: String
-  , at :: String
-  }
-
-defaultNotificationDefaults :: NotificationDefaults
-defaultNotificationDefaults =
-  { startDayTime: "06:00"
-  , beforeEndHours: 24
-  }
-
-type TaskTemplate =
-  { id :: String
-  , title :: String
-  , durationMinutes :: Int
-  , category :: String
-  }
-
-type TemplateDraft =
-  { title :: String
-  , durationMinutes :: String
-  , category :: String
-  }
-
-emptyTemplateDraft :: TemplateDraft
-emptyTemplateDraft =
-  { title: ""
-  , durationMinutes: ""
-  , category: ""
-  }
-
-type CsvImportError =
-  { rowNumber :: Int
-  , message :: String
-  }
-
-type CsvImportResult =
-  { items :: Array CalendarItem
-  , errors :: Array CsvImportError
-  }
-
-type IcsImportError =
-  { eventIndex :: Int
-  , message :: String
-  }
-
-type IcsImportResult =
-  { items :: Array CalendarItem
-  , errors :: Array IcsImportError
-  }
-
-data ExportFormat = ExportCSV | ExportICS
-derive instance exportFormatGeneric :: Generic ExportFormat _
-derive instance exportFormatEq :: Eq ExportFormat
-instance exportFormatShow :: Show ExportFormat where
-  show = genericShow
-
-type ExportFilter =
-  { itemType :: Maybe ItemType
-  , status :: Maybe ItemStatus
-  , category :: Maybe String
-  , startDate :: Maybe String
-  , endDate :: Maybe String
-  }
-
-data CalendarItem
-  = NewCalendarItem { content :: CalendarItemContent }
-  | ServerCalendarItem { content :: CalendarItemContent, id :: String }
-
-derive instance calendarItemGeneric :: Generic CalendarItem _
-derive instance calendarItemEq :: Eq CalendarItem
-instance calendarItemShow :: Show CalendarItem where
-  show = genericShow
-
-type IntentionDraft =
-  { title :: String
-  , windowStart :: String
-  , windowEnd :: String
-  , category :: String
-  }
-
-data ValidationError
-  = TitleEmpty
-  | WindowStartInvalid
-  | WindowEndInvalid
-  | WindowOrderInvalid
-
-derive instance validationErrorGeneric :: Generic ValidationError _
-derive instance validationErrorEq :: Eq ValidationError
-instance validationErrorShow :: Show ValidationError where
-  show = genericShow
 
 emptyDraft :: IntentionDraft
 emptyDraft =
@@ -347,128 +177,6 @@ isDateTimeLocal raw =
   isDigitChar :: Char -> Boolean
   isDigitChar ch = ch >= '0' && ch <= '9'
 
-instance itemTypeEncodeJson :: EncodeJson ItemType where
-  encodeJson Intention = encodeJson "INTENTION"
-  encodeJson ScheduledBlock = encodeJson "BLOC_PLANIFIE"
-
-instance itemTypeDecodeJson :: DecodeJson ItemType where
-  decodeJson json = do
-    str <- decodeJson json
-    case str of
-      "INTENTION" -> pure Intention
-      "BLOC_PLANIFIE" -> pure ScheduledBlock
-      _ -> Left $ UnexpectedValue json
-
-instance itemStatusEncodeJson :: EncodeJson ItemStatus where
-  encodeJson Todo = encodeJson "TODO"
-  encodeJson EnCours = encodeJson "EN_COURS"
-  encodeJson Fait = encodeJson "FAIT"
-  encodeJson Annule = encodeJson "ANNULE"
-
-instance itemStatusDecodeJson :: DecodeJson ItemStatus where
-  decodeJson json = do
-    str <- decodeJson json
-    case str of
-      "TODO" -> pure Todo
-      "EN_COURS" -> pure EnCours
-      "FAIT" -> pure Fait
-      "ANNULE" -> pure Annule
-      _ -> Left $ UnexpectedValue json
-
-instance recurrenceRuleEncodeJson :: EncodeJson RecurrenceRule where
-  encodeJson rule =
-    case rule of
-      RecurrenceDaily ->
-        "type" := "DAILY" ~> jsonEmptyObject
-      RecurrenceWeekly ->
-        "type" := "WEEKLY" ~> jsonEmptyObject
-      RecurrenceMonthly ->
-        "type" := "MONTHLY" ~> jsonEmptyObject
-      RecurrenceYearly ->
-        "type" := "YEARLY" ~> jsonEmptyObject
-      RecurrenceEveryXDays interval ->
-        "type" := "EVERY_X_DAYS"
-          ~> "interval_days" := interval
-          ~> jsonEmptyObject
-
-instance recurrenceRuleDecodeJson :: DecodeJson RecurrenceRule where
-  decodeJson json = do
-    obj <- decodeJson json
-    kind <- obj .: "type"
-    case kind of
-      "DAILY" -> pure RecurrenceDaily
-      "WEEKLY" -> pure RecurrenceWeekly
-      "MONTHLY" -> pure RecurrenceMonthly
-      "YEARLY" -> pure RecurrenceYearly
-      "EVERY_X_DAYS" -> RecurrenceEveryXDays <$> obj .: "interval_days"
-      _ -> Left $ UnexpectedValue json
-
-instance calendarItemDecodeJson :: DecodeJson CalendarItem where
-  decodeJson json = do
-    obj <- decodeJson json
-    itemType <- obj .: "type"
-    title <- obj .: "titre"
-    windowStart <- obj .: "fenetre_debut"
-    windowEnd <- obj .: "fenetre_fin"
-    status <- obj .: "statut"
-    sourceItemId <- obj .:? "source_item_id"
-    actualDurationMinutes <- obj .:? "duree_reelle_minutes"
-    category <- obj .:? "categorie"
-    recurrenceRule <- obj .:? "recurrence_rule"
-    recurrenceExceptionDates <- obj .:? "recurrence_exception_dates"
-    let
-      content =
-        { itemType
-        , title
-        , windowStart
-        , windowEnd
-        , status
-        , sourceItemId
-        , actualDurationMinutes
-        , category
-        , recurrenceRule
-        , recurrenceExceptionDates: fromMaybe [] recurrenceExceptionDates
-        }
-    either (const $ pure $ NewCalendarItem { content })
-           (\id -> pure $ ServerCalendarItem { content, id })
-           (obj .: "id")
-
-instance calendarItemEncodeJson :: EncodeJson CalendarItem where
-  encodeJson (NewCalendarItem { content }) =
-    encodeCalendarContent content
-  encodeJson (ServerCalendarItem { content, id }) =
-    "id" := id
-      ~> encodeCalendarContent content
-
-encodeCalendarContent :: CalendarItemContent -> Json
-encodeCalendarContent { itemType, title, windowStart, windowEnd, status, sourceItemId, actualDurationMinutes, category, recurrenceRule, recurrenceExceptionDates } =
-  withRecurrence $ withCategory $ withDuration $ withSourceItem $
-    "type" := itemType
-      ~> "titre" := title
-      ~> "fenetre_debut" := windowStart
-      ~> "fenetre_fin" := windowEnd
-      ~> "statut" := status
-      ~> jsonEmptyObject
-  where
-  withSourceItem base =
-    case sourceItemId of
-      Just sourceId -> "source_item_id" := sourceId ~> base
-      Nothing -> base
-  withDuration base =
-    case actualDurationMinutes of
-      Just minutes -> "duree_reelle_minutes" := minutes ~> base
-      Nothing -> base
-  withCategory base =
-    case category of
-      Just value -> "categorie" := value ~> base
-      Nothing -> base
-  withRecurrence base =
-    case recurrenceRule of
-      Just rule ->
-        "recurrence_rule" := encodeJson rule
-          ~> "recurrence_exception_dates" := recurrenceExceptionDates
-          ~> base
-      Nothing -> base
 
 type State =
   { items :: Array CalendarItem
@@ -1541,27 +1249,6 @@ derive instance resolutionStrategyEq :: Eq ResolutionStrategy
 instance resolutionStrategyShow :: Show ResolutionStrategy where
   show = genericShow
 
-data SortMode
-  = SortByTime
-  | SortByStatus
-  | SortByCategory
-  | SortByConflict
-
-derive instance sortModeGeneric :: Generic SortMode _
-derive instance sortModeEq :: Eq SortMode
-instance sortModeShow :: Show SortMode where
-  show = genericShow
-
-data AgendaView
-  = ViewDay
-  | ViewWeek
-  | ViewMonth
-
-derive instance agendaViewGeneric :: Generic AgendaView _
-derive instance agendaViewEq :: Eq AgendaView
-instance agendaViewShow :: Show AgendaView where
-  show = genericShow
-
 type OfflineMutationResult =
   { items :: Array CalendarItem
   , pending :: Array CalendarItem
@@ -1725,318 +1412,10 @@ nextTemplateId templates =
   in
     findId 1
 
-type CsvHeader =
-  { typeIdx :: Int
-  , titleIdx :: Int
-  , startIdx :: Int
-  , endIdx :: Int
-  , categoryIdx :: Maybe Int
-  , statusIdx :: Maybe Int
-  }
-
-parseCsvImport :: String -> CsvImportResult
-parseCsvImport raw =
-  let
-    lines = map stripCR (StringCommon.split (Pattern "\n") raw)
-    indexed = mapWithIndex (\idx line -> { row: idx + 1, raw: line }) lines
-    nonEmpty = filter (\line -> StringCommon.trim line.raw /= "") indexed
-  in
-    case uncons nonEmpty of
-      Nothing -> { items: [], errors: [ { rowNumber: 1, message: "CSV vide." } ] }
-      Just { head: headerLine, tail: dataLines } ->
-        case resolveCsvHeader headerLine.raw of
-          Left err -> { items: [], errors: [ { rowNumber: headerLine.row, message: err } ] }
-          Right header -> parseCsvRows header dataLines
-
-resolveCsvHeader :: String -> Either String CsvHeader
-resolveCsvHeader rawHeader =
-  let
-    headers = map normalizeHeader (splitCsvLine rawHeader)
-    findFor names = findIndex (\name -> elem name names) headers
-    typeIdx = findFor [ "type" ]
-    titleIdx = findFor [ "titre", "title" ]
-    startIdx = findFor [ "fenetre_debut", "window_start", "start" ]
-    endIdx = findFor [ "fenetre_fin", "window_end", "end" ]
-    categoryIdx = findFor [ "categorie", "category" ]
-    statusIdx = findFor [ "statut", "status" ]
-  in
-    case { typeIdx, titleIdx, startIdx, endIdx } of
-      { typeIdx: Just t, titleIdx: Just ti, startIdx: Just s, endIdx: Just e } ->
-        Right { typeIdx: t, titleIdx: ti, startIdx: s, endIdx: e, categoryIdx, statusIdx }
-      _ ->
-        Left "Colonnes minimales manquantes: type, titre, fenetre_debut, fenetre_fin."
-
-parseCsvRows :: CsvHeader -> Array { row :: Int, raw :: String } -> CsvImportResult
-parseCsvRows header rows =
-  foldl parseRow { items: [], errors: [] } rows
-  where
-  parseRow acc row =
-    let
-      fields = splitCsvLine row.raw
-      fieldAt idx = index fields idx
-    in
-      case { typeVal: fieldAt header.typeIdx
-           , titleVal: fieldAt header.titleIdx
-           , startVal: fieldAt header.startIdx
-           , endVal: fieldAt header.endIdx
-           } of
-        { typeVal: Just typeVal
-        , titleVal: Just titleVal
-        , startVal: Just startVal
-        , endVal: Just endVal
-        } ->
-          case parseCsvItem header fields typeVal titleVal startVal endVal of
-            Left err -> acc { errors = acc.errors <> [ { rowNumber: row.row, message: err } ] }
-            Right item -> acc { items = acc.items <> [ item ] }
-        _ ->
-          acc { errors = acc.errors <> [ { rowNumber: row.row, message: "Colonnes manquantes pour cette ligne." } ] }
-
-parseCsvItem :: CsvHeader -> Array String -> String -> String -> String -> String -> Either String CalendarItem
-parseCsvItem header fields typeVal titleVal startVal endVal = do
-  itemType <- parseCsvItemType typeVal
-  status <- parseCsvStatus (lookupField header.statusIdx fields)
-  let
-    title = StringCommon.trim titleVal
-    windowStart = StringCommon.trim startVal
-    windowEnd = StringCommon.trim endVal
-    category = lookupField header.categoryIdx fields >>= toOptionalString
-  if title == "" then Left "Le titre est vide."
-  else if not (isDateTimeLocal windowStart) then Left "Debut invalide (format YYYY-MM-DDTHH:MM)."
-  else if not (isDateTimeLocal windowEnd) then Left "Fin invalide (format YYYY-MM-DDTHH:MM)."
-  else if windowEnd <= windowStart then Left "La fin doit etre apres le debut."
-  else
-    Right $ NewCalendarItem
-      { content:
-          { itemType
-          , title
-          , windowStart
-          , windowEnd
-          , status
-          , sourceItemId: Nothing
-          , actualDurationMinutes: Nothing
-          , category
-          , recurrenceRule: Nothing
-          , recurrenceExceptionDates: []
-          }
-      }
-
-lookupField :: Maybe Int -> Array String -> Maybe String
-lookupField idx fields = idx >>= \i -> index fields i
-
-parseCsvItemType :: String -> Either String ItemType
-parseCsvItemType raw =
-  case normalizeHeader raw of
-    "intention" -> Right Intention
-    "bloc_planifie" -> Right ScheduledBlock
-    "scheduled_block" -> Right ScheduledBlock
-    _ -> Left "Type invalide (INTENTION ou BLOC_PLANIFIE)."
-
-parseCsvStatus :: Maybe String -> Either String ItemStatus
-parseCsvStatus raw =
-  case raw of
-    Nothing -> Right Todo
-    Just value | StringCommon.trim value == "" -> Right Todo
-    Just value ->
-      case normalizeHeader value of
-        "todo" -> Right Todo
-        "en_cours" -> Right EnCours
-        "fait" -> Right Fait
-        "annule" -> Right Annule
-        _ -> Left "Statut invalide (TODO, EN_COURS, FAIT, ANNULE)."
-
-normalizeHeader :: String -> String
-normalizeHeader = toLower <<< StringCommon.trim
-
 toOptionalString :: String -> Maybe String
 toOptionalString raw =
   let trimmed = StringCommon.trim raw
   in if trimmed == "" then Nothing else Just trimmed
-
-splitCsvLine :: String -> Array String
-splitCsvLine raw =
-  parseChars (String.toCharArray raw) { field: "", fields: [], inQuote: false }
-  where
-  parseChars chars state =
-    case uncons chars of
-      Nothing -> state.fields <> [ state.field ]
-      Just { head, tail } ->
-        if head == '"' then
-          case uncons tail of
-            Just { head: next, tail: rest } | state.inQuote && next == '"' ->
-              parseChars rest state { field = state.field <> String.singleton '"' }
-            _ ->
-              parseChars tail state { inQuote = not state.inQuote }
-        else if head == ',' && not state.inQuote then
-          parseChars tail state { fields = state.fields <> [ state.field ], field = "" }
-        else
-          parseChars tail state { field = state.field <> String.singleton head }
-
-stripCR :: String -> String
-stripCR line =
-  let len = String.length line
-  in if len > 0 && String.charAt (len - 1) line == Just '\r'
-     then String.slice 0 (len - 1) line
-     else line
-
-type IcsEventDraft =
-  { summary :: Maybe String
-  , dtStart :: Maybe String
-  , dtEnd :: Maybe String
-  }
-
-parseIcsImport :: String -> IcsImportResult
-parseIcsImport raw =
-  let
-    lines = map stripCR (StringCommon.split (Pattern "\n") raw)
-    initial =
-      { current: Nothing
-      , items: []
-      , errors: []
-      , index: 0
-      }
-    final = foldl parseIcsLine initial lines
-  in
-    { items: final.items, errors: final.errors }
-  where
-  parseIcsLine state line =
-    case StringCommon.trim line of
-      "BEGIN:VEVENT" ->
-        state { current = Just { summary: Nothing, dtStart: Nothing, dtEnd: Nothing } }
-      "END:VEVENT" ->
-        case state.current of
-          Nothing -> state
-          Just event ->
-            let nextIndex = state.index + 1
-            in case buildIcsItem nextIndex event of
-                Left err -> state { errors = state.errors <> [ err ], current = Nothing, index = nextIndex }
-                Right item -> state { items = state.items <> [ item ], current = Nothing, index = nextIndex }
-      _ ->
-        case state.current of
-          Nothing -> state
-          Just event ->
-            let
-              key = extractIcsKey line
-              value = extractIcsValue line
-              updated =
-                case key of
-                  "SUMMARY" -> event { summary = toOptionalString value }
-                  "DTSTART" -> event { dtStart = Just value }
-                  "DTEND" -> event { dtEnd = Just value }
-                  _ -> event
-            in
-              state { current = Just updated }
-
-buildIcsItem :: Int -> IcsEventDraft -> Either IcsImportError CalendarItem
-buildIcsItem index event = do
-  title <- maybe (Left { eventIndex: index, message: "SUMMARY manquant." }) Right event.summary
-  startRaw <- maybe (Left { eventIndex: index, message: "DTSTART manquant." }) Right event.dtStart
-  endRaw <- maybe (Left { eventIndex: index, message: "DTEND manquant." }) Right event.dtEnd
-  windowStart <- maybe (Left { eventIndex: index, message: "DTSTART invalide." }) Right (parseIcsDateTime startRaw)
-  windowEnd <- maybe (Left { eventIndex: index, message: "DTEND invalide." }) Right (parseIcsDateTime endRaw)
-  if windowEnd <= windowStart then Left { eventIndex: index, message: "La fin doit etre apres le debut." }
-  else
-    Right $ NewCalendarItem
-      { content:
-          { itemType: ScheduledBlock
-          , title
-          , windowStart
-          , windowEnd
-          , status: Todo
-          , sourceItemId: Nothing
-          , actualDurationMinutes: Nothing
-          , category: Nothing
-          , recurrenceRule: Nothing
-          , recurrenceExceptionDates: []
-          }
-      }
-
-extractIcsKey :: String -> String
-extractIcsKey line =
-  case uncons (StringCommon.split (Pattern ":") line) of
-    Nothing -> ""
-    Just { head: first } ->
-      case uncons (StringCommon.split (Pattern ";") first) of
-        Nothing -> ""
-        Just { head: key } -> StringCommon.trim key
-
-extractIcsValue :: String -> String
-extractIcsValue line =
-  fromMaybe "" (last (StringCommon.split (Pattern ":") line))
-
-parseIcsDateTime :: String -> Maybe String
-parseIcsDateTime raw =
-  let
-    trimmed = StringCommon.trim raw
-    cleaned = if endsWithChar 'Z' trimmed then String.slice 0 (String.length trimmed - 1) trimmed else trimmed
-  in
-    if String.length cleaned < 13 then Nothing
-    else if String.charAt 8 cleaned /= Just 'T' then Nothing
-    else
-      let
-        y = String.slice 0 4 cleaned
-        m = String.slice 4 6 cleaned
-        d = String.slice 6 8 cleaned
-        hh = String.slice 9 11 cleaned
-        mm = String.slice 11 13 cleaned
-      in
-        Just $ y <> "-" <> m <> "-" <> d <> "T" <> hh <> ":" <> mm
-  where
-  endsWithChar ch str =
-    let len = String.length str
-    in len > 0 && String.charAt (len - 1) str == Just ch
-
-exportFormatValue :: ExportFormat -> String
-exportFormatValue ExportCSV = "csv"
-exportFormatValue ExportICS = "ics"
-
-parseExportFormat :: String -> ExportFormat
-parseExportFormat raw =
-  if raw == "ics" then ExportICS else ExportCSV
-
-parseExportItemType :: String -> Maybe ItemType
-parseExportItemType raw =
-  case raw of
-    "INTENTION" -> Just Intention
-    "BLOC_PLANIFIE" -> Just ScheduledBlock
-    _ -> Nothing
-
-parseExportStatus :: String -> Maybe ItemStatus
-parseExportStatus raw =
-  case raw of
-    "TODO" -> Just Todo
-    "EN_COURS" -> Just EnCours
-    "FAIT" -> Just Fait
-    "ANNULE" -> Just Annule
-    _ -> Nothing
-
-filterItemsForExport :: ExportFilter -> Array CalendarItem -> Array CalendarItem
-filterItemsForExport criteria items =
-  filter (matchesFilter criteria) items
-
-matchesFilter :: ExportFilter -> CalendarItem -> Boolean
-matchesFilter criteria item =
-  let
-    content = calendarItemContent item
-    matchesType = maybe true (\target -> content.itemType == target) criteria.itemType
-    matchesStatus = maybe true (\target -> content.status == target) criteria.status
-    matchesCategory =
-      case criteria.category of
-        Nothing -> true
-        Just target ->
-          case content.category of
-            Nothing -> false
-            Just value -> normalizeHeader value == normalizeHeader target
-    dateKey = datePart content.windowStart
-    matchesStart =
-      case criteria.startDate of
-        Nothing -> true
-        Just start -> dateKey >= start
-    matchesEnd =
-      case criteria.endDate of
-        Nothing -> true
-        Just end -> dateKey <= end
-  in
-    matchesType && matchesStatus && matchesCategory && matchesStart && matchesEnd
 
 datePart :: String -> String
 datePart raw =
@@ -2100,88 +1479,6 @@ addDaysToDate days date' = do
   newDt <- addDays days dt
   pure $ date newDt
 
-exportItemsToCsv :: Array CalendarItem -> String
-exportItemsToCsv items =
-  let
-    header = "type,titre,fenetre_debut,fenetre_fin,statut,categorie"
-    rows = map exportCsvRow items
-  in
-    StringCommon.joinWith "\n" ([ header ] <> rows)
-
-exportCsvRow :: CalendarItem -> String
-exportCsvRow item =
-  let
-    content = calendarItemContent item
-    category = fromMaybe "" content.category
-  in
-    StringCommon.joinWith "," $
-      map csvEscape
-        [ exportItemType content.itemType
-        , content.title
-        , content.windowStart
-        , content.windowEnd
-        , exportItemStatus content.status
-        , category
-        ]
-
-csvEscape :: String -> String
-csvEscape value =
-  "\"" <> escapeQuotes value <> "\""
-
-escapeQuotes :: String -> String
-escapeQuotes raw =
-  foldl
-    (\acc ch -> if ch == '"' then acc <> "\"\"" else acc <> String.singleton ch)
-    ""
-    (String.toCharArray raw)
-
-exportItemsToIcs :: Array CalendarItem -> String
-exportItemsToIcs items =
-  let
-    header = [ "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//FAVS//EN" ]
-    events = items >>= exportIcsEvent
-  in
-    StringCommon.joinWith "\n" (header <> events <> [ "END:VCALENDAR" ])
-
-exportIcsEvent :: CalendarItem -> Array String
-exportIcsEvent item =
-  let
-    content = calendarItemContent item
-    start = toIcsDateTime content.windowStart
-    end = toIcsDateTime content.windowEnd
-    categoryLine =
-      case content.category of
-        Nothing -> []
-        Just value -> [ "CATEGORIES:" <> value ]
-  in
-    [ "BEGIN:VEVENT"
-    , "SUMMARY:" <> content.title
-    , "DTSTART:" <> start
-    , "DTEND:" <> end
-    ]
-      <> categoryLine
-      <> [ "END:VEVENT" ]
-
-toIcsDateTime :: String -> String
-toIcsDateTime raw =
-  if String.length raw >= 16 then
-    String.slice 0 4 raw <>
-    String.slice 5 7 raw <>
-    String.slice 8 10 raw <>
-    "T" <>
-    String.slice 11 13 raw <>
-    String.slice 14 16 raw
-  else raw
-
-exportItemType :: ItemType -> String
-exportItemType Intention = "INTENTION"
-exportItemType ScheduledBlock = "BLOC_PLANIFIE"
-
-exportItemStatus :: ItemStatus -> String
-exportItemStatus Todo = "TODO"
-exportItemStatus EnCours = "EN_COURS"
-exportItemStatus Fait = "FAIT"
-exportItemStatus Annule = "ANNULE"
 
 isUnplannedIntention :: Array CalendarItem -> CalendarItem -> Boolean
 isUnplannedIntention items item =

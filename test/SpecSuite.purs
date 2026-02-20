@@ -2,8 +2,8 @@ module Test.SpecSuite (runSpecSuite) where
 
 import Prelude
 
-import Agenda (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), RecurrenceRule(..), RoutineTemplate, SortMode(..), StepDependency(..), ValidationError(..), addTemplate, applyOfflineMutation, applyTemplateToDraft, defaultNotificationDefaults, detectConflictGroups, detectConflictIds, durationMinutesBetween, exportItemsToCsv, exportItemsToIcs, filterItemsForExport, generateOccurrencesForMonth, instantiateRoutine, parseCsvImport, parseIcsImport, reminderTimesForIntention, removeTemplate, sortItems, templateSummary, toNewIntention, updateTemplate, validateIntention)
-import Checklists (Checklist(..), ChecklistItem(..), removeChecklistItem)
+import Domain.Agenda (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), RecurrenceRule(..), RoutineTemplate, SortMode(..), StepDependency(..), ValidationError(..), addTemplate, applyOfflineMutation, applyTemplateToDraft, defaultNotificationDefaults, detectConflictGroups, detectConflictIds, durationMinutesBetween, exportItemsToCsv, exportItemsToIcs, filterItemsForExport, generateOccurrencesForMonth, instantiateRoutine, parseCsvImport, parseIcsImport, reminderTimesForIntention, removeTemplate, sortItems, templateSummary, toNewIntention, updateTemplate, validateIntention)
+import Pages.Checklists (Checklist(..), ChecklistItem(..), removeChecklistItem)
 import Data.Argonaut.Decode (decodeJson)
 import Data.Argonaut.Encode (encodeJson)
 import Data.Array (head, length)
@@ -12,7 +12,7 @@ import Data.Maybe (Maybe(..))
 import Data.String.Common as StringCommon
 import Data.String.Pattern (Pattern(..))
 import Effect.Aff (Aff)
-import Notes (Note(..), newNote)
+import Pages.Notes (Note(..), newNote)
 import Test.Spec (describe, it)
 import Test.Spec.Assertions (fail, shouldEqual)
 import Test.Spec.Reporter.Console (consoleReporter)
