@@ -298,6 +298,12 @@ a.nav-link:hover {
   flex-wrap: wrap;
 }
 
+.agenda-view-date-field {
+  display: grid;
+  gap: 0.2rem;
+  align-items: start;
+}
+
 .agenda-view-date {
   max-width: 200px;
 }

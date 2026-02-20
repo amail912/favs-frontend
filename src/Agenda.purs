@@ -1043,7 +1043,7 @@ renderAgendaView viewMode focusDate conflictIds items =
 
 renderRangeView :: forall w. String -> Array String -> Array String -> Array CalendarItem -> HTML w Action
 renderRangeView label dates conflictIds items =
-  if null dates then emptyAgenda
+  if null dates then emptyAgendaRange label
   else
     div [ class_ "agenda-range" ]
       (map (renderDateSection label conflictIds items) dates)
@@ -1060,6 +1060,13 @@ renderDateSection _ conflictIds items dateStr =
           then div [ class_ "agenda-date-empty" ] [ text "Aucun item" ]
           else agendaList conflictIds sorted
       ]
+
+emptyAgendaRange :: forall w i. String -> HTML w i
+emptyAgendaRange label =
+  div [ class_ "row entity-empty agenda-empty" ]
+    [ div [ class_ "entity-empty-title" ] [ text $ "Aucun item sur la " <> label ]
+    , div [ class_ "entity-empty-subtitle" ] [ text "Ajoutez une intention pour demarrer." ]
+    ]
 
 agendaList :: forall w. Array String -> Array CalendarItem -> HTML w Action
 agendaList conflictIds items =
@@ -2459,11 +2466,14 @@ renderViewSelector viewMode focusDate =
             ]
             [ text "Mois" ]
         ]
-    , input
-        [ class_ "form-control agenda-input agenda-view-date"
-        , type_ InputDate
-        , value focusDate
-        , onValueChange FocusDateChanged
+    , div [ class_ "agenda-view-date-field" ]
+        [ div [ class_ "agenda-notifications-label" ] [ text "Date de reference" ]
+        , input
+            [ class_ "form-control agenda-input agenda-view-date"
+            , type_ InputDate
+            , value focusDate
+            , onValueChange FocusDateChanged
+            ]
         ]
     ]
 
