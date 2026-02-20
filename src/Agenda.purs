@@ -10,6 +10,8 @@ module Agenda
   , ReminderTime
   , TaskTemplate
   , TemplateDraft
+  , CsvImportError
+  , CsvImportResult
   , SortMode(..)
   , RecurrenceRule(..)
   , StepDependency(..)
@@ -31,6 +33,7 @@ module Agenda
   , updateTemplate
   , removeTemplate
   , templateSummary
+  , parseCsvImport
   , reminderTimesForIntention
   , sortItems
   , toNewIntention
@@ -53,7 +56,7 @@ import Data.Argonaut.Core (Json, jsonEmptyObject)
 import Data.Argonaut.Decode (class DecodeJson, decodeJson, (.:), (.:?))
 import Data.Argonaut.Decode.Error (JsonDecodeError(..))
 import Data.Argonaut.Encode (class EncodeJson, encodeJson, (:=), (~>))
-import Data.Array (catMaybes, elem, filter, find, foldM, index, length, mapMaybe, mapWithIndex, nub, null, sortBy, uncons)
+import Data.Array (catMaybes, elem, filter, find, findIndex, foldM, index, length, mapMaybe, mapWithIndex, nub, null, sortBy, uncons)
 import Data.Bifunctor (lmap)
 import Data.Either (Either(..), either)
 import Data.Foldable (all, foldl)
@@ -64,6 +67,8 @@ import Data.Newtype (unwrap)
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits as String
 import Data.String.Common as StringCommon
+import Data.String (toLower)
+import Data.String.Pattern (Pattern(..))
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Data.Date (canonicalDate, day, exactDate, month, year)
 import Data.DateTime (DateTime(..), adjust, date, diff, time)
@@ -77,7 +82,7 @@ import Effect.Class (liftEffect)
 import Effect.Class.Console (logShow)
 import Effect.Now (nowDateTime)
 import Halogen (Component, ComponentHTML, HalogenM, defaultEval, mkComponent, mkEval) as H
-import Halogen.HTML (HTML, button, div, h2, input, li, option, section, select, text, ul)
+import Halogen.HTML (HTML, button, div, h2, input, li, option, section, select, text, textarea, ul)
 import Halogen.HTML.Events (onClick, onDragEnd, onDragOver, onDragStart, onDrop, onValueChange)
 import Halogen.HTML.Properties (IProp, draggable, placeholder, type_, value)
 import Utils (class_)
@@ -201,6 +206,16 @@ emptyTemplateDraft =
   { title: ""
   , durationMinutes: ""
   , category: ""
+  }
+
+type CsvImportError =
+  { rowNumber :: Int
+  , message :: String
+  }
+
+type CsvImportResult =
+  { items :: Array CalendarItem
+  , errors :: Array CsvImportError
   }
 
 data CalendarItem
@@ -442,6 +457,8 @@ type State =
   , templates :: Array TaskTemplate
   , templateDraft :: TemplateDraft
   , editingTemplateId :: Maybe String
+  , csvInput :: String
+  , csvImportResult :: Maybe CsvImportResult
   }
 
 data Action
@@ -486,6 +503,10 @@ data Action
   | CancelTemplateEdit
   | DeleteTemplate String
   | UseTemplate String
+  | CsvInputChanged String
+  | ParseCsvInput
+  | ApplyCsvImport
+  | ClearCsvImport
 
 component :: forall q i. H.Component q i NoOutput Aff
 component =
@@ -517,6 +538,8 @@ initialState = const
   , templates: []
   , templateDraft: emptyTemplateDraft
   , editingTemplateId: Nothing
+  , csvInput: ""
+  , csvImportResult: Nothing
   }
 
 handleAction :: Action -> AgendaAppM Unit
@@ -714,6 +737,34 @@ handleAction action = handleError $
           let startStr = formatDateTimeLocal now
           let endStr = fromMaybe startStr (shiftMinutes template.durationMinutes startStr)
           lift $ modify_ \st' -> st' { draft = applyTemplateToDraft template startStr endStr }
+    CsvInputChanged raw ->
+      lift $ modify_ \st -> st { csvInput = raw }
+    ParseCsvInput -> do
+      st <- get
+      let result = parseCsvImport st.csvInput
+      lift $ modify_ _ { csvImportResult = Just result }
+    ApplyCsvImport -> do
+      st <- get
+      case st.csvImportResult of
+        Nothing -> pure unit
+        Just result ->
+          if null result.items then pure unit
+          else if st.offlineMode then do
+            let
+              initial = { items: st.items, pending: st.pendingSync }
+              final = foldl (\acc item -> applyOfflineMutation true item acc.items acc.pending) initial result.items
+            lift $ modify_ _ { items = final.items
+                            , pendingSync = final.pending
+                            , csvInput = ""
+                            , csvImportResult = Nothing
+                            }
+          else
+            lift $ modify_ _ { items = st.items <> result.items
+                            , csvInput = ""
+                            , csvImportResult = Nothing
+                            }
+    ClearCsvImport ->
+      lift $ modify_ _ { csvInput = "", csvImportResult = Nothing }
 
 handleError :: ErrorAgendaAppM Unit -> AgendaAppM Unit
 handleError m = do
@@ -758,7 +809,7 @@ syncPending = do
     else lift $ modify_ _ { syncConflict = Just st.pendingSync }
 
 render :: forall m. State -> H.ComponentHTML Action () m
-render { items, draft, validationError, showConflictsOnly, conflictResolution, offlineMode, syncConflict, validationPanel, sortMode, notificationDefaults, notificationOverrides, notificationPanelOpen, notificationEditor, templates, templateDraft, editingTemplateId } =
+render { items, draft, validationError, showConflictsOnly, conflictResolution, offlineMode, syncConflict, validationPanel, sortMode, notificationDefaults, notificationOverrides, notificationPanelOpen, notificationEditor, templates, templateDraft, editingTemplateId, csvInput, csvImportResult } =
   let
     conflictIds = detectConflictIds items
     conflictGroups = detectConflictGroups items
@@ -785,6 +836,7 @@ render { items, draft, validationError, showConflictsOnly, conflictResolution, o
     , renderForm draft validationError
     , renderNotificationsPanel notificationPanelOpen notificationDefaults notificationOverrides notificationEditor unplannedIntentions
     , renderTemplatesPanel templates templateDraft editingTemplateId
+    , renderCsvImportPanel csvInput csvImportResult
     , if (null sortedItems) then emptyAgenda else agendaList conflictIds sortedItems
     , maybe (text "") (renderConflictResolution items) conflictResolution
     , maybe (text "") renderSyncConflict syncConflict
@@ -1077,6 +1129,50 @@ renderTemplateCard template =
         ]
     ]
 
+renderCsvImportPanel :: forall w. String -> Maybe CsvImportResult -> HTML w Action
+renderCsvImportPanel csvInput result =
+  section [ class_ "agenda-import" ]
+    [ div [ class_ "agenda-import-header" ]
+        [ div [ class_ "agenda-import-title" ] [ text "Import CSV" ]
+        , div [ class_ "agenda-import-subtitle" ]
+            [ text "Colonnes minimales: type, titre, fenetre_debut, fenetre_fin." ]
+        ]
+    , textarea
+        [ class_ "form-control agenda-import-textarea"
+        , placeholder "Collez votre CSV ici..."
+        , value csvInput
+        , onValueChange CsvInputChanged
+        ]
+    , div [ class_ "agenda-import-actions" ]
+        [ button [ class_ "btn btn-sm btn-outline-primary", onClick (const ParseCsvInput) ] [ text "Analyser" ]
+        , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const ClearCsvImport) ] [ text "Effacer" ]
+        , button [ class_ "btn btn-sm btn-success", onClick (const ApplyCsvImport) ] [ text "Ajouter a la liste" ]
+        ]
+    , maybe (text "") renderCsvImportResult result
+    ]
+
+renderCsvImportResult :: forall w. CsvImportResult -> HTML w Action
+renderCsvImportResult result =
+  let
+    okCount = length result.items
+    errorCount = length result.errors
+  in
+    div [ class_ "agenda-import-result" ]
+      [ div [ class_ "agenda-import-summary" ]
+          [ text $ "Valides: " <> show okCount <> " • Erreurs: " <> show errorCount ]
+      , if null result.errors then text "" else renderCsvImportErrors result.errors
+      ]
+
+renderCsvImportErrors :: forall w. Array CsvImportError -> HTML w Action
+renderCsvImportErrors errors =
+  div [ class_ "agenda-import-errors" ]
+    (map renderCsvImportError errors)
+
+renderCsvImportError :: forall w. CsvImportError -> HTML w Action
+renderCsvImportError err =
+  div [ class_ "agenda-import-error" ]
+    [ text $ "Ligne " <> show err.rowNumber <> ": " <> err.message ]
+
 timeLabel :: String -> String
 timeLabel raw =
   if String.length raw >= 16 then String.slice 11 16 raw else raw
@@ -1307,6 +1403,159 @@ nextTemplateId templates =
       in if elem candidate existing then findId (n + 1) else candidate
   in
     findId 1
+
+type CsvHeader =
+  { typeIdx :: Int
+  , titleIdx :: Int
+  , startIdx :: Int
+  , endIdx :: Int
+  , categoryIdx :: Maybe Int
+  , statusIdx :: Maybe Int
+  }
+
+parseCsvImport :: String -> CsvImportResult
+parseCsvImport raw =
+  let
+    lines = map stripCR (StringCommon.split (Pattern "\n") raw)
+    indexed = mapWithIndex (\idx line -> { row: idx + 1, raw: line }) lines
+    nonEmpty = filter (\line -> StringCommon.trim line.raw /= "") indexed
+  in
+    case uncons nonEmpty of
+      Nothing -> { items: [], errors: [ { rowNumber: 1, message: "CSV vide." } ] }
+      Just { head: headerLine, tail: dataLines } ->
+        case resolveCsvHeader headerLine.raw of
+          Left err -> { items: [], errors: [ { rowNumber: headerLine.row, message: err } ] }
+          Right header -> parseCsvRows header dataLines
+
+resolveCsvHeader :: String -> Either String CsvHeader
+resolveCsvHeader rawHeader =
+  let
+    headers = map normalizeHeader (splitCsvLine rawHeader)
+    findFor names = findIndex (\name -> elem name names) headers
+    typeIdx = findFor [ "type" ]
+    titleIdx = findFor [ "titre", "title" ]
+    startIdx = findFor [ "fenetre_debut", "window_start", "start" ]
+    endIdx = findFor [ "fenetre_fin", "window_end", "end" ]
+    categoryIdx = findFor [ "categorie", "category" ]
+    statusIdx = findFor [ "statut", "status" ]
+  in
+    case { typeIdx, titleIdx, startIdx, endIdx } of
+      { typeIdx: Just t, titleIdx: Just ti, startIdx: Just s, endIdx: Just e } ->
+        Right { typeIdx: t, titleIdx: ti, startIdx: s, endIdx: e, categoryIdx, statusIdx }
+      _ ->
+        Left "Colonnes minimales manquantes: type, titre, fenetre_debut, fenetre_fin."
+
+parseCsvRows :: CsvHeader -> Array { row :: Int, raw :: String } -> CsvImportResult
+parseCsvRows header rows =
+  foldl parseRow { items: [], errors: [] } rows
+  where
+  parseRow acc row =
+    let
+      fields = splitCsvLine row.raw
+      fieldAt idx = index fields idx
+    in
+      case { typeVal: fieldAt header.typeIdx
+           , titleVal: fieldAt header.titleIdx
+           , startVal: fieldAt header.startIdx
+           , endVal: fieldAt header.endIdx
+           } of
+        { typeVal: Just typeVal
+        , titleVal: Just titleVal
+        , startVal: Just startVal
+        , endVal: Just endVal
+        } ->
+          case parseCsvItem header fields typeVal titleVal startVal endVal of
+            Left err -> acc { errors = acc.errors <> [ { rowNumber: row.row, message: err } ] }
+            Right item -> acc { items = acc.items <> [ item ] }
+        _ ->
+          acc { errors = acc.errors <> [ { rowNumber: row.row, message: "Colonnes manquantes pour cette ligne." } ] }
+
+parseCsvItem :: CsvHeader -> Array String -> String -> String -> String -> String -> Either String CalendarItem
+parseCsvItem header fields typeVal titleVal startVal endVal = do
+  itemType <- parseCsvItemType typeVal
+  status <- parseCsvStatus (lookupField header.statusIdx fields)
+  let
+    title = StringCommon.trim titleVal
+    windowStart = StringCommon.trim startVal
+    windowEnd = StringCommon.trim endVal
+    category = lookupField header.categoryIdx fields >>= toOptionalString
+  if title == "" then Left "Le titre est vide."
+  else if not (isDateTimeLocal windowStart) then Left "Debut invalide (format YYYY-MM-DDTHH:MM)."
+  else if not (isDateTimeLocal windowEnd) then Left "Fin invalide (format YYYY-MM-DDTHH:MM)."
+  else if windowEnd <= windowStart then Left "La fin doit etre apres le debut."
+  else
+    Right $ NewCalendarItem
+      { content:
+          { itemType
+          , title
+          , windowStart
+          , windowEnd
+          , status
+          , sourceItemId: Nothing
+          , actualDurationMinutes: Nothing
+          , category
+          , recurrenceRule: Nothing
+          , recurrenceExceptionDates: []
+          }
+      }
+
+lookupField :: Maybe Int -> Array String -> Maybe String
+lookupField idx fields = idx >>= \i -> index fields i
+
+parseCsvItemType :: String -> Either String ItemType
+parseCsvItemType raw =
+  case normalizeHeader raw of
+    "intention" -> Right Intention
+    "bloc_planifie" -> Right ScheduledBlock
+    "scheduled_block" -> Right ScheduledBlock
+    _ -> Left "Type invalide (INTENTION ou BLOC_PLANIFIE)."
+
+parseCsvStatus :: Maybe String -> Either String ItemStatus
+parseCsvStatus raw =
+  case raw of
+    Nothing -> Right Todo
+    Just value | StringCommon.trim value == "" -> Right Todo
+    Just value ->
+      case normalizeHeader value of
+        "todo" -> Right Todo
+        "en_cours" -> Right EnCours
+        "fait" -> Right Fait
+        "annule" -> Right Annule
+        _ -> Left "Statut invalide (TODO, EN_COURS, FAIT, ANNULE)."
+
+normalizeHeader :: String -> String
+normalizeHeader = toLower <<< StringCommon.trim
+
+toOptionalString :: String -> Maybe String
+toOptionalString raw =
+  let trimmed = StringCommon.trim raw
+  in if trimmed == "" then Nothing else Just trimmed
+
+splitCsvLine :: String -> Array String
+splitCsvLine raw =
+  parseChars (String.toCharArray raw) { field: "", fields: [], inQuote: false }
+  where
+  parseChars chars state =
+    case uncons chars of
+      Nothing -> state.fields <> [ state.field ]
+      Just { head, tail } ->
+        if head == '"' then
+          case uncons tail of
+            Just { head: next, tail: rest } | state.inQuote && next == '"' ->
+              parseChars rest state { field = state.field <> String.singleton '"' }
+            _ ->
+              parseChars tail state { inQuote = not state.inQuote }
+        else if head == ',' && not state.inQuote then
+          parseChars tail state { fields = state.fields <> [ state.field ], field = "" }
+        else
+          parseChars tail state { field = state.field <> String.singleton head }
+
+stripCR :: String -> String
+stripCR line =
+  let len = String.length line
+  in if len > 0 && String.charAt (len - 1) line == Just '\r'
+     then String.slice 0 (len - 1) line
+     else line
 
 isUnplannedIntention :: Array CalendarItem -> CalendarItem -> Boolean
 isUnplannedIntention items item =
