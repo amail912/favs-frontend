@@ -2,7 +2,7 @@ module Test.SpecSuite (runSpecSuite) where
 
 import Prelude
 
-import Agenda (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), RecurrenceRule(..), RoutineTemplate, SortMode(..), StepDependency(..), ValidationError(..), addTemplate, applyOfflineMutation, applyTemplateToDraft, defaultNotificationDefaults, detectConflictGroups, detectConflictIds, durationMinutesBetween, generateOccurrencesForMonth, instantiateRoutine, parseCsvImport, reminderTimesForIntention, removeTemplate, sortItems, templateSummary, toNewIntention, updateTemplate, validateIntention)
+import Agenda (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), RecurrenceRule(..), RoutineTemplate, SortMode(..), StepDependency(..), ValidationError(..), addTemplate, applyOfflineMutation, applyTemplateToDraft, defaultNotificationDefaults, detectConflictGroups, detectConflictIds, durationMinutesBetween, generateOccurrencesForMonth, instantiateRoutine, parseCsvImport, parseIcsImport, reminderTimesForIntention, removeTemplate, sortItems, templateSummary, toNewIntention, updateTemplate, validateIntention)
 import Checklists (Checklist(..), ChecklistItem(..), removeChecklistItem)
 import Data.Argonaut.Decode (decodeJson)
 import Data.Argonaut.Encode (encodeJson)
@@ -356,6 +356,33 @@ runSpecSuite = runSpec [ consoleReporter ] do
           "type,titre,fenetre_debut,fenetre_fin\n" <>
           "INTENTION,,2026-02-19T09:00,2026-02-19T08:00"
         result = parseCsvImport csv
+      length result.items `shouldEqual` 0
+      length result.errors `shouldEqual` 1
+
+    it "parses a valid ICS import" do
+      let
+        ics =
+          "BEGIN:VCALENDAR\n" <>
+          "BEGIN:VEVENT\n" <>
+          "SUMMARY:Meeting\n" <>
+          "DTSTART:20260219T090000\n" <>
+          "DTEND:20260219T100000\n" <>
+          "END:VEVENT\n" <>
+          "END:VCALENDAR"
+        result = parseIcsImport ics
+      length result.items `shouldEqual` 1
+      length result.errors `shouldEqual` 0
+
+    it "reports errors for invalid ICS events" do
+      let
+        ics =
+          "BEGIN:VCALENDAR\n" <>
+          "BEGIN:VEVENT\n" <>
+          "DTSTART:20260219T090000\n" <>
+          "DTEND:20260219T100000\n" <>
+          "END:VEVENT\n" <>
+          "END:VCALENDAR"
+        result = parseIcsImport ics
       length result.items `shouldEqual` 0
       length result.errors `shouldEqual` 1
 
