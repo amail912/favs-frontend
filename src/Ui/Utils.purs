@@ -1,4 +1,4 @@
-module Utils (class_) where
+module Ui.Utils (class_) where
 
 import Prelude
 
@@ -9,4 +9,3 @@ import Halogen.HTML.Properties (IProp, classes)
 
 class_ :: forall r i. String -> IProp (class :: String | r) i
 class_ = split (Pattern " ") >>> (map wrap) >>> classes
-
