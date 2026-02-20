@@ -2,13 +2,15 @@ module Test.SpecSuite (runSpecSuite) where
 
 import Prelude
 
-import Agenda (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), RecurrenceRule(..), RoutineTemplate, SortMode(..), StepDependency(..), ValidationError(..), addTemplate, applyOfflineMutation, applyTemplateToDraft, defaultNotificationDefaults, detectConflictGroups, detectConflictIds, durationMinutesBetween, generateOccurrencesForMonth, instantiateRoutine, parseCsvImport, parseIcsImport, reminderTimesForIntention, removeTemplate, sortItems, templateSummary, toNewIntention, updateTemplate, validateIntention)
+import Agenda (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), RecurrenceRule(..), RoutineTemplate, SortMode(..), StepDependency(..), ValidationError(..), addTemplate, applyOfflineMutation, applyTemplateToDraft, defaultNotificationDefaults, detectConflictGroups, detectConflictIds, durationMinutesBetween, exportItemsToCsv, exportItemsToIcs, filterItemsForExport, generateOccurrencesForMonth, instantiateRoutine, parseCsvImport, parseIcsImport, reminderTimesForIntention, removeTemplate, sortItems, templateSummary, toNewIntention, updateTemplate, validateIntention)
 import Checklists (Checklist(..), ChecklistItem(..), removeChecklistItem)
 import Data.Argonaut.Decode (decodeJson)
 import Data.Argonaut.Encode (encodeJson)
 import Data.Array (head, length)
 import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
+import Data.String.Common as StringCommon
+import Data.String.Pattern (Pattern(..))
 import Effect.Aff (Aff)
 import Notes (Note(..), newNote)
 import Test.Spec (describe, it)
@@ -385,6 +387,72 @@ runSpecSuite = runSpec [ consoleReporter ] do
         result = parseIcsImport ics
       length result.items `shouldEqual` 0
       length result.errors `shouldEqual` 1
+
+    it "filters items for export" do
+      let
+        itemA =
+          ServerCalendarItem
+            { id: "a"
+            , content:
+                { itemType: Intention
+                , title: "A"
+                , windowStart: "2026-02-19T09:00"
+                , windowEnd: "2026-02-19T10:00"
+                , status: Todo
+                , sourceItemId: Nothing
+                , actualDurationMinutes: Nothing
+                , category: Just "Sport"
+                , recurrenceRule: Nothing
+                , recurrenceExceptionDates: []
+                }
+            }
+        itemB =
+          ServerCalendarItem
+            { id: "b"
+            , content:
+                { itemType: ScheduledBlock
+                , title: "B"
+                , windowStart: "2026-02-20T11:00"
+                , windowEnd: "2026-02-20T12:00"
+                , status: Fait
+                , sourceItemId: Nothing
+                , actualDurationMinutes: Nothing
+                , category: Just "Work"
+                , recurrenceRule: Nothing
+                , recurrenceExceptionDates: []
+                }
+            }
+        filter =
+          { itemType: Nothing
+          , status: Just Todo
+          , category: Nothing
+          , startDate: Nothing
+          , endDate: Nothing
+          }
+      filterItemsForExport filter [ itemA, itemB ] `shouldEqual` [ itemA ]
+
+    it "exports items to CSV and ICS" do
+      let
+        item =
+          ServerCalendarItem
+            { id: "a"
+            , content:
+                { itemType: Intention
+                , title: "A"
+                , windowStart: "2026-02-19T09:00"
+                , windowEnd: "2026-02-19T10:00"
+                , status: Todo
+                , sourceItemId: Nothing
+                , actualDurationMinutes: Nothing
+                , category: Just "Sport"
+                , recurrenceRule: Nothing
+                , recurrenceExceptionDates: []
+                }
+            }
+        csv = exportItemsToCsv [ item ]
+        ics = exportItemsToIcs [ item ]
+      (length (StringCommon.split (Pattern "type,titre") csv) > 1) `shouldEqual` true
+      (length (StringCommon.split (Pattern "BEGIN:VEVENT") ics) > 1) `shouldEqual` true
 
     it "sorts items by status" do
       let

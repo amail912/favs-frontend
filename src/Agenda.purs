@@ -14,6 +14,8 @@ module Agenda
   , CsvImportResult
   , IcsImportError
   , IcsImportResult
+  , ExportFormat(..)
+  , ExportFilter
   , SortMode(..)
   , RecurrenceRule(..)
   , StepDependency(..)
@@ -37,6 +39,9 @@ module Agenda
   , templateSummary
   , parseCsvImport
   , parseIcsImport
+  , filterItemsForExport
+  , exportItemsToCsv
+  , exportItemsToIcs
   , reminderTimesForIntention
   , sortItems
   , toNewIntention
@@ -229,6 +234,20 @@ type IcsImportError =
 type IcsImportResult =
   { items :: Array CalendarItem
   , errors :: Array IcsImportError
+  }
+
+data ExportFormat = ExportCSV | ExportICS
+derive instance exportFormatGeneric :: Generic ExportFormat _
+derive instance exportFormatEq :: Eq ExportFormat
+instance exportFormatShow :: Show ExportFormat where
+  show = genericShow
+
+type ExportFilter =
+  { itemType :: Maybe ItemType
+  , status :: Maybe ItemStatus
+  , category :: Maybe String
+  , startDate :: Maybe String
+  , endDate :: Maybe String
   }
 
 data CalendarItem
@@ -474,6 +493,13 @@ type State =
   , csvImportResult :: Maybe CsvImportResult
   , icsInput :: String
   , icsImportResult :: Maybe IcsImportResult
+  , exportFormat :: ExportFormat
+  , exportTypeFilter :: String
+  , exportStatusFilter :: String
+  , exportCategoryFilter :: String
+  , exportStartDate :: String
+  , exportEndDate :: String
+  , exportOutput :: String
   }
 
 data Action
@@ -526,6 +552,14 @@ data Action
   | ParseIcsInput
   | ApplyIcsImport
   | ClearIcsImport
+  | ExportFormatChanged String
+  | ExportTypeFilterChanged String
+  | ExportStatusFilterChanged String
+  | ExportCategoryFilterChanged String
+  | ExportStartDateChanged String
+  | ExportEndDateChanged String
+  | GenerateExport
+  | ClearExportOutput
 
 component :: forall q i. H.Component q i NoOutput Aff
 component =
@@ -561,6 +595,13 @@ initialState = const
   , csvImportResult: Nothing
   , icsInput: ""
   , icsImportResult: Nothing
+  , exportFormat: ExportCSV
+  , exportTypeFilter: ""
+  , exportStatusFilter: ""
+  , exportCategoryFilter: ""
+  , exportStartDate: ""
+  , exportEndDate: ""
+  , exportOutput: ""
   }
 
 handleAction :: Action -> AgendaAppM Unit
@@ -814,6 +855,36 @@ handleAction action = handleError $
                             }
     ClearIcsImport ->
       lift $ modify_ _ { icsInput = "", icsImportResult = Nothing }
+    ExportFormatChanged raw ->
+      lift $ modify_ \st -> st { exportFormat = parseExportFormat raw }
+    ExportTypeFilterChanged raw ->
+      lift $ modify_ \st -> st { exportTypeFilter = raw }
+    ExportStatusFilterChanged raw ->
+      lift $ modify_ \st -> st { exportStatusFilter = raw }
+    ExportCategoryFilterChanged raw ->
+      lift $ modify_ \st -> st { exportCategoryFilter = raw }
+    ExportStartDateChanged raw ->
+      lift $ modify_ \st -> st { exportStartDate = raw }
+    ExportEndDateChanged raw ->
+      lift $ modify_ \st -> st { exportEndDate = raw }
+    GenerateExport -> do
+      st <- get
+      let
+        filter =
+          { itemType: parseExportItemType st.exportTypeFilter
+          , status: parseExportStatus st.exportStatusFilter
+          , category: toOptionalString st.exportCategoryFilter
+          , startDate: toOptionalString st.exportStartDate
+          , endDate: toOptionalString st.exportEndDate
+          }
+        filtered = filterItemsForExport filter st.items
+        output =
+          case st.exportFormat of
+            ExportCSV -> exportItemsToCsv filtered
+            ExportICS -> exportItemsToIcs filtered
+      lift $ modify_ _ { exportOutput = output }
+    ClearExportOutput ->
+      lift $ modify_ _ { exportOutput = "" }
 
 handleError :: ErrorAgendaAppM Unit -> AgendaAppM Unit
 handleError m = do
@@ -858,7 +929,7 @@ syncPending = do
     else lift $ modify_ _ { syncConflict = Just st.pendingSync }
 
 render :: forall m. State -> H.ComponentHTML Action () m
-render { items, draft, validationError, showConflictsOnly, conflictResolution, offlineMode, syncConflict, validationPanel, sortMode, notificationDefaults, notificationOverrides, notificationPanelOpen, notificationEditor, templates, templateDraft, editingTemplateId, csvInput, csvImportResult, icsInput, icsImportResult } =
+render { items, draft, validationError, showConflictsOnly, conflictResolution, offlineMode, syncConflict, validationPanel, sortMode, notificationDefaults, notificationOverrides, notificationPanelOpen, notificationEditor, templates, templateDraft, editingTemplateId, csvInput, csvImportResult, icsInput, icsImportResult, exportFormat, exportTypeFilter, exportStatusFilter, exportCategoryFilter, exportStartDate, exportEndDate, exportOutput } =
   let
     conflictIds = detectConflictIds items
     conflictGroups = detectConflictGroups items
@@ -887,6 +958,7 @@ render { items, draft, validationError, showConflictsOnly, conflictResolution, o
     , renderTemplatesPanel templates templateDraft editingTemplateId
     , renderCsvImportPanel csvInput csvImportResult
     , renderIcsImportPanel icsInput icsImportResult
+    , renderExportPanel exportFormat exportTypeFilter exportStatusFilter exportCategoryFilter exportStartDate exportEndDate exportOutput
     , if (null sortedItems) then emptyAgenda else agendaList conflictIds sortedItems
     , maybe (text "") (renderConflictResolution items) conflictResolution
     , maybe (text "") renderSyncConflict syncConflict
@@ -1266,6 +1338,100 @@ renderIcsImportError :: forall w. IcsImportError -> HTML w Action
 renderIcsImportError err =
   div [ class_ "agenda-import-error" ]
     [ text $ "Evenement " <> show err.eventIndex <> ": " <> err.message ]
+
+renderExportPanel
+  :: forall w
+   . ExportFormat
+  -> String
+  -> String
+  -> String
+  -> String
+  -> String
+  -> String
+  -> HTML w Action
+renderExportPanel format typeFilter statusFilter categoryFilter startDate endDate output =
+  section [ class_ "agenda-export" ]
+    [ div [ class_ "agenda-export-header" ]
+        [ div [ class_ "agenda-export-title" ] [ text "Export" ]
+        , div [ class_ "agenda-export-subtitle" ]
+            [ text "Filtres: type, categorie, statut, periode." ]
+        ]
+    , div [ class_ "agenda-export-controls" ]
+        [ div [ class_ "agenda-export-control" ]
+            [ div [ class_ "agenda-notifications-label" ] [ text "Format" ]
+            , select
+                [ class_ "form-select agenda-sort-select"
+                , onValueChange ExportFormatChanged
+                , value (exportFormatValue format)
+                ]
+                [ option [ value "csv" ] [ text "CSV" ]
+                , option [ value "ics" ] [ text "ICS" ]
+                ]
+            ]
+        , div [ class_ "agenda-export-control" ]
+            [ div [ class_ "agenda-notifications-label" ] [ text "Type" ]
+            , select
+                [ class_ "form-select agenda-sort-select"
+                , onValueChange ExportTypeFilterChanged
+                , value typeFilter
+                ]
+                [ option [ value "" ] [ text "Tous" ]
+                , option [ value "INTENTION" ] [ text "Intention" ]
+                , option [ value "BLOC_PLANIFIE" ] [ text "Bloc planifie" ]
+                ]
+            ]
+        , div [ class_ "agenda-export-control" ]
+            [ div [ class_ "agenda-notifications-label" ] [ text "Statut" ]
+            , select
+                [ class_ "form-select agenda-sort-select"
+                , onValueChange ExportStatusFilterChanged
+                , value statusFilter
+                ]
+                [ option [ value "" ] [ text "Tous" ]
+                , option [ value "TODO" ] [ text "TODO" ]
+                , option [ value "EN_COURS" ] [ text "EN_COURS" ]
+                , option [ value "FAIT" ] [ text "FAIT" ]
+                , option [ value "ANNULE" ] [ text "ANNULE" ]
+                ]
+            ]
+        , div [ class_ "agenda-export-control" ]
+            [ div [ class_ "agenda-notifications-label" ] [ text "Categorie" ]
+            , input
+                [ class_ "form-control agenda-input"
+                , placeholder "Ex: Sport"
+                , value categoryFilter
+                , onValueChange ExportCategoryFilterChanged
+                ]
+            ]
+        , div [ class_ "agenda-export-control" ]
+            [ div [ class_ "agenda-notifications-label" ] [ text "Debut" ]
+            , input
+                [ class_ "form-control agenda-input"
+                , type_ InputDate
+                , value startDate
+                , onValueChange ExportStartDateChanged
+                ]
+            ]
+        , div [ class_ "agenda-export-control" ]
+            [ div [ class_ "agenda-notifications-label" ] [ text "Fin" ]
+            , input
+                [ class_ "form-control agenda-input"
+                , type_ InputDate
+                , value endDate
+                , onValueChange ExportEndDateChanged
+                ]
+            ]
+        ]
+    , div [ class_ "agenda-export-actions" ]
+        [ button [ class_ "btn btn-sm btn-primary", onClick (const GenerateExport) ] [ text "Generer" ]
+        , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const ClearExportOutput) ] [ text "Effacer" ]
+        ]
+    , if output == "" then text "" else
+        textarea
+          [ class_ "form-control agenda-export-textarea"
+          , value output
+          ]
+    ]
 
 timeLabel :: String -> String
 timeLabel raw =
@@ -1757,6 +1923,146 @@ parseIcsDateTime raw =
   endsWithChar ch str =
     let len = String.length str
     in len > 0 && String.charAt (len - 1) str == Just ch
+
+exportFormatValue :: ExportFormat -> String
+exportFormatValue ExportCSV = "csv"
+exportFormatValue ExportICS = "ics"
+
+parseExportFormat :: String -> ExportFormat
+parseExportFormat raw =
+  if raw == "ics" then ExportICS else ExportCSV
+
+parseExportItemType :: String -> Maybe ItemType
+parseExportItemType raw =
+  case raw of
+    "INTENTION" -> Just Intention
+    "BLOC_PLANIFIE" -> Just ScheduledBlock
+    _ -> Nothing
+
+parseExportStatus :: String -> Maybe ItemStatus
+parseExportStatus raw =
+  case raw of
+    "TODO" -> Just Todo
+    "EN_COURS" -> Just EnCours
+    "FAIT" -> Just Fait
+    "ANNULE" -> Just Annule
+    _ -> Nothing
+
+filterItemsForExport :: ExportFilter -> Array CalendarItem -> Array CalendarItem
+filterItemsForExport criteria items =
+  filter (matchesFilter criteria) items
+
+matchesFilter :: ExportFilter -> CalendarItem -> Boolean
+matchesFilter criteria item =
+  let
+    content = calendarItemContent item
+    matchesType = maybe true (\target -> content.itemType == target) criteria.itemType
+    matchesStatus = maybe true (\target -> content.status == target) criteria.status
+    matchesCategory =
+      case criteria.category of
+        Nothing -> true
+        Just target ->
+          case content.category of
+            Nothing -> false
+            Just value -> normalizeHeader value == normalizeHeader target
+    dateKey = datePart content.windowStart
+    matchesStart =
+      case criteria.startDate of
+        Nothing -> true
+        Just start -> dateKey >= start
+    matchesEnd =
+      case criteria.endDate of
+        Nothing -> true
+        Just end -> dateKey <= end
+  in
+    matchesType && matchesStatus && matchesCategory && matchesStart && matchesEnd
+
+datePart :: String -> String
+datePart raw =
+  if String.length raw >= 10 then String.slice 0 10 raw else raw
+
+exportItemsToCsv :: Array CalendarItem -> String
+exportItemsToCsv items =
+  let
+    header = "type,titre,fenetre_debut,fenetre_fin,statut,categorie"
+    rows = map exportCsvRow items
+  in
+    StringCommon.joinWith "\n" ([ header ] <> rows)
+
+exportCsvRow :: CalendarItem -> String
+exportCsvRow item =
+  let
+    content = calendarItemContent item
+    category = fromMaybe "" content.category
+  in
+    StringCommon.joinWith "," $
+      map csvEscape
+        [ exportItemType content.itemType
+        , content.title
+        , content.windowStart
+        , content.windowEnd
+        , exportItemStatus content.status
+        , category
+        ]
+
+csvEscape :: String -> String
+csvEscape value =
+  "\"" <> escapeQuotes value <> "\""
+
+escapeQuotes :: String -> String
+escapeQuotes raw =
+  foldl
+    (\acc ch -> if ch == '"' then acc <> "\"\"" else acc <> String.singleton ch)
+    ""
+    (String.toCharArray raw)
+
+exportItemsToIcs :: Array CalendarItem -> String
+exportItemsToIcs items =
+  let
+    header = [ "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//FAVS//EN" ]
+    events = items >>= exportIcsEvent
+  in
+    StringCommon.joinWith "\n" (header <> events <> [ "END:VCALENDAR" ])
+
+exportIcsEvent :: CalendarItem -> Array String
+exportIcsEvent item =
+  let
+    content = calendarItemContent item
+    start = toIcsDateTime content.windowStart
+    end = toIcsDateTime content.windowEnd
+    categoryLine =
+      case content.category of
+        Nothing -> []
+        Just value -> [ "CATEGORIES:" <> value ]
+  in
+    [ "BEGIN:VEVENT"
+    , "SUMMARY:" <> content.title
+    , "DTSTART:" <> start
+    , "DTEND:" <> end
+    ]
+      <> categoryLine
+      <> [ "END:VEVENT" ]
+
+toIcsDateTime :: String -> String
+toIcsDateTime raw =
+  if String.length raw >= 16 then
+    String.slice 0 4 raw <>
+    String.slice 5 7 raw <>
+    String.slice 8 10 raw <>
+    "T" <>
+    String.slice 11 13 raw <>
+    String.slice 14 16 raw
+  else raw
+
+exportItemType :: ItemType -> String
+exportItemType Intention = "INTENTION"
+exportItemType ScheduledBlock = "BLOC_PLANIFIE"
+
+exportItemStatus :: ItemStatus -> String
+exportItemStatus Todo = "TODO"
+exportItemStatus EnCours = "EN_COURS"
+exportItemStatus Fait = "FAIT"
+exportItemStatus Annule = "ANNULE"
 
 isUnplannedIntention :: Array CalendarItem -> CalendarItem -> Boolean
 isUnplannedIntention items item =
