@@ -2,7 +2,7 @@ module Test.SpecSuite (runSpecSuite) where
 
 import Prelude
 
-import Agenda (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), RecurrenceRule(..), RoutineTemplate, SortMode(..), StepDependency(..), ValidationError(..), addTemplate, applyOfflineMutation, applyTemplateToDraft, defaultNotificationDefaults, detectConflictGroups, detectConflictIds, durationMinutesBetween, generateOccurrencesForMonth, instantiateRoutine, reminderTimesForIntention, removeTemplate, sortItems, templateSummary, toNewIntention, updateTemplate, validateIntention)
+import Agenda (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), RecurrenceRule(..), RoutineTemplate, SortMode(..), StepDependency(..), ValidationError(..), addTemplate, applyOfflineMutation, applyTemplateToDraft, defaultNotificationDefaults, detectConflictGroups, detectConflictIds, durationMinutesBetween, generateOccurrencesForMonth, instantiateRoutine, parseCsvImport, reminderTimesForIntention, removeTemplate, sortItems, templateSummary, toNewIntention, updateTemplate, validateIntention)
 import Checklists (Checklist(..), ChecklistItem(..), removeChecklistItem)
 import Data.Argonaut.Decode (decodeJson)
 import Data.Argonaut.Encode (encodeJson)
@@ -340,6 +340,24 @@ runSpecSuite = runSpec [ consoleReporter ] do
           , category: "Focus"
           }
       templateSummary template `shouldEqual` "90 min • Focus"
+
+    it "parses a valid CSV import" do
+      let
+        csv =
+          "type,titre,fenetre_debut,fenetre_fin,categorie,statut\n" <>
+          "INTENTION,Focus,2026-02-19T09:00,2026-02-19T10:00,Deep,TODO"
+        result = parseCsvImport csv
+      length result.items `shouldEqual` 1
+      length result.errors `shouldEqual` 0
+
+    it "reports errors for invalid CSV rows" do
+      let
+        csv =
+          "type,titre,fenetre_debut,fenetre_fin\n" <>
+          "INTENTION,,2026-02-19T09:00,2026-02-19T08:00"
+        result = parseCsvImport csv
+      length result.items `shouldEqual` 0
+      length result.errors `shouldEqual` 1
 
     it "sorts items by status" do
       let

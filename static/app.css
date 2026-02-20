@@ -668,6 +668,64 @@ a.nav-link:hover {
   flex-wrap: wrap;
 }
 
+.agenda-import {
+  border: 1px solid var(--app-border);
+  background: rgba(255, 255, 255, 0.96);
+  border-radius: 18px;
+  padding: 1rem;
+  display: grid;
+  gap: 0.85rem;
+  box-shadow: 0 12px 28px rgba(20, 37, 68, 0.08);
+}
+
+.agenda-import-header {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.agenda-import-title {
+  font-weight: 700;
+}
+
+.agenda-import-subtitle {
+  color: var(--app-muted);
+  font-size: 0.95rem;
+}
+
+.agenda-import-textarea {
+  min-height: 140px;
+  border-radius: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.9rem;
+}
+
+.agenda-import-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.agenda-import-result {
+  border-top: 1px dashed var(--app-border);
+  padding-top: 0.7rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.agenda-import-summary {
+  font-weight: 600;
+}
+
+.agenda-import-errors {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.agenda-import-error {
+  color: #9a1111;
+  font-size: 0.9rem;
+}
+
 @media (max-width: 768px) {
   .container {
     padding-inline: 0.8rem;
