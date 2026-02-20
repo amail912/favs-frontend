@@ -78,7 +78,7 @@ import Data.String.Common as StringCommon
 import Data.String (toLower)
 import Data.String.Pattern (Pattern(..))
 import DOM.HTML.Indexed.InputType (InputType(..))
-import Data.Date (canonicalDate, day, exactDate, month, year)
+import Data.Date (Date, canonicalDate, day, exactDate, month, year)
 import Data.DateTime (DateTime(..), adjust, date, diff, time)
 import Data.Enum (fromEnum, toEnum)
 import Data.Time (Time(..), hour, minute)
@@ -500,6 +500,8 @@ type State =
   , exportStartDate :: String
   , exportEndDate :: String
   , exportOutput :: String
+  , viewMode :: AgendaView
+  , focusDate :: String
   }
 
 data Action
@@ -560,6 +562,8 @@ data Action
   | ExportEndDateChanged String
   | GenerateExport
   | ClearExportOutput
+  | ViewChanged String
+  | FocusDateChanged String
 
 component :: forall q i. H.Component q i NoOutput Aff
 component =
@@ -602,12 +606,17 @@ initialState = const
   , exportStartDate: ""
   , exportEndDate: ""
   , exportOutput: ""
+  , viewMode: ViewDay
+  , focusDate: ""
   }
 
 handleAction :: Action -> AgendaAppM Unit
 handleAction action = handleError $
   case action of
-    Initialize -> refreshItems
+    Initialize -> do
+      now <- liftEffect nowDateTime
+      lift $ modify_ _ { focusDate = formatDate now }
+      refreshItems
     DraftTitleChanged title ->
       lift $ modify_ \st -> st { draft = st.draft { title = title }, validationError = Nothing }
     DraftStartChanged windowStart ->
@@ -885,6 +894,10 @@ handleAction action = handleError $
       lift $ modify_ _ { exportOutput = output }
     ClearExportOutput ->
       lift $ modify_ _ { exportOutput = "" }
+    ViewChanged raw ->
+      lift $ modify_ \st -> st { viewMode = parseAgendaView raw }
+    FocusDateChanged raw ->
+      lift $ modify_ \st -> st { focusDate = raw }
 
 handleError :: ErrorAgendaAppM Unit -> AgendaAppM Unit
 handleError m = do
@@ -929,7 +942,7 @@ syncPending = do
     else lift $ modify_ _ { syncConflict = Just st.pendingSync }
 
 render :: forall m. State -> H.ComponentHTML Action () m
-render { items, draft, validationError, showConflictsOnly, conflictResolution, offlineMode, syncConflict, validationPanel, sortMode, notificationDefaults, notificationOverrides, notificationPanelOpen, notificationEditor, templates, templateDraft, editingTemplateId, csvInput, csvImportResult, icsInput, icsImportResult, exportFormat, exportTypeFilter, exportStatusFilter, exportCategoryFilter, exportStartDate, exportEndDate, exportOutput } =
+render { items, draft, validationError, showConflictsOnly, conflictResolution, offlineMode, syncConflict, validationPanel, sortMode, notificationDefaults, notificationOverrides, notificationPanelOpen, notificationEditor, templates, templateDraft, editingTemplateId, csvInput, csvImportResult, icsInput, icsImportResult, exportFormat, exportTypeFilter, exportStatusFilter, exportCategoryFilter, exportStartDate, exportEndDate, exportOutput, viewMode, focusDate } =
   let
     conflictIds = detectConflictIds items
     conflictGroups = detectConflictGroups items
@@ -942,7 +955,7 @@ render { items, draft, validationError, showConflictsOnly, conflictResolution, o
   in
   div [ class_ "entity-page agenda-page" ]
     [ section [ class_ "agenda-header" ]
-        [ h2 [ class_ "agenda-title" ] [ text "Vue Jour" ]
+        [ h2 [ class_ "agenda-title" ] [ text (viewTitle viewMode) ]
         , div [ class_ "agenda-subtitle" ] [ text "Capture rapide des intentions a planifier." ]
         , button
             [ class_ $ "btn btn-sm agenda-filter" <> if showConflictsOnly then " btn-outline-primary" else " btn-outline-secondary"
@@ -952,6 +965,7 @@ render { items, draft, validationError, showConflictsOnly, conflictResolution, o
         , renderOfflineToggle offlineMode
         , renderSortPicker sortMode
         , renderConflictActions conflictGroups
+        , renderViewSelector viewMode focusDate
         ]
     , renderForm draft validationError
     , renderNotificationsPanel notificationPanelOpen notificationDefaults notificationOverrides notificationEditor unplannedIntentions
@@ -959,7 +973,7 @@ render { items, draft, validationError, showConflictsOnly, conflictResolution, o
     , renderCsvImportPanel csvInput csvImportResult
     , renderIcsImportPanel icsInput icsImportResult
     , renderExportPanel exportFormat exportTypeFilter exportStatusFilter exportCategoryFilter exportStartDate exportEndDate exportOutput
-    , if (null sortedItems) then emptyAgenda else agendaList conflictIds sortedItems
+    , renderAgendaView viewMode focusDate conflictIds sortedItems
     , maybe (text "") (renderConflictResolution items) conflictResolution
     , maybe (text "") renderSyncConflict syncConflict
     , maybe (text "") renderValidationPanel validationPanel
@@ -1016,6 +1030,36 @@ emptyAgenda =
     [ div [ class_ "entity-empty-title" ] [ text "Aucune intention aujourd'hui" ]
     , div [ class_ "entity-empty-subtitle" ] [ text "Ajoutez une intention pour demarrer votre journee." ]
     ]
+
+renderAgendaView :: forall w. AgendaView -> String -> Array String -> Array CalendarItem -> HTML w Action
+renderAgendaView viewMode focusDate conflictIds items =
+  case viewMode of
+    ViewDay ->
+      if null items then emptyAgenda else agendaList conflictIds items
+    ViewWeek ->
+      renderRangeView "Semaine" (generateDateRange focusDate 7) conflictIds items
+    ViewMonth ->
+      renderRangeView "Mois" (generateMonthDates focusDate) conflictIds items
+
+renderRangeView :: forall w. String -> Array String -> Array String -> Array CalendarItem -> HTML w Action
+renderRangeView label dates conflictIds items =
+  if null dates then emptyAgenda
+  else
+    div [ class_ "agenda-range" ]
+      (map (renderDateSection label conflictIds items) dates)
+
+renderDateSection :: forall w. String -> Array String -> Array CalendarItem -> String -> HTML w Action
+renderDateSection _ conflictIds items dateStr =
+  let
+    itemsForDate = filter (isItemOnDate dateStr) items
+    sorted = sortItems SortByTime conflictIds itemsForDate
+  in
+    section [ class_ "agenda-date-section" ]
+      [ div [ class_ "agenda-date-title" ] [ text dateStr ]
+      , if null sorted
+          then div [ class_ "agenda-date-empty" ] [ text "Aucun item" ]
+          else agendaList conflictIds sorted
+      ]
 
 agendaList :: forall w. Array String -> Array CalendarItem -> HTML w Action
 agendaList conflictIds items =
@@ -1501,6 +1545,16 @@ derive instance sortModeEq :: Eq SortMode
 instance sortModeShow :: Show SortMode where
   show = genericShow
 
+data AgendaView
+  = ViewDay
+  | ViewWeek
+  | ViewMonth
+
+derive instance agendaViewGeneric :: Generic AgendaView _
+derive instance agendaViewEq :: Eq AgendaView
+instance agendaViewShow :: Show AgendaView where
+  show = genericShow
+
 type OfflineMutationResult =
   { items :: Array CalendarItem
   , pending :: Array CalendarItem
@@ -1981,6 +2035,64 @@ datePart :: String -> String
 datePart raw =
   if String.length raw >= 10 then String.slice 0 10 raw else raw
 
+isItemOnDate :: String -> CalendarItem -> Boolean
+isItemOnDate dateStr item =
+  datePart (calendarItemContent item).windowStart == dateStr
+
+generateDateRange :: String -> Int -> Array String
+generateDateRange start count =
+  case parseDateLocal start of
+    Nothing -> []
+    Just date ->
+      let
+        go current remaining acc =
+          if remaining <= 0 then acc
+          else
+            let next = addDaysToDate 1 current
+            in case next of
+                Nothing -> acc <> [ formatDateOnly current ]
+                Just nextDate -> go nextDate (remaining - 1) (acc <> [ formatDateOnly current ])
+      in
+        go date count []
+
+generateMonthDates :: String -> Array String
+generateMonthDates start =
+  case parseDateLocal start of
+    Nothing -> []
+    Just date ->
+      case toEnum 1 of
+        Nothing -> []
+        Just day1 ->
+          let
+            first = canonicalDate (year date) (month date) day1
+            targetMonth = month date
+            go current acc =
+              if month current /= targetMonth then acc
+              else case addDaysToDate 1 current of
+                Nothing -> acc <> [ formatDateOnly current ]
+                Just nextDate -> go nextDate (acc <> [ formatDateOnly current ])
+          in
+            go first []
+
+parseDateLocal :: String -> Maybe Date
+parseDateLocal raw = do
+  yearNum <- parseInt (String.slice 0 4 raw)
+  monthNum <- parseInt (String.slice 5 7 raw)
+  dayNum <- parseInt (String.slice 8 10 raw)
+  month' <- toEnum monthNum
+  day' <- toEnum dayNum
+  year' <- toEnum yearNum
+  exactDate year' month' day'
+  where
+  parseInt str = Int.fromString str
+
+addDaysToDate :: Int -> Date -> Maybe Date
+addDaysToDate days date' = do
+  t <- parseTimeLocal "00:00"
+  let dt = DateTime date' t
+  newDt <- addDays days dt
+  pure $ date newDt
+
 exportItemsToCsv :: Array CalendarItem -> String
 exportItemsToCsv items =
   let
@@ -2185,10 +2297,14 @@ addMonths n (DateTime d t) =
 
 formatDate :: DateTime -> String
 formatDate dt =
+  formatDateOnly (date dt)
+
+formatDateOnly :: Date -> String
+formatDateOnly dt =
   let
-    y = Int.toStringAs Int.decimal (fromEnum (year (date dt)))
-    m = pad2 (fromEnum (month (date dt)))
-    d = pad2 (fromEnum (day (date dt)))
+    y = Int.toStringAs Int.decimal (fromEnum (year dt))
+    m = pad2 (fromEnum (month dt))
+    d = pad2 (fromEnum (day dt))
   in
     y <> "-" <> m <> "-" <> d
 
@@ -2322,6 +2438,48 @@ renderSortPicker sortMode =
         , option [ value "conflict" ] [ text "Conflit" ]
         ]
     ]
+
+renderViewSelector :: forall w. AgendaView -> String -> HTML w Action
+renderViewSelector viewMode focusDate =
+  div [ class_ "agenda-view-selector" ]
+    [ div [ class_ "agenda-view-buttons" ]
+        [ button
+            [ class_ $ "btn btn-sm " <> if viewMode == ViewDay then "btn-primary" else "btn-outline-secondary"
+            , onClick (const $ ViewChanged "day")
+            ]
+            [ text "Jour" ]
+        , button
+            [ class_ $ "btn btn-sm " <> if viewMode == ViewWeek then "btn-primary" else "btn-outline-secondary"
+            , onClick (const $ ViewChanged "week")
+            ]
+            [ text "Semaine" ]
+        , button
+            [ class_ $ "btn btn-sm " <> if viewMode == ViewMonth then "btn-primary" else "btn-outline-secondary"
+            , onClick (const $ ViewChanged "month")
+            ]
+            [ text "Mois" ]
+        ]
+    , input
+        [ class_ "form-control agenda-input agenda-view-date"
+        , type_ InputDate
+        , value focusDate
+        , onValueChange FocusDateChanged
+        ]
+    ]
+
+viewTitle :: AgendaView -> String
+viewTitle viewMode =
+  case viewMode of
+    ViewDay -> "Vue Jour"
+    ViewWeek -> "Vue Semaine"
+    ViewMonth -> "Vue Mois"
+
+parseAgendaView :: String -> AgendaView
+parseAgendaView raw =
+  case raw of
+    "week" -> ViewWeek
+    "month" -> ViewMonth
+    _ -> ViewDay
 
 sortModeValue :: SortMode -> String
 sortModeValue SortByTime = "time"
