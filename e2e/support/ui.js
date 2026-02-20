@@ -6,6 +6,10 @@ function checklistsTab(page) {
   return page.locator("a.nav-link", { hasText: "Checklists" });
 }
 
+function agendaTab(page) {
+  return page.locator("a.nav-link", { hasText: "Agenda" });
+}
+
 function signupMenuButton(page) {
   return page.getByRole("button", { name: "Signup" });
 }
@@ -39,6 +43,7 @@ function appTitle(page) {
 }
 
 module.exports = {
+  agendaTab,
   appTitle,
   checklistsTab,
   createAccountButton,
