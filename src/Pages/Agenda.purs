@@ -52,13 +52,14 @@ import Effect.Class (liftEffect)
 import Ui.Errors (FatalError, handleError, toFatalError)
 import Effect.Now (nowDateTime)
 import Halogen (Component, ComponentHTML, HalogenM, defaultEval, mkComponent, mkEval) as H
-import Halogen.HTML (HTML, button, div, h2, input, li, option, section, select, text, textarea, ul)
-import Halogen.HTML.Events (onClick, onDragEnd, onDragOver, onDragStart, onDrop, onValueChange)
+import Halogen.HTML (HTML, button, details, div, h2, input, li, option, section, select, summary, text, textarea, ul, span)
+import Halogen.HTML.Events (onClick, onDragEnd, onDragOver, onDragStart, onDrop, onValueChange, onKeyDown)
 import Halogen.HTML.Properties (IProp, draggable, placeholder, type_, value)
 import Ui.AgendaRender (renderPanelHeader)
 import Ui.Utils (class_)
 import Web.Event.Event (preventDefault)
 import Web.HTML.Event.DragEvent (DragEvent, toEvent)
+import Web.UIEvent.KeyboardEvent as KE
 import Agenda.Model
   ( AgendaView(..)
   , CalendarItem(..)
@@ -214,6 +215,7 @@ data Action
   | DraftStartChanged String
   | DraftEndChanged String
   | DraftCategoryChanged String
+  | DraftTitleKeyDown String
   | SubmitIntention
   | PlanifyFrom String CalendarItemContent
   | ToggleConflictFilter
@@ -329,24 +331,10 @@ handleAction action = handleError $
       lift $ modify_ \st -> st { draft = st.draft { windowEnd = windowEnd }, validationError = Nothing }
     DraftCategoryChanged category ->
       lift $ modify_ \st -> st { draft = st.draft { category = category }, validationError = Nothing }
-    SubmitIntention -> do
-      st <- get
-      case validateIntention st.draft of
-        Left err -> lift $ modify_ _ { validationError = Just err }
-        Right validDraft -> do
-          let item = toNewIntention validDraft
-          if st.offlineMode then do
-            let
-              result = applyOfflineMutation true item st.items st.pendingSync
-            lift $ modify_ _ { items = result.items
-                            , pendingSync = result.pending
-                            , draft = emptyDraft
-                            , validationError = Nothing
-                            }
-          else do
-            _ <- createItem item
-            lift $ modify_ _ { draft = emptyDraft, validationError = Nothing }
-            refreshItems
+    DraftTitleKeyDown key ->
+      when (key == "Enter") submitIntention
+    SubmitIntention ->
+      submitIntention
     PlanifyFrom sourceId content -> do
       st <- get
       let item = toScheduledBlock sourceId content
@@ -638,6 +626,26 @@ syncPending = do
       refreshItems
     else lift $ modify_ _ { syncConflict = Just st.pendingSync }
 
+submitIntention :: ErrorAgendaAppM Unit
+submitIntention = do
+  st <- get
+  case validateIntention st.draft of
+    Left err -> lift $ modify_ _ { validationError = Just err }
+    Right validDraft -> do
+      let item = toNewIntention validDraft
+      if st.offlineMode then do
+        let
+          result = applyOfflineMutation true item st.items st.pendingSync
+        lift $ modify_ _ { items = result.items
+                        , pendingSync = result.pending
+                        , draft = emptyDraft
+                        , validationError = Nothing
+                        }
+      else do
+        _ <- createItem item
+        lift $ modify_ _ { draft = emptyDraft, validationError = Nothing }
+        refreshItems
+
 render :: forall m. State -> H.ComponentHTML Action () m
 render { items, draft, validationError, showConflictsOnly, conflictResolution, offlineMode, syncConflict, validationPanel, sortMode, notificationDefaults, notificationOverrides, notificationPanelOpen, notificationEditor, templates, templateDraft, editingTemplateId, csvInput, csvImportResult, icsInput, icsImportResult, exportFormat, exportTypeFilter, exportStatusFilter, exportCategoryFilter, exportStartDate, exportEndDate, exportOutput, viewMode, focusDate } =
   let
@@ -654,26 +662,44 @@ render { items, draft, validationError, showConflictsOnly, conflictResolution, o
     [ section [ class_ "agenda-header" ]
         [ h2 [ class_ "agenda-title" ] [ text (viewTitle viewMode) ]
         , div [ class_ "agenda-subtitle" ] [ text "Capture rapide des intentions a planifier." ]
-        , button
-            [ class_ $ "btn btn-sm agenda-filter" <> if showConflictsOnly then " btn-outline-primary" else " btn-outline-secondary"
-            , onClick (const ToggleConflictFilter)
+        , div [ class_ "agenda-controls" ]
+            [ button
+                [ class_ $ "btn btn-sm agenda-filter" <> if showConflictsOnly then " btn-outline-primary" else " btn-outline-secondary"
+                , onClick (const ToggleConflictFilter)
+                ]
+                [ text "Filtrer: en conflit" ]
+            , renderOfflineToggle offlineMode
+            , renderSortPicker sortMode
+            , renderConflictActions conflictGroups
             ]
-            [ text "Filtrer: en conflit" ]
-        , renderOfflineToggle offlineMode
-        , renderSortPicker sortMode
-        , renderConflictActions conflictGroups
         , renderViewSelector viewMode focusDate
         ]
-    , renderForm draft validationError
-    , renderNotificationsPanel notificationPanelOpen notificationDefaults notificationOverrides notificationEditor unplannedIntentions
-    , renderTemplatesPanel templates templateDraft editingTemplateId
-    , renderCsvImportPanel csvInput csvImportResult
-    , renderIcsImportPanel icsInput icsImportResult
-    , renderExportPanel exportFormat exportTypeFilter exportStatusFilter exportCategoryFilter exportStartDate exportEndDate exportOutput
-    , renderAgendaView viewMode focusDate conflictIds sortedItems
-    , maybe (text "") (renderConflictResolution items) conflictResolution
-    , maybe (text "") renderSyncConflict syncConflict
-    , maybe (text "") renderValidationPanel validationPanel
+        , div [ class_ "agenda-layout" ]
+        [ div [ class_ "agenda-main" ]
+            [ renderForm draft validationError
+            , maybe (text "") renderValidationPanel validationPanel
+            , section [ class_ "agenda-list-panel" ]
+                [ renderAgendaView viewMode focusDate conflictIds sortedItems ]
+            , maybe (text "") (renderConflictResolution items) conflictResolution
+            , maybe (text "") renderSyncConflict syncConflict
+            ]
+        , div [ class_ "agenda-side" ]
+            [ renderNotificationsPanel notificationPanelOpen notificationDefaults notificationOverrides notificationEditor unplannedIntentions
+            , renderAccordion "Templates de taches" "agenda-accordion templates" $ renderTemplatesPanel templates templateDraft editingTemplateId
+            , renderAccordion "Import CSV" "agenda-accordion import-csv" $ renderCsvImportPanel csvInput csvImportResult
+            , renderAccordion "Import ICS" "agenda-accordion import-ics" $ renderIcsImportPanel icsInput icsImportResult
+            , renderAccordion "Export" "agenda-accordion export" $ renderExportPanel exportFormat exportTypeFilter exportStatusFilter exportCategoryFilter exportStartDate exportEndDate exportOutput
+            ]
+        ]
+    ]
+
+renderAccordion :: forall w i. String -> String -> HTML w i -> HTML w i
+renderAccordion title extraClass content =
+  div [ class_ ("agenda-accordion-wrap " <> extraClass) ]
+    [ details [ class_ "agenda-accordion-details" ]
+        [ summary [ class_ "agenda-accordion-summary" ] [ text title ]
+        , div [ class_ "agenda-accordion-content" ] [ content ]
+        ]
     ]
 
 renderForm :: forall w. IntentionDraft -> Maybe ValidationError -> HTML w Action
@@ -683,6 +709,7 @@ renderForm draft validationError =
         [ class_ "form-control agenda-input"
         , placeholder "Titre de l'intention"
         , onValueChange DraftTitleChanged
+        , onKeyDown (\ev -> DraftTitleKeyDown (KE.key ev))
         , value draft.title
         ]
     , div [ class_ "agenda-time-row" ]
@@ -726,6 +753,10 @@ emptyAgenda =
   div [ class_ "row entity-empty agenda-empty" ]
     [ div [ class_ "entity-empty-title" ] [ text "Aucune intention aujourd'hui" ]
     , div [ class_ "entity-empty-subtitle" ] [ text "Ajoutez une intention pour demarrer votre journee." ]
+    , div [ class_ "agenda-empty-cta" ]
+        [ span [ class_ "badge rounded-pill text-bg-primary" ] [ text "Astuce" ]
+        , span [ class_ "text-muted" ] [ text "Commencez par un titre et appuyez sur Entrée." ]
+        ]
     ]
 
 renderAgendaView :: forall w. AgendaView -> String -> Array String -> Array CalendarItem -> HTML w Action
