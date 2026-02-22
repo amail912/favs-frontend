@@ -187,7 +187,6 @@ render { currentRoute: Route route, isAuthenticated } =
    ] <>
   (if route /= Signup && route /= Signin then [ nav [ class_ "row nav nav-tabs" ] [ tab Note route, tab Checklist route, tab Agenda route ] ] else []) <>
   [ currentComponent route
-  , div [ class_ "bottom-space" ] []
   ])
 render { currentRoute: Root } = text ""
 render { currentRoute: NotFound, isAuthenticated } =

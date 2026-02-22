@@ -43,8 +43,8 @@ test("agenda integration: create intention then validate", async ({ authenticate
   const titles = Array.isArray(listBody) ? listBody.map(item => item.titre || "") : [];
   expect(titles).toContain(title);
 
-  const row = page.locator(".agenda-card", {
-    has: page.locator(".agenda-card-title", { hasText: title })
+  const row = page.locator(".agenda-calendar-item", {
+    has: page.locator(".agenda-calendar-item-title", { hasText: title })
   }).first();
 
   await expect(row).toBeVisible();
