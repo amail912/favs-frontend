@@ -28,7 +28,7 @@ import Control.Monad.RWS (get, modify_)
 import Control.Monad.Trans.Class (lift)
 import Data.Argonaut.Core (Json)
 import Data.Argonaut.Decode (decodeJson)
-import Data.Array (catMaybes, elem, filter, find, foldM, index, length, mapMaybe, mapWithIndex, nub, null, sortBy, uncons)
+import Data.Array (catMaybes, elem, filter, find, findIndex, foldM, index, length, mapMaybe, mapWithIndex, nub, null, sortBy, uncons, updateAt)
 import Data.Bifunctor (lmap)
 import Data.Either (Either(..))
 import Data.Foldable (all, foldl)
@@ -39,10 +39,11 @@ import Data.Newtype (unwrap)
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits as String
 import Data.String.Common as StringCommon
+import Data.String.Pattern (Pattern(..))
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Data.Date (Date, canonicalDate, day, exactDate, month, year)
 import Data.DateTime (DateTime(..), adjust, date, diff, time)
-import Data.Enum (fromEnum, toEnum)
+import Data.Enum (enumFromTo, fromEnum, toEnum)
 import Data.Time (Time(..), hour, minute)
 import Data.Time.Duration (Days(..), Minutes(..))
 import Effect (Effect)
@@ -54,8 +55,10 @@ import Effect.Now (nowDateTime)
 import Halogen (Component, ComponentHTML, HalogenM, defaultEval, mkComponent, mkEval) as H
 import Halogen.HTML (HTML, button, details, div, h2, input, li, option, section, select, summary, text, textarea, ul, span)
 import Halogen.HTML.Events (onClick, onDragEnd, onDragOver, onDragStart, onDrop, onValueChange, onKeyDown)
-import Halogen.HTML.Properties (IProp, draggable, placeholder, type_, value)
+import Halogen.HTML.Properties (IProp, attr, draggable, placeholder, style, type_, value)
+import Halogen.HTML.Core (AttrName(..))
 import Ui.AgendaRender (renderPanelHeader)
+import Ui.Modal (renderModal)
 import Ui.Utils (class_)
 import Web.Event.Event (preventDefault)
 import Web.HTML.Event.DragEvent (DragEvent, toEvent)
@@ -207,6 +210,7 @@ type State =
   , exportOutput :: String
   , viewMode :: AgendaView
   , focusDate :: String
+  , activeModal :: Maybe AgendaModal
   }
 
 data Action
@@ -270,6 +274,20 @@ data Action
   | ClearExportOutput
   | ViewChanged String
   | FocusDateChanged String
+  | OpenModal AgendaModal
+  | CloseModal
+
+data AgendaModal
+  = ModalNotifications
+  | ModalTemplates
+  | ModalImportCsv
+  | ModalImportIcs
+  | ModalExport
+  | ModalTools
+  | ModalFilters
+  | ModalDateTime
+
+derive instance eqAgendaModal :: Eq AgendaModal
 
 component :: forall q i. H.Component q i NoOutput Aff
 component =
@@ -314,6 +332,7 @@ initialState = const
   , exportOutput: ""
   , viewMode: ViewDay
   , focusDate: ""
+  , activeModal: Nothing
   }
 
 handleAction :: Action -> AgendaAppM Unit
@@ -590,6 +609,10 @@ handleAction action = handleError $
       lift $ modify_ \st -> st { viewMode = parseAgendaView raw }
     FocusDateChanged raw ->
       lift $ modify_ \st -> st { focusDate = raw }
+    OpenModal modal ->
+      lift $ modify_ \st -> st { activeModal = Just modal }
+    CloseModal ->
+      lift $ modify_ \st -> st { activeModal = Nothing }
 
 refreshItems :: ErrorAgendaAppM Unit
 refreshItems = do
@@ -647,7 +670,7 @@ submitIntention = do
         refreshItems
 
 render :: forall m. State -> H.ComponentHTML Action () m
-render { items, draft, validationError, showConflictsOnly, conflictResolution, offlineMode, syncConflict, validationPanel, sortMode, notificationDefaults, notificationOverrides, notificationPanelOpen, notificationEditor, templates, templateDraft, editingTemplateId, csvInput, csvImportResult, icsInput, icsImportResult, exportFormat, exportTypeFilter, exportStatusFilter, exportCategoryFilter, exportStartDate, exportEndDate, exportOutput, viewMode, focusDate } =
+render { items, draft, validationError, showConflictsOnly, conflictResolution, offlineMode, syncConflict, validationPanel, sortMode, notificationDefaults, notificationOverrides, notificationPanelOpen, notificationEditor, templates, templateDraft, editingTemplateId, csvInput, csvImportResult, icsInput, icsImportResult, exportFormat, exportTypeFilter, exportStatusFilter, exportCategoryFilter, exportStartDate, exportEndDate, exportOutput, viewMode, focusDate, activeModal } =
   let
     conflictIds = detectConflictIds items
     conflictGroups = detectConflictGroups items
@@ -673,13 +696,17 @@ render { items, draft, validationError, showConflictsOnly, conflictResolution, o
             , renderConflictActions conflictGroups
             ]
         , renderViewSelector viewMode focusDate
+        , renderMobileTools viewMode
         ]
-        , div [ class_ "agenda-layout" ]
+        , div [ class_ $ "agenda-layout" <> if viewMode == ViewDay then " agenda-layout--calendar" else "" ]
         [ div [ class_ "agenda-main" ]
-            [ renderForm draft validationError
-            , maybe (text "") renderValidationPanel validationPanel
-            , section [ class_ "agenda-list-panel" ]
-                [ renderAgendaView viewMode focusDate conflictIds sortedItems ]
+            [ maybe (text "") renderValidationPanel validationPanel
+            , section [ class_ $ "agenda-list-panel" <> if viewMode == ViewDay then " agenda-list-panel--calendar" else "" ]
+                [ if viewMode == ViewDay
+                    then div [ class_ "agenda-calendar-form-header" ] [ renderForm draft validationError ]
+                    else text ""
+                , renderAgendaView viewMode focusDate conflictIds sortedItems
+                ]
             , maybe (text "") (renderConflictResolution items) conflictResolution
             , maybe (text "") renderSyncConflict syncConflict
             ]
@@ -691,6 +718,7 @@ render { items, draft, validationError, showConflictsOnly, conflictResolution, o
             , renderAccordion "Export" "agenda-accordion export" $ renderExportPanel exportFormat exportTypeFilter exportStatusFilter exportCategoryFilter exportStartDate exportEndDate exportOutput
             ]
         ]
+    , renderAgendaModals activeModal showConflictsOnly conflictGroups offlineMode sortMode notificationDefaults notificationOverrides notificationEditor draft unplannedIntentions templates templateDraft editingTemplateId csvInput csvImportResult icsInput icsImportResult exportFormat exportTypeFilter exportStatusFilter exportCategoryFilter exportStartDate exportEndDate exportOutput
     ]
 
 renderAccordion :: forall w i. String -> String -> HTML w i -> HTML w i
@@ -716,6 +744,7 @@ renderForm draft validationError =
         [ input
             [ class_ "form-control agenda-input"
             , type_ InputDatetimeLocal
+            , attr (AttrName "lang") "fr"
             , placeholder "Debut"
             , onValueChange DraftStartChanged
             , value draft.windowStart
@@ -723,6 +752,7 @@ renderForm draft validationError =
         , input
             [ class_ "form-control agenda-input"
             , type_ InputDatetimeLocal
+            , attr (AttrName "lang") "fr"
             , placeholder "Fin"
             , onValueChange DraftEndChanged
             , value draft.windowEnd
@@ -734,9 +764,71 @@ renderForm draft validationError =
         , onValueChange DraftCategoryChanged
         , value draft.category
         ]
+    , div [ class_ "agenda-datetime-row" ]
+        [ button
+            [ class_ "btn btn-outline-secondary agenda-datetime-button"
+            , onClick (const $ OpenModal ModalDateTime)
+            ]
+            [ text "Dates & heures" ]
+        , div [ class_ "agenda-datetime-summary" ]
+            [ text $ summarizeDateRange draft.windowStart draft.windowEnd ]
+        ]
     , maybe (text "") renderValidationError validationError
     , button [ class_ "btn btn-primary agenda-submit", onClick (const SubmitIntention) ] [ text "Creer l'intention" ]
     ]
+
+renderDateTimeContent :: forall w. IntentionDraft -> HTML w Action
+renderDateTimeContent draft =
+  div [ class_ "agenda-modal-stack" ]
+    [ div [ class_ "agenda-modal-field" ]
+        [ div [ class_ "agenda-notifications-label" ] [ text "Debut" ]
+        , input
+            [ class_ "form-control agenda-input"
+            , type_ InputDatetimeLocal
+            , attr (AttrName "lang") "fr"
+            , placeholder "Debut"
+            , onValueChange DraftStartChanged
+            , value draft.windowStart
+            ]
+        ]
+    , div [ class_ "agenda-modal-field" ]
+        [ div [ class_ "agenda-notifications-label" ] [ text "Fin" ]
+        , input
+            [ class_ "form-control agenda-input"
+            , type_ InputDatetimeLocal
+            , attr (AttrName "lang") "fr"
+            , placeholder "Fin"
+            , onValueChange DraftEndChanged
+            , value draft.windowEnd
+            ]
+        ]
+    ]
+
+summarizeDateRange :: String -> String -> String
+summarizeDateRange start end =
+  if start == "" && end == "" then "Aucune date selectionnee"
+  else if end == "" then "Debut: " <> formatDateTimeFr start
+  else if start == "" then "Fin: " <> formatDateTimeFr end
+  else formatDateTimeFr start <> " → " <> formatDateTimeFr end
+
+formatDateTimeFr :: String -> String
+formatDateTimeFr raw =
+  if raw == "" then ""
+  else
+    let
+      parts = StringCommon.split (Pattern "T") raw
+      datePart = fromMaybe raw (index parts 0)
+      timePart = fromMaybe "" (index parts 1)
+      dateFr = formatDateFr datePart
+      timeFr = if timePart == "" then "" else String.take 5 timePart
+    in
+      if timeFr == "" then dateFr else dateFr <> " " <> timeFr
+
+formatDateFr :: String -> String
+formatDateFr datePart =
+  case StringCommon.split (Pattern "-") datePart of
+    [ yearPart, monthPart, dayPart ] -> dayPart <> "/" <> monthPart <> "/" <> yearPart
+    _ -> datePart
 
 renderValidationError :: forall w. ValidationError -> HTML w Action
 renderValidationError err =
@@ -763,11 +855,174 @@ renderAgendaView :: forall w. AgendaView -> String -> Array String -> Array Cale
 renderAgendaView viewMode focusDate conflictIds items =
   case viewMode of
     ViewDay ->
-      if null items then emptyAgenda else agendaList conflictIds items
+      renderDayCalendar focusDate conflictIds items
     ViewWeek ->
       renderRangeView "Semaine" (generateDateRange focusDate 7) conflictIds items
     ViewMonth ->
       renderRangeView "Mois" (generateMonthDates focusDate) conflictIds items
+
+type TimelineBlock =
+  { item :: CalendarItem
+  , startMin :: Int
+  , endMin :: Int
+  }
+
+type TimelineLayout =
+  { item :: CalendarItem
+  , startMin :: Int
+  , duration :: Int
+  , columnIndex :: Int
+  , columnCount :: Int
+  }
+
+renderDayCalendar :: forall w. String -> Array String -> Array CalendarItem -> HTML w Action
+renderDayCalendar focusDate conflictIds items =
+  let
+    itemsForDate = filter (isItemOnDate focusDate) items
+    sorted = sortItems SortByTime conflictIds itemsForDate
+    layout = buildTimelineLayout sorted
+  in
+    if null itemsForDate then emptyAgenda
+    else
+      div [ class_ "agenda-calendar" ]
+        [ div [ class_ "agenda-calendar-header" ]
+            [ div [ class_ "agenda-calendar-title" ] [ text focusDate ]
+            , div [ class_ "agenda-calendar-count" ] [ text $ show (length itemsForDate) <> " items" ]
+            ]
+        , div [ class_ "agenda-calendar-body" ]
+            [ div [ class_ "agenda-calendar-hours" ]
+                (map renderHourLabel (enumFromTo 0 23) <> [ renderHourLabelEnd ])
+            , div [ class_ "agenda-calendar-grid" ]
+                [ div [ class_ "agenda-calendar-lines" ]
+                    (map renderHourLine (enumFromTo 0 23))
+                , div [ class_ "agenda-calendar-items" ]
+                    (map (renderTimelineItem conflictIds) layout)
+                ]
+            ]
+        ]
+
+renderHourLabel :: forall w i. Int -> HTML w i
+renderHourLabel h =
+  div [ class_ "agenda-calendar-hour" ] [ text $ pad2 h <> ":00" ]
+
+renderHourLabelEnd :: forall w i. HTML w i
+renderHourLabelEnd =
+  div [ class_ "agenda-calendar-hour agenda-calendar-hour--end" ] [ text "24:00" ]
+
+renderHourLine :: forall w i. Int -> HTML w i
+renderHourLine _ =
+  div [ class_ "agenda-calendar-line" ] []
+
+renderTimelineItem :: forall w. Array String -> TimelineLayout -> HTML w Action
+renderTimelineItem conflictIds layout =
+  let
+    content = calendarItemContent layout.item
+    typeClass =
+      case content.itemType of
+        ScheduledBlock -> " agenda-calendar-item--scheduled"
+        Intention -> " agenda-calendar-item--intention"
+    conflictClass = if isConflict conflictIds layout.item then " agenda-calendar-item--conflict" else ""
+    inlineStyle =
+      " --start:" <> show layout.startMin <> ";" <>
+      " --duration:" <> show layout.duration <> ";" <>
+      " --column:" <> show layout.columnIndex <> ";" <>
+      " --columns:" <> show layout.columnCount <> ";"
+  in
+    div
+      [ class_ $ "agenda-calendar-item" <> typeClass <> conflictClass
+      , style inlineStyle
+      ]
+      [ div [ class_ "agenda-calendar-meta" ]
+          [ div [ class_ "agenda-calendar-item-time" ]
+              [ text $ timeLabel content.windowStart <> " → " <> timeLabel content.windowEnd ]
+          , div [ class_ "agenda-calendar-item-title" ] [ text content.title ]
+          , div [ class_ "agenda-calendar-footer" ]
+              [ renderCategory content.category
+              , div [ class_ "agenda-calendar-actions" ]
+                  [ renderValidationAction layout.item content
+                  , renderPlanifyAction layout.item content
+                  ]
+              ]
+          ]
+      ]
+
+buildTimelineLayout :: Array CalendarItem -> Array TimelineLayout
+buildTimelineLayout items =
+  let
+    blocks = sortBy compareStart (mapMaybe toTimelineBlock items)
+    groups = groupTimelineBlocks blocks
+  in
+    foldl (\acc group -> acc <> assignColumns group) [] groups
+  where
+  compareStart a b = compare a.startMin b.startMin
+
+groupTimelineBlocks :: Array TimelineBlock -> Array (Array TimelineBlock)
+groupTimelineBlocks blocks =
+  case uncons blocks of
+    Nothing -> []
+    Just { head, tail } -> go tail [ head ] head.endMin []
+  where
+  go remaining current maxEnd acc =
+    case uncons remaining of
+      Nothing -> acc <> [ current ]
+      Just { head: next, tail } ->
+        if next.startMin < maxEnd then
+          go tail (current <> [ next ]) (max maxEnd next.endMin) acc
+        else
+          go tail [ next ] next.endMin (acc <> [ current ])
+
+assignColumns :: Array TimelineBlock -> Array TimelineLayout
+assignColumns group =
+  let
+    sorted = sortBy (\a b -> compare a.startMin b.startMin) group
+    initial = { columns: [], maxColumns: 0, placements: [] }
+    step acc block =
+      let
+        openIndex = findIndex (\endMin -> endMin <= block.startMin) acc.columns
+        columnIndex = case openIndex of
+          Just idx -> idx
+          Nothing -> length acc.columns
+        columns' = case openIndex of
+          Just idx -> fromMaybe acc.columns (updateAt idx block.endMin acc.columns)
+          Nothing -> acc.columns <> [ block.endMin ]
+        maxColumns' = max acc.maxColumns (length columns')
+        placements' = acc.placements <> [ { block, columnIndex } ]
+      in
+        { columns: columns', maxColumns: maxColumns', placements: placements' }
+    result = foldl step initial sorted
+  in
+    map
+      (\placement ->
+        { item: placement.block.item
+        , startMin: placement.block.startMin
+        , duration: max 1 (placement.block.endMin - placement.block.startMin)
+        , columnIndex: placement.columnIndex
+        , columnCount: result.maxColumns
+        }
+      )
+      result.placements
+
+toTimelineBlock :: CalendarItem -> Maybe TimelineBlock
+toTimelineBlock item = do
+  let content = calendarItemContent item
+  startMin <- minuteOfDay content.windowStart
+  endMinRaw <- minuteOfDay content.windowEnd
+  let
+    startClamped = clamp 0 1439 startMin
+    endAdjusted = if endMinRaw <= startMin then 1440 else endMinRaw
+    endClamped = clamp (startClamped + 1) 1440 endAdjusted
+  if endClamped <= 0 || startClamped >= 1440 then Nothing
+  else Just { item, startMin: startClamped, endMin: endClamped }
+
+minuteOfDay :: String -> Maybe Int
+minuteOfDay raw = do
+  dt <- parseDateTimeLocal raw
+  let t = time dt
+  pure $ (fromEnum (hour t) * 60) + fromEnum (minute t)
+
+clamp :: Int -> Int -> Int -> Int
+clamp low high value =
+  max low (min high value)
 
 renderRangeView :: forall w. String -> Array String -> Array String -> Array CalendarItem -> HTML w Action
 renderRangeView label dates conflictIds items =
@@ -861,6 +1116,40 @@ renderNotificationsPanel isOpen defaults overrides editor intentions =
       , if isOpen then renderNotificationDefaults defaults else text ""
       , if isOpen then renderNotificationList defaults overrides editor intentions else text ""
       ]
+
+renderNotificationsContent :: forall w. NotificationDefaults -> Array NotificationOverride -> Maybe NotificationEditor -> Array CalendarItem -> HTML w Action
+renderNotificationsContent defaults overrides editor intentions =
+  if null intentions then
+    div [ class_ "agenda-modal-empty" ]
+      [ text "Aucune intention non planifiee." ]
+  else
+    div [ class_ "agenda-notifications-modal" ]
+      [ renderNotificationDefaults defaults
+      , renderNotificationList defaults overrides editor intentions
+      ]
+
+renderFiltersContent :: forall w. Boolean -> Array (Array String) -> Boolean -> SortMode -> HTML w Action
+renderFiltersContent showConflictsOnly conflictGroups offlineMode sortMode =
+  div [ class_ "agenda-modal-stack" ]
+    [ button
+        [ class_ $ "btn btn-sm agenda-filter" <> if showConflictsOnly then " btn-outline-primary" else " btn-outline-secondary"
+        , onClick (const ToggleConflictFilter)
+        ]
+        [ text "Filtrer: en conflit" ]
+    , renderOfflineToggle offlineMode
+    , renderSortPicker sortMode
+    , renderConflictActions conflictGroups
+    ]
+
+renderToolsContent :: forall w. HTML w Action
+renderToolsContent =
+  div [ class_ "agenda-modal-stack" ]
+    [ button [ class_ "btn btn-outline-secondary", onClick (const $ OpenModal ModalNotifications) ] [ text "Rappels" ]
+    , button [ class_ "btn btn-outline-secondary", onClick (const $ OpenModal ModalTemplates) ] [ text "Templates" ]
+    , button [ class_ "btn btn-outline-secondary", onClick (const $ OpenModal ModalImportCsv) ] [ text "Import CSV" ]
+    , button [ class_ "btn btn-outline-secondary", onClick (const $ OpenModal ModalImportIcs) ] [ text "Import ICS" ]
+    , button [ class_ "btn btn-outline-secondary", onClick (const $ OpenModal ModalExport) ] [ text "Export" ]
+    ]
 
 renderNotificationDefaults :: forall w. NotificationDefaults -> HTML w Action
 renderNotificationDefaults defaults =
@@ -1788,10 +2077,67 @@ renderViewSelector viewMode focusDate =
         , input
             [ class_ "form-control agenda-input agenda-view-date"
             , type_ InputDate
+            , attr (AttrName "lang") "fr"
             , value focusDate
             , onValueChange FocusDateChanged
             ]
         ]
+    ]
+
+renderMobileTools :: forall w. AgendaView -> HTML w Action
+renderMobileTools viewMode =
+  if viewMode /= ViewDay then text ""
+  else
+    div [ class_ "agenda-mobile-tools" ]
+      [ button [ class_ "btn btn-sm btn-outline-secondary", onClick (const $ OpenModal ModalFilters) ] [ text "Filtres" ]
+      , button [ class_ "btn btn-sm btn-primary", onClick (const $ OpenModal ModalTools) ] [ text "Outils" ]
+      ]
+
+renderAgendaModals ::
+  forall w.
+  Maybe AgendaModal ->
+  Boolean ->
+  Array (Array String) ->
+  Boolean ->
+  SortMode ->
+  NotificationDefaults ->
+  Array NotificationOverride ->
+  Maybe NotificationEditor ->
+  IntentionDraft ->
+  Array CalendarItem ->
+  Array TaskTemplate ->
+  TemplateDraft ->
+  Maybe String ->
+  String ->
+  Maybe CsvImportResult ->
+  String ->
+  Maybe IcsImportResult ->
+  ExportFormat ->
+  String ->
+  String ->
+  String ->
+  String ->
+  String ->
+  String ->
+  HTML w Action
+renderAgendaModals activeModal showConflictsOnly conflictGroups offlineMode sortMode defaults overrides editor draft intentions templates templateDraft editingTemplateId csvInput csvImportResult icsInput icsImportResult exportFormat exportTypeFilter exportStatusFilter exportCategoryFilter exportStartDate exportEndDate exportOutput =
+  div []
+    [ renderModal "Filtres" (activeModal == Just ModalFilters) CloseModal
+        [ renderFiltersContent showConflictsOnly conflictGroups offlineMode sortMode ]
+    , renderModal "Outils" (activeModal == Just ModalTools) CloseModal
+        [ renderToolsContent ]
+    , renderModal "Dates et heures" (activeModal == Just ModalDateTime) CloseModal
+        [ renderDateTimeContent draft ]
+    , renderModal "Rappels" (activeModal == Just ModalNotifications) CloseModal
+        [ renderNotificationsContent defaults overrides editor intentions ]
+    , renderModal "Templates de taches" (activeModal == Just ModalTemplates) CloseModal
+        [ renderTemplatesPanel templates templateDraft editingTemplateId ]
+    , renderModal "Import CSV" (activeModal == Just ModalImportCsv) CloseModal
+        [ renderCsvImportPanel csvInput csvImportResult ]
+    , renderModal "Import ICS" (activeModal == Just ModalImportIcs) CloseModal
+        [ renderIcsImportPanel icsInput icsImportResult ]
+    , renderModal "Export" (activeModal == Just ModalExport) CloseModal
+        [ renderExportPanel exportFormat exportTypeFilter exportStatusFilter exportCategoryFilter exportStartDate exportEndDate exportOutput ]
     ]
 
 viewTitle :: AgendaView -> String
