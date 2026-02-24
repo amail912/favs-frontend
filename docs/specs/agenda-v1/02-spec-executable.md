@@ -130,7 +130,7 @@ Feature: Planification quotidienne
 Endpoints (versionnes):
 - `GET /api/v1/calendar-items`
 - `POST /api/v1/calendar-items`
-- `PATCH /api/v1/calendar-items/:id`
+- `POST /api/v1/calendar-items/:id`
 - `DELETE /api/v1/calendar-items/:id`
 - `POST /api/v1/calendar-items/:id/validate`
 - `POST /api/v1/conflicts/:conflictGroupId/resolve`
