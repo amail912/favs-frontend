@@ -21,7 +21,7 @@ module Pages.Agenda
 import Prelude hiding (div)
 
 import Affjax.Web (Response)
-import Api.Agenda (createItemResponse, getItemsResponse, validateItemResponse)
+import Api.Agenda (createItemResponse, getItemsResponse, updateItemResponse, validateItemResponse)
 import Control.Alt ((<|>))
 import Control.Monad.Except (ExceptT(..), withExceptT)
 import Control.Monad.RWS (get, modify_)
@@ -31,7 +31,7 @@ import Data.Argonaut.Decode (decodeJson)
 import Data.Array (catMaybes, elem, filter, find, findIndex, foldM, index, length, mapMaybe, mapWithIndex, nub, null, sortBy, uncons, updateAt)
 import Data.Bifunctor (lmap)
 import Data.Either (Either(..))
-import Data.Foldable (all, foldl)
+import Data.Foldable (all, any, foldl)
 import Data.Generic.Rep (class Generic)
 import Data.Int as Int
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
@@ -61,7 +61,11 @@ import Ui.AgendaRender (renderPanelHeader)
 import Ui.Modal (renderModal)
 import Ui.Utils (class_)
 import Web.Event.Event (preventDefault)
+import Web.Event.Event (currentTarget, target) as Event
 import Web.HTML.Event.DragEvent (DragEvent, toEvent)
+import Web.HTML.HTMLElement as HTMLElement
+import Web.DOM.Element (getBoundingClientRect)
+import Web.UIEvent.MouseEvent as MouseEvent
 import Web.UIEvent.KeyboardEvent as KE
 import Agenda.Model
   ( AgendaView(..)
@@ -190,6 +194,8 @@ type State =
   , validationPanel :: Maybe ValidationPanel
   , sortMode :: SortMode
   , draggingId :: Maybe String
+  , dragHoverIndex :: Maybe Int
+  , dragOffsetMinutes :: Maybe Int
   , notificationDefaults :: NotificationDefaults
   , notificationOverrides :: Array NotificationOverride
   , notificationPanelOpen :: Boolean
@@ -225,10 +231,12 @@ data Action
   | ToggleConflictFilter
   | ToggleOffline
   | SortChanged String
-  | DragStart String
+  | DragStart String DragEvent
   | DragOver String DragEvent
   | DropOn String
   | DragEnd
+  | DragOverCalendar DragEvent
+  | DropOnCalendar DragEvent
   | OpenValidation String CalendarItemContent
   | ValidationMinutesChanged String
   | ConfirmValidation
@@ -333,6 +341,8 @@ initialState = const
   , viewMode: ViewDay
   , focusDate: ""
   , activeModal: Nothing
+  , dragHoverIndex: Nothing
+  , dragOffsetMinutes: Nothing
   }
 
 handleAction :: Action -> AgendaAppM Unit
@@ -374,8 +384,16 @@ handleAction action = handleError $
       else lift $ modify_ _ { offlineMode = true }
     SortChanged raw ->
       lift $ modify_ \st -> st { sortMode = parseSortMode raw }
-    DragStart itemId ->
-      lift $ modify_ _ { draggingId = Just itemId }
+    DragStart itemId ev -> do
+      st <- get
+      let duration =
+            find (\item -> case item of
+              ServerCalendarItem { id } -> id == itemId
+              _ -> false
+            ) st.items >>= \item ->
+              durationMinutesBetween (calendarItemContent item).windowStart (calendarItemContent item).windowEnd
+      offset <- liftEffect $ dragOffsetFromEvent ev duration
+      lift $ modify_ _ { draggingId = Just itemId, dragOffsetMinutes = offset }
     DragOver _ ev ->
       liftEffect $ preventDefault (toEvent ev)
     DropOn targetId -> do
@@ -386,7 +404,54 @@ handleAction action = handleError $
           let reordered = moveItemBefore draggingId targetId st.items
           lift $ modify_ _ { items = reordered, draggingId = Nothing }
     DragEnd ->
-      lift $ modify_ _ { draggingId = Nothing }
+      lift $ modify_ _ { draggingId = Nothing, dragHoverIndex = Nothing, dragOffsetMinutes = Nothing }
+    DragOverCalendar ev -> do
+      liftEffect $ preventDefault (toEvent ev)
+      idx <- liftEffect $ dragMinuteIndexFromEvent ev
+      lift $ modify_ _ { dragHoverIndex = idx }
+    DropOnCalendar ev -> do
+      liftEffect $ preventDefault (toEvent ev)
+      idx <- liftEffect $ dragMinuteIndexFromEvent ev
+      st <- get
+      case st.draggingId of
+        Nothing -> pure unit
+        Just draggingId -> do
+          let
+            baseDateTime = st.focusDate <> "T00:00"
+            offset = fromMaybe 0 st.dragOffsetMinutes
+            minuteIndex = fromMaybe 0 idx
+            totalMinutes = max 0 ((minuteIndex * 5) - offset)
+            hour = Int.quot totalMinutes 60
+            minute = Int.rem totalMinutes 60
+            newStart = combineDateWithTime baseDateTime (pad2 hour <> ":" <> pad2 minute)
+            updated =
+              newStart >>= \start ->
+                find (\item -> case item of
+                  ServerCalendarItem { id } -> id == draggingId
+                  _ -> false
+                ) st.items >>= \item ->
+                  durationMinutesBetween (calendarItemContent item).windowStart (calendarItemContent item).windowEnd >>= \mins ->
+                    shiftMinutes mins start >>= \end ->
+                      Just { start, end }
+          case updated of
+            Nothing -> lift $ modify_ _ { draggingId = Nothing, dragHoverIndex = Nothing, dragOffsetMinutes = Nothing }
+            Just { start, end } -> do
+              let
+                result = updateItemWindowById draggingId start end st.items
+              case result.updated of
+                Nothing -> lift $ modify_ _ { draggingId = Nothing, dragHoverIndex = Nothing, dragOffsetMinutes = Nothing }
+                Just updatedItem -> do
+                  if st.offlineMode then
+                    lift $ modify_ _ { items = result.items
+                                    , pendingSync = upsertPendingItem updatedItem st.pendingSync
+                                    , draggingId = Nothing
+                                    , dragHoverIndex = Nothing
+                                    , dragOffsetMinutes = Nothing
+                                    }
+                  else do
+                    _ <- updateItem draggingId updatedItem
+                    lift $ modify_ _ { draggingId = Nothing, dragHoverIndex = Nothing, dragOffsetMinutes = Nothing }
+                    refreshItems
     OpenValidation itemId content -> do
       suggested <- liftEffect $ suggestDurationMinutes content.windowStart
       lift $ modify_ _ { validationPanel = Just { itemId, proposedMinutes: suggested, inputValue: "" } }
@@ -623,6 +688,9 @@ refreshItems = do
 createItem :: CalendarItem -> ErrorAgendaAppM (Response Json)
 createItem item = withExceptT toFatalError $ ExceptT $ liftAff $ createItemResponse item
 
+updateItem :: String -> CalendarItem -> ErrorAgendaAppM (Response Json)
+updateItem itemId item = withExceptT toFatalError $ ExceptT $ liftAff $ updateItemResponse itemId item
+
 validateItem :: String -> Int -> ErrorAgendaAppM (Response Json)
 validateItem itemId minutes =
   withExceptT toFatalError $ ExceptT $ liftAff $ validateItemResponse itemId minutes
@@ -670,7 +738,7 @@ submitIntention = do
         refreshItems
 
 render :: forall m. State -> H.ComponentHTML Action () m
-render { items, draft, validationError, showConflictsOnly, conflictResolution, offlineMode, syncConflict, validationPanel, sortMode, notificationDefaults, notificationOverrides, notificationPanelOpen, notificationEditor, templates, templateDraft, editingTemplateId, csvInput, csvImportResult, icsInput, icsImportResult, exportFormat, exportTypeFilter, exportStatusFilter, exportCategoryFilter, exportStartDate, exportEndDate, exportOutput, viewMode, focusDate, activeModal } =
+render { items, draft, validationError, showConflictsOnly, conflictResolution, offlineMode, syncConflict, validationPanel, sortMode, notificationDefaults, notificationOverrides, notificationPanelOpen, notificationEditor, templates, templateDraft, editingTemplateId, csvInput, csvImportResult, icsInput, icsImportResult, exportFormat, exportTypeFilter, exportStatusFilter, exportCategoryFilter, exportStartDate, exportEndDate, exportOutput, viewMode, focusDate, activeModal, draggingId, dragHoverIndex } =
   let
     conflictIds = detectConflictIds items
     conflictGroups = detectConflictGroups items
@@ -705,7 +773,7 @@ render { items, draft, validationError, showConflictsOnly, conflictResolution, o
                 [ if viewMode == ViewDay
                     then div [ class_ "agenda-calendar-form-header" ] [ renderForm draft validationError ]
                     else text ""
-                , renderAgendaView viewMode focusDate conflictIds sortedItems
+        , renderAgendaView viewMode focusDate conflictIds sortedItems draggingId dragHoverIndex
                 ]
             , maybe (text "") (renderConflictResolution items) conflictResolution
             , maybe (text "") renderSyncConflict syncConflict
@@ -851,11 +919,11 @@ emptyAgenda =
         ]
     ]
 
-renderAgendaView :: forall w. AgendaView -> String -> Array String -> Array CalendarItem -> HTML w Action
-renderAgendaView viewMode focusDate conflictIds items =
+renderAgendaView :: forall w. AgendaView -> String -> Array String -> Array CalendarItem -> Maybe String -> Maybe Int -> HTML w Action
+renderAgendaView viewMode focusDate conflictIds items draggingId dragHoverIndex =
   case viewMode of
     ViewDay ->
-      renderDayCalendar focusDate conflictIds items
+      renderDayCalendar focusDate conflictIds items draggingId dragHoverIndex
     ViewWeek ->
       renderRangeView "Semaine" (generateDateRange focusDate 7) conflictIds items
     ViewMonth ->
@@ -875,8 +943,8 @@ type TimelineLayout =
   , columnCount :: Int
   }
 
-renderDayCalendar :: forall w. String -> Array String -> Array CalendarItem -> HTML w Action
-renderDayCalendar focusDate conflictIds items =
+renderDayCalendar :: forall w. String -> Array String -> Array CalendarItem -> Maybe String -> Maybe Int -> HTML w Action
+renderDayCalendar focusDate conflictIds items draggingId dragHoverIndex =
   let
     itemsForDate = filter (isItemOnDate focusDate) items
     sorted = sortItems SortByTime conflictIds itemsForDate
@@ -892,10 +960,16 @@ renderDayCalendar focusDate conflictIds items =
         , div [ class_ "agenda-calendar-body" ]
             [ div [ class_ "agenda-calendar-hours" ]
                 (map renderHourLabel (enumFromTo 0 23) <> [ renderHourLabelEnd ])
-            , div [ class_ "agenda-calendar-grid" ]
+            , div
+                [ class_ "agenda-calendar-grid"
+                , onDragOver DragOverCalendar
+                , onDrop DropOnCalendar
+                ]
                 [ div [ class_ "agenda-calendar-lines" ]
                     (map renderHourLine (enumFromTo 0 23))
-                , div [ class_ "agenda-calendar-items" ]
+                , maybe (text "") renderDropIndicator dragHoverIndex
+                , div
+                    [ class_ $ "agenda-calendar-items" <> if draggingId == Nothing then "" else " agenda-calendar-items--dragging" ]
                     (map (renderTimelineItem conflictIds) layout)
                 ]
             ]
@@ -909,9 +983,26 @@ renderHourLabelEnd :: forall w i. HTML w i
 renderHourLabelEnd =
   div [ class_ "agenda-calendar-hour agenda-calendar-hour--end" ] [ text "24:00" ]
 
-renderHourLine :: forall w i. Int -> HTML w i
-renderHourLine _ =
-  div [ class_ "agenda-calendar-line" ] []
+renderHourLine :: forall w. Int -> HTML w Action
+renderHourLine h =
+  div
+    [ class_ "agenda-calendar-line" ]
+    []
+
+renderDropIndicator :: forall w. Int -> HTML w Action
+renderDropIndicator idx =
+  let
+    totalMinutes = idx * 5
+    hour = Int.quot totalMinutes 60
+    minute = Int.rem totalMinutes 60
+    label = pad2 hour <> ":" <> pad2 minute
+    inlineStyle = "top: calc(" <> show totalMinutes <> " * var(--agenda-minute-height));"
+  in
+    div
+      [ class_ "agenda-calendar-drop-indicator"
+      , style inlineStyle
+      ]
+      [ div [ class_ "agenda-calendar-drop-label" ] [ text label ] ]
 
 renderTimelineItem :: forall w. Array String -> TimelineLayout -> HTML w Action
 renderTimelineItem conflictIds layout =
@@ -927,11 +1018,12 @@ renderTimelineItem conflictIds layout =
       " --duration:" <> show layout.duration <> ";" <>
       " --column:" <> show layout.columnIndex <> ";" <>
       " --columns:" <> show layout.columnCount <> ";"
+    dragProps = dragCalendarHandlers layout.item
   in
     div
-      [ class_ $ "agenda-calendar-item" <> typeClass <> conflictClass
-      , style inlineStyle
-      ]
+      ([ class_ $ "agenda-calendar-item" <> typeClass <> conflictClass
+       , style inlineStyle
+       ] <> dragProps)
       [ div [ class_ "agenda-calendar-meta" ]
           [ div [ class_ "agenda-calendar-item-time" ]
               [ text $ timeLabel content.windowStart <> " → " <> timeLabel content.windowEnd ]
@@ -1521,12 +1613,33 @@ dragHandlers ::
     )
 dragHandlers (ServerCalendarItem { id }) =
   [ draggable true
-  , onDragStart (const $ DragStart id)
+  , onDragStart (\ev -> DragStart id ev)
   , onDragOver (\ev -> DragOver id ev)
   , onDrop (const $ DropOn id)
   , onDragEnd (const DragEnd)
   ]
 dragHandlers _ = []
+
+dragCalendarHandlers ::
+  forall r.
+  CalendarItem ->
+  Array
+    (IProp
+       ( draggable :: Boolean
+       , onDragStart :: DragEvent
+       , onDragEnd :: DragEvent
+       | r
+       )
+       Action
+    )
+dragCalendarHandlers (ServerCalendarItem { id, content }) =
+  if content.itemType == Intention then
+    [ draggable true
+    , onDragStart (\ev -> DragStart id ev)
+    , onDragEnd (const DragEnd)
+    ]
+  else []
+dragCalendarHandlers _ = []
 
 isConflict :: Array String -> CalendarItem -> Boolean
 isConflict conflictIds (ServerCalendarItem { id }) = elem id conflictIds
@@ -1644,6 +1757,73 @@ combineDateWithTime dateTimeRaw timeRaw = do
   dt <- parseDateTimeLocal dateTimeRaw
   t <- parseTimeLocal timeRaw
   pure $ formatDateTimeLocal (DateTime (date dt) t)
+
+dragOffsetFromEvent :: DragEvent -> Maybe Int -> Effect (Maybe Int)
+dragOffsetFromEvent ev duration = do
+  let
+    dur = fromMaybe 0 duration
+    event = toEvent ev
+    mouse = MouseEvent.fromEvent event
+    clientY = maybe 0 MouseEvent.clientY mouse
+    targetEl =
+      (Event.currentTarget event <|> Event.target event)
+        >>= HTMLElement.fromEventTarget
+        <#> HTMLElement.toElement
+  case targetEl of
+    Nothing -> pure (Just 0)
+    Just el -> do
+      rect <- getBoundingClientRect el
+      let
+        safeDuration = max 1 dur
+        minuteHeight = rect.height / Int.toNumber safeDuration
+        offsetPx = Int.toNumber clientY - rect.top
+        rawMinutes = if minuteHeight <= 0.0 then 0.0 else offsetPx / minuteHeight
+        minutes = Int.floor rawMinutes
+        clamped = max 0 (min (safeDuration - 1) minutes)
+        snapped = Int.quot clamped 5 * 5
+      pure (Just snapped)
+
+dragMinuteIndexFromEvent :: DragEvent -> Effect (Maybe Int)
+dragMinuteIndexFromEvent ev = do
+  let
+    event = toEvent ev
+    mouse = MouseEvent.fromEvent event
+    clientY = maybe 0 MouseEvent.clientY mouse
+    targetEl =
+      (Event.currentTarget event <|> Event.target event)
+        >>= HTMLElement.fromEventTarget
+        <#> HTMLElement.toElement
+  case targetEl of
+    Nothing -> pure Nothing
+    Just el -> do
+      rect <- getBoundingClientRect el
+      let
+        minuteHeight = rect.height / 1440.0
+        offsetPx = Int.toNumber clientY - rect.top
+        rawMinutes = if minuteHeight <= 0.0 then 0.0 else offsetPx / minuteHeight
+        minutes = max 0 (min 1439 (Int.floor rawMinutes))
+        index = Int.quot minutes 5
+      pure (Just index)
+
+upsertPendingItem :: CalendarItem -> Array CalendarItem -> Array CalendarItem
+upsertPendingItem item pending =
+  case item of
+    ServerCalendarItem { id } ->
+      let
+        hasSame =
+          any (\candidate -> case candidate of
+            ServerCalendarItem { id: candidateId } -> candidateId == id
+            _ -> false
+          ) pending
+      in
+        if hasSame then
+          map (\candidate -> case candidate of
+            ServerCalendarItem payload | payload.id == id -> item
+            _ -> candidate
+          ) pending
+        else
+          pending <> [ item ]
+    _ -> pending
 
 reminderTimesForIntention :: NotificationDefaults -> Maybe NotificationOverride -> CalendarItemContent -> Array ReminderTime
 reminderTimesForIntention defaults override content =
@@ -2325,3 +2505,29 @@ renderConfirmation pending =
 calendarItemContent :: CalendarItem -> CalendarItemContent
 calendarItemContent (NewCalendarItem { content }) = content
 calendarItemContent (ServerCalendarItem { content }) = content
+
+updateItemWindowById ::
+  String ->
+  String ->
+  String ->
+  Array CalendarItem ->
+  { items :: Array CalendarItem, updated :: Maybe CalendarItem }
+updateItemWindowById targetId newStart newEnd items =
+  foldl step { items: [], updated: Nothing } items
+  where
+  step acc item =
+    case item of
+      ServerCalendarItem payload | payload.id == targetId ->
+        let
+          updatedItem =
+            ServerCalendarItem
+              payload
+                { content = payload.content
+                    { windowStart = newStart
+                    , windowEnd = newEnd
+                    }
+                }
+        in
+          { items: acc.items <> [ updatedItem ], updated: Just updatedItem }
+      _ ->
+        { items: acc.items <> [ item ], updated: acc.updated }
