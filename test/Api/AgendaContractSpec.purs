@@ -12,5 +12,5 @@ spec =
     it "uses POST for updating calendar items" do
       updateMethod `shouldEqual` POST
 
-    it "builds update paths with the item id" do
-      updatePath "item-123" `shouldEqual` "/api/v1/calendar-items/item-123"
+    it "uses the base calendar-items path for updates" do
+      updatePath "item-123" `shouldEqual` "/api/v1/calendar-items"
