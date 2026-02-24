@@ -6,6 +6,7 @@ import Effect.Aff (Aff)
 import Test.Api.AgendaContractSpec as AgendaContractSpec
 import Test.Api.ChecklistsContractSpec as ChecklistsContractSpec
 import Test.Api.NotesContractSpec as NotesContractSpec
+import Test.Agenda.DragSpec as DragSpec
 import Test.Domain.Agenda.Spec as AgendaSpec
 import Test.Pages.ChecklistsSpec as ChecklistsSpec
 import Test.Pages.NotesSpec as NotesSpec
@@ -18,6 +19,7 @@ runSpecSuite :: Aff Unit
 runSpecSuite = runSpec [ consoleReporter ] do
   NotesContractSpec.spec
   ChecklistsContractSpec.spec
+  DragSpec.spec
   NotesSpec.spec
   ChecklistsSpec.spec
   AgendaContractSpec.spec

@@ -96,6 +96,7 @@ import Agenda.Model
   , emptyTemplateDraft
   )
 import Agenda.Imports (parseCsvImport, parseIcsImport)
+import Agenda.Drag (computeDropMinuteIndex, indexToMinutes, indexToTimeLabel)
 import Agenda.Exports
   ( exportFormatValue
   , parseExportFormat
@@ -416,11 +417,7 @@ handleAction action = handleError $
       st <- get
       let
         offset = fromMaybe 0 st.dragOffsetMinutes
-        adjusted = idx <#> \minuteIndex ->
-          let
-            totalMinutes = max 0 ((minuteIndex * 5) - offset)
-          in
-            Int.quot totalMinutes 5
+        adjusted = idx <#> \minuteIndex -> computeDropMinuteIndex minuteIndex offset
       lift $ modify_ _ { dragHoverIndex = adjusted }
     DropOnCalendar ev -> do
       liftEffect $ preventDefault (toEvent ev)
@@ -433,7 +430,8 @@ handleAction action = handleError $
             baseDateTime = st.focusDate <> "T00:00"
             offset = fromMaybe 0 st.dragOffsetMinutes
             minuteIndex = fromMaybe 0 idx
-            totalMinutes = max 0 ((minuteIndex * 5) - offset)
+            adjustedIndex = computeDropMinuteIndex minuteIndex offset
+            totalMinutes = indexToMinutes adjustedIndex
             hour = Int.quot totalMinutes 60
             minute = Int.rem totalMinutes 60
             newStart = combineDateWithTime baseDateTime (pad2 hour <> ":" <> pad2 minute)
@@ -1034,10 +1032,8 @@ renderHourLine h =
 renderDropIndicator :: forall w. Int -> HTML w Action
 renderDropIndicator idx =
   let
-    totalMinutes = idx * 5
-    hour = Int.quot totalMinutes 60
-    minute = Int.rem totalMinutes 60
-    label = pad2 hour <> ":" <> pad2 minute
+    totalMinutes = indexToMinutes idx
+    label = indexToTimeLabel idx
     inlineStyle = "top: calc(" <> show totalMinutes <> " * var(--agenda-minute-height));"
   in
     div
