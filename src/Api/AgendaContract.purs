@@ -26,7 +26,7 @@ createPath :: String
 createPath = "/api/v1/calendar-items"
 
 updatePath :: String -> String
-updatePath itemId = "/api/v1/calendar-items/" <> itemId
+updatePath _ = "/api/v1/calendar-items"
 
 updateMethod :: Method
 updateMethod = POST

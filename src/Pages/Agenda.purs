@@ -196,6 +196,7 @@ type State =
   , draggingId :: Maybe String
   , dragHoverIndex :: Maybe Int
   , dragOffsetMinutes :: Maybe Int
+  , updateError :: Maybe String
   , notificationDefaults :: NotificationDefaults
   , notificationOverrides :: Array NotificationOverride
   , notificationPanelOpen :: Boolean
@@ -237,6 +238,7 @@ data Action
   | DragEnd
   | DragOverCalendar DragEvent
   | DropOnCalendar DragEvent
+  | DismissUpdateError
   | OpenValidation String CalendarItemContent
   | ValidationMinutesChanged String
   | ConfirmValidation
@@ -320,6 +322,9 @@ initialState = const
   , validationPanel: Nothing
   , sortMode: SortByTime
   , draggingId: Nothing
+  , dragHoverIndex: Nothing
+  , dragOffsetMinutes: Nothing
+  , updateError: Nothing
   , notificationDefaults: defaultNotificationDefaults
   , notificationOverrides: []
   , notificationPanelOpen: false
@@ -341,8 +346,6 @@ initialState = const
   , viewMode: ViewDay
   , focusDate: ""
   , activeModal: Nothing
-  , dragHoverIndex: Nothing
-  , dragOffsetMinutes: Nothing
   }
 
 handleAction :: Action -> AgendaAppM Unit
@@ -405,10 +408,20 @@ handleAction action = handleError $
           lift $ modify_ _ { items = reordered, draggingId = Nothing }
     DragEnd ->
       lift $ modify_ _ { draggingId = Nothing, dragHoverIndex = Nothing, dragOffsetMinutes = Nothing }
+    DismissUpdateError ->
+      lift $ modify_ _ { updateError = Nothing }
     DragOverCalendar ev -> do
       liftEffect $ preventDefault (toEvent ev)
       idx <- liftEffect $ dragMinuteIndexFromEvent ev
-      lift $ modify_ _ { dragHoverIndex = idx }
+      st <- get
+      let
+        offset = fromMaybe 0 st.dragOffsetMinutes
+        adjusted = idx <#> \minuteIndex ->
+          let
+            totalMinutes = max 0 ((minuteIndex * 5) - offset)
+          in
+            Int.quot totalMinutes 5
+      lift $ modify_ _ { dragHoverIndex = adjusted }
     DropOnCalendar ev -> do
       liftEffect $ preventDefault (toEvent ev)
       idx <- liftEffect $ dragMinuteIndexFromEvent ev
@@ -447,11 +460,24 @@ handleAction action = handleError $
                                     , draggingId = Nothing
                                     , dragHoverIndex = Nothing
                                     , dragOffsetMinutes = Nothing
+                                    , updateError = Nothing
                                     }
                   else do
-                    _ <- updateItem draggingId updatedItem
-                    lift $ modify_ _ { draggingId = Nothing, dragHoverIndex = Nothing, dragOffsetMinutes = Nothing }
-                    refreshItems
+                    resp <- updateItem draggingId updatedItem
+                    if statusOk resp then do
+                      lift $ modify_ _ { draggingId = Nothing
+                                      , dragHoverIndex = Nothing
+                                      , dragOffsetMinutes = Nothing
+                                      , updateError = Nothing
+                                      }
+                      refreshItems
+                    else do
+                      lift $ modify_ _ { draggingId = Nothing
+                                      , dragHoverIndex = Nothing
+                                      , dragOffsetMinutes = Nothing
+                                      , updateError = Just (updateErrorMessage (unwrap resp.status))
+                                      }
+                      refreshItems
     OpenValidation itemId content -> do
       suggested <- liftEffect $ suggestDurationMinutes content.windowStart
       lift $ modify_ _ { validationPanel = Just { itemId, proposedMinutes: suggested, inputValue: "" } }
@@ -738,7 +764,7 @@ submitIntention = do
         refreshItems
 
 render :: forall m. State -> H.ComponentHTML Action () m
-render { items, draft, validationError, showConflictsOnly, conflictResolution, offlineMode, syncConflict, validationPanel, sortMode, notificationDefaults, notificationOverrides, notificationPanelOpen, notificationEditor, templates, templateDraft, editingTemplateId, csvInput, csvImportResult, icsInput, icsImportResult, exportFormat, exportTypeFilter, exportStatusFilter, exportCategoryFilter, exportStartDate, exportEndDate, exportOutput, viewMode, focusDate, activeModal, draggingId, dragHoverIndex } =
+render { items, draft, validationError, showConflictsOnly, conflictResolution, offlineMode, syncConflict, validationPanel, sortMode, notificationDefaults, notificationOverrides, notificationPanelOpen, notificationEditor, templates, templateDraft, editingTemplateId, csvInput, csvImportResult, icsInput, icsImportResult, exportFormat, exportTypeFilter, exportStatusFilter, exportCategoryFilter, exportStartDate, exportEndDate, exportOutput, viewMode, focusDate, activeModal, draggingId, dragHoverIndex, updateError } =
   let
     conflictIds = detectConflictIds items
     conflictGroups = detectConflictGroups items
@@ -768,7 +794,8 @@ render { items, draft, validationError, showConflictsOnly, conflictResolution, o
         ]
         , div [ class_ $ "agenda-layout" <> if viewMode == ViewDay then " agenda-layout--calendar" else "" ]
         [ div [ class_ "agenda-main" ]
-            [ maybe (text "") renderValidationPanel validationPanel
+            [ maybe (text "") renderUpdateError updateError
+            , maybe (text "") renderValidationPanel validationPanel
             , section [ class_ $ "agenda-list-panel" <> if viewMode == ViewDay then " agenda-list-panel--calendar" else "" ]
                 [ if viewMode == ViewDay
                     then div [ class_ "agenda-calendar-form-header" ] [ renderForm draft validationError ]
@@ -907,6 +934,21 @@ renderValidationError err =
         WindowEndInvalid -> "La date de fin est invalide."
         WindowOrderInvalid -> "La fin doit etre apres le debut."
     ]
+
+renderUpdateError :: forall w. String -> HTML w Action
+renderUpdateError message =
+  div [ class_ "agenda-error agenda-error--update" ]
+    [ text message
+    , button
+        [ class_ "btn btn-sm btn-outline-secondary agenda-error-dismiss"
+        , onClick (const DismissUpdateError)
+        ]
+        [ text "OK" ]
+    ]
+
+updateErrorMessage :: Int -> String
+updateErrorMessage status =
+  "Echec de mise a jour de l'item (HTTP " <> show status <> ")."
 
 emptyAgenda :: forall w i. HTML w i
 emptyAgenda =
