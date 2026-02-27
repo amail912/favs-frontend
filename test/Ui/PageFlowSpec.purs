@@ -44,6 +44,7 @@ spec =
         ref <- liftEffect $ Ref.new 0
         let
           response = mkResponse 201 jsonEmptyObject
+
           save :: Unit -> ExceptT FatalError Aff (Response Json)
           save _ = pure response
           refresh = liftEffect $ Ref.modify_ (_ + 1) ref
@@ -57,6 +58,7 @@ spec =
       it "returns CustomFatalError when save fails" do
         let
           response = mkResponse 500 jsonEmptyObject
+
           save :: Unit -> ExceptT FatalError Aff (Response Json)
           save _ = pure response
           refresh = pure unit

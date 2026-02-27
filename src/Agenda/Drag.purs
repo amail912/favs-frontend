@@ -32,9 +32,7 @@ indexToTimeLabel idx =
 
 pad2 :: Int -> String
 pad2 n =
-  let raw = Int.toStringAs Int.decimal n
-  in if String.length raw == 1 then "0" <> raw else raw
-
-clamp :: Int -> Int -> Int -> Int
-clamp low high value =
-  max low (min high value)
+  let
+    raw = Int.toStringAs Int.decimal n
+  in
+    if String.length raw == 1 then "0" <> raw else raw

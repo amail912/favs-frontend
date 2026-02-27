@@ -45,14 +45,16 @@ import Ui.Utils (class_)
 import Web.Event.Event (Event, preventDefault)
 
 type OpaqueSlot slot = forall query. H.Slot query Void slot
-type ChildSlots = ( notes :: OpaqueSlot Unit
-                  , checklists :: OpaqueSlot Unit
-                  , agenda :: OpaqueSlot Unit
-                  , signup :: AuthSlot Unit
-                  , signin :: AuthSlot Unit
-                  )
+type ChildSlots =
+  ( notes :: OpaqueSlot Unit
+  , checklists :: OpaqueSlot Unit
+  , agenda :: OpaqueSlot Unit
+  , signup :: AuthSlot Unit
+  , signin :: AuthSlot Unit
+  )
 
 data DefinedRoute = Note | Checklist | Agenda | Signup | Signin
+
 derive instance definedRouteGeneric :: Generic DefinedRoute _
 derive instance definedRouteEq :: Eq DefinedRoute
 derive instance definedRouteOrd :: Ord DefinedRoute
@@ -60,6 +62,7 @@ instance showDefinedRoute :: Show DefinedRoute where
   show = genericShow
 
 data Route = Root | Route DefinedRoute | NotFound
+
 derive instance routeGeneric :: Generic Route _
 derive instance routeEq :: Eq Route
 derive instance ordRoute :: Ord Route
@@ -86,20 +89,24 @@ parseRouteString rawPath =
 
 subscribeToRouting :: forall state slots output m. MonadEffect m => PushStateInterface -> H.HalogenM state Action slots output m Unit
 subscribeToRouting nav = do
-  {emitter, listener} <- liftEffect Sub.create
+  { emitter, listener } <- liftEffect Sub.create
   void $ subscribe emitter
-  void $ liftEffect $ matchesWith parseRouteString (\old new -> do
-    when (old /= Just new) $ do
-      Sub.notify listener $ RouteChanged new
-    ) nav
+  void $ liftEffect $ matchesWith parseRouteString
+    ( \old new -> do
+        when (old /= Just new) $ do
+          Sub.notify listener $ RouteChanged new
+    )
+    nav
   pure unit
 
-data Action = RouteChanged Route
-            | NavigateTo DefinedRoute
-            | SignOut
-            | HandleAuthOutput AuthOutput
-            | RefreshAuthStatus
-            | InitializeRouting
+data Action
+  = RouteChanged Route
+  | NavigateTo DefinedRoute
+  | SignOut
+  | HandleAuthOutput AuthOutput
+  | RefreshAuthStatus
+  | InitializeRouting
+
 type State =
   { currentRoute :: Route
   , nav :: Maybe PushStateInterface
@@ -111,8 +118,10 @@ component =
   H.mkComponent
     { initialState
     , render
-    , eval: H.mkEval $ H.defaultEval { handleAction = handleAction
-                                     , initialize = pure InitializeRouting}
+    , eval: H.mkEval $ H.defaultEval
+        { handleAction = handleAction
+        , initialize = pure InitializeRouting
+        }
     }
 
 initialState :: forall i. i -> State
@@ -179,12 +188,14 @@ handleAction RefreshAuthStatus = do
 render :: State -> H.ComponentHTML Action ChildSlots Aff
 render { currentRoute: Route route, isAuthenticated } =
   div [ class_ "container" ]
-  ([ h1 [ class_ "text-center" ] [ text "FAVS" ]
-   , authMenu isAuthenticated
-   ] <>
-  (if route /= Signup && route /= Signin then [ nav [ class_ "row nav nav-tabs" ] [ tab Note route, tab Checklist route, tab Agenda route ] ] else []) <>
-  [ currentComponent route
-  ])
+    ( [ h1 [ class_ "text-center" ] [ text "FAVS" ]
+      , authMenu isAuthenticated
+      ]
+        <> (if route /= Signup && route /= Signin then [ nav [ class_ "row nav nav-tabs" ] [ tab Note route, tab Checklist route, tab Agenda route ] ] else [])
+        <>
+          [ currentComponent route
+          ]
+    )
 render { currentRoute: Root } = text ""
 render { currentRoute: NotFound, isAuthenticated } =
   div [ class_ "container py-5" ]
@@ -209,10 +220,11 @@ render { currentRoute: NotFound, isAuthenticated } =
 authMenu :: forall w. Boolean -> HTML w Action
 authMenu isAuthenticated =
   div [ class_ "auth-menu d-flex justify-content-end mb-2" ]
-    if isAuthenticated
-      then [ button [ class_ "btn btn-outline-secondary btn-sm", onClick (const SignOut) ] [ text "Se deconnecter" ] ]
-      else [ button [ class_ "btn btn-outline-secondary btn-sm", onClick (const $ NavigateTo Signin) ] [ text "Signin" ]
-           , button [ class_ "btn btn-outline-secondary btn-sm", onClick (const $ NavigateTo Signup) ] [ text "Signup" ] ]
+    if isAuthenticated then [ button [ class_ "btn btn-outline-secondary btn-sm", onClick (const SignOut) ] [ text "Se deconnecter" ] ]
+    else
+      [ button [ class_ "btn btn-outline-secondary btn-sm", onClick (const $ NavigateTo Signin) ] [ text "Signin" ]
+      , button [ class_ "btn btn-outline-secondary btn-sm", onClick (const $ NavigateTo Signup) ] [ text "Signup" ]
+      ]
 
 currentComponent :: DefinedRoute -> H.ComponentHTML Action ChildSlots Aff
 currentComponent Note = slot_ (Proxy :: _ "notes") unit Notes.component unit
@@ -224,7 +236,8 @@ currentComponent Signin = slot (Proxy :: _ "signin") unit signinComponent unit H
 tab :: forall w. DefinedRoute -> DefinedRoute -> HTML w Action
 tab tabRoute activeRoute =
   div [ class_ "col text-center nav-item px-0" ]
-    [ a [ class_ $ "nav-link" <> (if tabRoute == activeRoute then " active" else "")
+    [ a
+        [ class_ $ "nav-link" <> (if tabRoute == activeRoute then " active" else "")
         , onClick (const $ NavigateTo tabRoute)
         ]
         [ text (tabLabel tabRoute) ]
@@ -247,11 +260,13 @@ type AuthState =
   }
 
 newtype AuthRequestData = AuthRequestData { username :: String, password :: String }
+
 instance authRequestDataEncodeJson :: EncodeJson AuthRequestData where
   encodeJson :: AuthRequestData -> Json
-  encodeJson (AuthRequestData {username, password}) = uname ~> pass ~> jsonEmptyObject
-    where uname = "username" := username
-          pass = "password" := password
+  encodeJson (AuthRequestData { username, password }) = uname ~> pass ~> jsonEmptyObject
+    where
+    uname = "username" := username
+    pass = "password" := password
 
 jsonRequestBody :: forall a. EncodeJson a => a -> Maybe RequestBody
 jsonRequestBody = Just <<< Json <<< encodeJson
@@ -297,7 +312,8 @@ signinSubmitConfig =
 authComponent
   :: AuthRenderConfig
   -> AuthSubmitConfig AuthAction AuthOutput
-  -> forall q i. H.Component q i AuthOutput Aff
+  -> forall q i
+   . H.Component q i AuthOutput Aff
 authComponent renderConfig submitConfig =
   H.mkComponent
     { initialState: const authInitialState
@@ -328,13 +344,17 @@ isAllowedUsernameChar c =
 
 isAsciiAlpha :: Char -> Boolean
 isAsciiAlpha c =
-  let code = toCharCode c
-  in (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+  let
+    code = toCharCode c
+  in
+    (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
 
 isAsciiDigit :: Char -> Boolean
 isAsciiDigit c =
-  let code = toCharCode c
-  in code >= 48 && code <= 57
+  let
+    code = toCharCode c
+  in
+    code >= 48 && code <= 57
 
 validatePassword :: String -> Maybe String
 validatePassword password
@@ -356,40 +376,44 @@ handleAuthSubmit cfg e = do
     hasErrors = case usernameErr, passwordErr of
       Nothing, Nothing -> false
       _, _ -> true
-  modify_ $ _ { usernameError = usernameErr
-              , passwordError = passwordErr
-              , feedbackMessage = Nothing
-              }
-  if hasErrors
-    then pure unit
-    else do
-      modify_ $ _ { submitting = true }
-      resp <- liftAff $ post string cfg.endpoint (jsonRequestBody $ AuthRequestData { username: formData.username, password: formData.password })
-      either
-        (\_ -> modify_ $ _ { feedbackMessage = Just cfg.networkError, submitting = false })
-        (\r ->
+  modify_ $ _
+    { usernameError = usernameErr
+    , passwordError = passwordErr
+    , feedbackMessage = Nothing
+    }
+  if hasErrors then pure unit
+  else do
+    modify_ $ _ { submitting = true }
+    resp <- liftAff $ post string cfg.endpoint (jsonRequestBody $ AuthRequestData { username: formData.username, password: formData.password })
+    either
+      (\_ -> modify_ $ _ { feedbackMessage = Just cfg.networkError, submitting = false })
+      ( \r ->
           if statusOk r then do
-            modify_ $ _ { submitting = false
-                        , password = if cfg.resetPasswordOnSuccess then "" else formData.password
-                        }
+            modify_ $ _
+              { submitting = false
+              , password = if cfg.resetPasswordOnSuccess then "" else formData.password
+              }
             cfg.onSuccess
           else
-            modify_ $ _ { feedbackMessage = Just (if String.length r.body > 0 then r.body else cfg.responseError), submitting = false })
-        resp
+            modify_ $ _ { feedbackMessage = Just (if String.length r.body > 0 then r.body else cfg.responseError), submitting = false }
+      )
+      resp
 
 handleUsernameChanged :: forall action output. String -> HalogenM AuthState action () output Aff Unit
 handleUsernameChanged newUsername =
-  modify_ $ _ { username = newUsername
-              , usernameError = validateUsername newUsername
-              , feedbackMessage = Nothing
-              }
+  modify_ $ _
+    { username = newUsername
+    , usernameError = validateUsername newUsername
+    , feedbackMessage = Nothing
+    }
 
 handlePasswordChanged :: forall action output. String -> HalogenM AuthState action () output Aff Unit
 handlePasswordChanged newPassword =
-  modify_ $ _ { password = newPassword
-              , passwordError = validatePassword newPassword
-              , feedbackMessage = Nothing
-              }
+  modify_ $ _
+    { password = newPassword
+    , passwordError = validatePassword newPassword
+    , feedbackMessage = Nothing
+    }
 
 handleAuthAction
   :: { submitConfig :: AuthSubmitConfig AuthAction AuthOutput }
@@ -439,41 +463,48 @@ renderAuth cfg state =
     [ div [ class_ "col-12 col-md-8 col-lg-5" ]
         [ div [ class_ "card shadow-sm border-0" ]
             [ div [ class_ "card-body p-4" ]
-                ([ div [ class_ "text-center mb-4" ]
-                     [ h1 [ class_ "h3 mb-1" ] [ text cfg.title ]
-                     , div [ class_ "text-muted" ] [ text cfg.subtitle ]
-                     ]
-                 , form [ onSubmit AuthSubmit ]
-                     ([ label [ class_ "form-label fw-semibold", for (cfg.idPrefix <> "-username") ] [ text "Username" ]
-                      , input [ id (cfg.idPrefix <> "-username")
-                              , type_ InputText
-                              , name "username"
-                              , class_ "form-control"
-                              , placeholder cfg.usernamePlaceholder
-                              , value state.username
-                              , onValueChange AuthUsernameChanged
-                              ]
+                ( [ div [ class_ "text-center mb-4" ]
+                      [ h1 [ class_ "h3 mb-1" ] [ text cfg.title ]
+                      , div [ class_ "text-muted" ] [ text cfg.subtitle ]
                       ]
-                      <> maybe [] (\err -> [ div [ class_ "invalid-feedback d-block mb-2" ] [ text err ] ]) state.usernameError
-                      <> [ label [ class_ "form-label fw-semibold mt-2", for (cfg.idPrefix <> "-password") ] [ text "Password" ]
-                         , input [ id (cfg.idPrefix <> "-password")
-                                 , type_ InputPassword
-                                 , name "password"
-                                 , class_ "form-control"
-                                 , placeholder cfg.passwordPlaceholder
-                                 , value state.password
-                                 , onValueChange AuthPasswordChanged
-                                 ]
-                         ]
-                      <> maybe [] (\err -> [ div [ class_ "invalid-feedback d-block mb-2" ] [ text err ] ]) state.passwordError
-                      <> maybe [] (\msg -> [ div [ class_ "alert alert-secondary mt-3 mb-0" ] [ text msg ] ]) state.feedbackMessage
-                      <> [ button [ type_ ButtonSubmit
-                                  , class_ "btn btn-primary w-100 mt-3"
-                                  , disabled state.submitting
-                                  ]
-                                  [ text (if state.submitting then cfg.submittingLabel else cfg.submitLabel) ]
-                         ])
-                 ])
+                  , form [ onSubmit AuthSubmit ]
+                      ( [ label [ class_ "form-label fw-semibold", for (cfg.idPrefix <> "-username") ] [ text "Username" ]
+                        , input
+                            [ id (cfg.idPrefix <> "-username")
+                            , type_ InputText
+                            , name "username"
+                            , class_ "form-control"
+                            , placeholder cfg.usernamePlaceholder
+                            , value state.username
+                            , onValueChange AuthUsernameChanged
+                            ]
+                        ]
+                          <> maybe [] (\err -> [ div [ class_ "invalid-feedback d-block mb-2" ] [ text err ] ]) state.usernameError
+                          <>
+                            [ label [ class_ "form-label fw-semibold mt-2", for (cfg.idPrefix <> "-password") ] [ text "Password" ]
+                            , input
+                                [ id (cfg.idPrefix <> "-password")
+                                , type_ InputPassword
+                                , name "password"
+                                , class_ "form-control"
+                                , placeholder cfg.passwordPlaceholder
+                                , value state.password
+                                , onValueChange AuthPasswordChanged
+                                ]
+                            ]
+                          <> maybe [] (\err -> [ div [ class_ "invalid-feedback d-block mb-2" ] [ text err ] ]) state.passwordError
+                          <> maybe [] (\msg -> [ div [ class_ "alert alert-secondary mt-3 mb-0" ] [ text msg ] ]) state.feedbackMessage
+                          <>
+                            [ button
+                                [ type_ ButtonSubmit
+                                , class_ "btn btn-primary w-100 mt-3"
+                                , disabled state.submitting
+                                ]
+                                [ text (if state.submitting then cfg.submittingLabel else cfg.submitLabel) ]
+                            ]
+                      )
+                  ]
+                )
             ]
         ]
     ]

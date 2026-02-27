@@ -182,7 +182,7 @@ spec =
       let
         csv =
           "type,titre,fenetre_debut,fenetre_fin,categorie,statut\n" <>
-          "INTENTION,Focus,2026-02-19T09:00,2026-02-19T10:00,Deep,TODO"
+            "INTENTION,Focus,2026-02-19T09:00,2026-02-19T10:00,Deep,TODO"
         result = parseCsvImport csv
       length result.items `shouldEqual` 1
       length result.errors `shouldEqual` 0
@@ -191,7 +191,7 @@ spec =
       let
         csv =
           "type,titre,fenetre_debut,fenetre_fin\n" <>
-          "INTENTION,,2026-02-19T09:00,2026-02-19T08:00"
+            "INTENTION,,2026-02-19T09:00,2026-02-19T08:00"
         result = parseCsvImport csv
       length result.items `shouldEqual` 0
       length result.errors `shouldEqual` 1
@@ -199,13 +199,14 @@ spec =
     it "parses a valid ICS import" do
       let
         ics =
-          "BEGIN:VCALENDAR\n" <>
-          "BEGIN:VEVENT\n" <>
-          "SUMMARY:Meeting\n" <>
-          "DTSTART:20260219T090000\n" <>
-          "DTEND:20260219T100000\n" <>
-          "END:VEVENT\n" <>
-          "END:VCALENDAR"
+          "BEGIN:VCALENDAR\n"
+            <> "BEGIN:VEVENT\n"
+            <> "SUMMARY:Meeting\n"
+            <> "DTSTART:20260219T090000\n"
+            <> "DTEND:20260219T100000\n"
+            <> "END:VEVENT\n"
+            <>
+              "END:VCALENDAR"
         result = parseIcsImport ics
       length result.items `shouldEqual` 1
       length result.errors `shouldEqual` 0
@@ -213,12 +214,13 @@ spec =
     it "reports errors for invalid ICS events" do
       let
         ics =
-          "BEGIN:VCALENDAR\n" <>
-          "BEGIN:VEVENT\n" <>
-          "DTSTART:20260219T090000\n" <>
-          "DTEND:20260219T100000\n" <>
-          "END:VEVENT\n" <>
-          "END:VCALENDAR"
+          "BEGIN:VCALENDAR\n"
+            <> "BEGIN:VEVENT\n"
+            <> "DTSTART:20260219T090000\n"
+            <> "DTEND:20260219T100000\n"
+            <> "END:VEVENT\n"
+            <>
+              "END:VCALENDAR"
         result = parseIcsImport ics
       length result.items `shouldEqual` 0
       length result.errors `shouldEqual` 1

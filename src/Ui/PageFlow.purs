@@ -28,6 +28,5 @@ saveAndRefresh
   -> m Unit
 saveAndRefresh save refresh entity item = do
   resp <- save item
-  if unwrap resp.status >= 200 && unwrap resp.status < 300
-    then refresh
-    else throwError $ CustomFatalError $ wrongStatusPost entity resp.status
+  if unwrap resp.status >= 200 && unwrap resp.status < 300 then refresh
+  else throwError $ CustomFatalError $ wrongStatusPost entity resp.status

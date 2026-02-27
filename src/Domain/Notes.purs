@@ -20,10 +20,12 @@ import Data.Show.Generic (genericShow)
 import Data.Tuple (Tuple)
 import Foreign.Object (Object)
 
-
-data Note = NewNote { content :: NoteContent }
-          | ServerNote { content :: NoteContent
-                       , storageId :: StorageId }
+data Note
+  = NewNote { content :: NoteContent }
+  | ServerNote
+      { content :: NoteContent
+      , storageId :: StorageId
+      }
 
 derive instance noteGenericInstance :: Generic Note _
 derive instance noteEqInstance :: Eq Note
@@ -34,41 +36,44 @@ instance noteDecodeJsonInstance :: DecodeJson Note where
   decodeJson :: Json -> Either JsonDecodeError Note
   decodeJson json = decodeWrappedNote json <|> decodeFlatNewNote json
     where
-      decodeWrappedNote :: Json -> Either JsonDecodeError Note
-      decodeWrappedNote wrappedJson = do
-        dec <- decodeJson wrappedJson
-        content <- dec .: "content"
-        title <- content .: "title"
-        noteContent <- content .: "noteContent"
-        either (const $ pure $ NewNote { content: { title: title, noteContent: noteContent } })
-               (decodeServerNote title noteContent)
-               (dec .: "storageId")
+    decodeWrappedNote :: Json -> Either JsonDecodeError Note
+    decodeWrappedNote wrappedJson = do
+      dec <- decodeJson wrappedJson
+      content <- dec .: "content"
+      title <- content .: "title"
+      noteContent <- content .: "noteContent"
+      either (const $ pure $ NewNote { content: { title: title, noteContent: noteContent } })
+        (decodeServerNote title noteContent)
+        (dec .: "storageId")
 
-      decodeFlatNewNote :: Json -> Either JsonDecodeError Note
-      decodeFlatNewNote flatJson = do
-        dec <- decodeJson flatJson
-        title <- dec .: "title"
-        noteContent <- dec .: "noteContent"
-        pure $ NewNote { content: { title: title, noteContent: noteContent } }
+    decodeFlatNewNote :: Json -> Either JsonDecodeError Note
+    decodeFlatNewNote flatJson = do
+      dec <- decodeJson flatJson
+      title <- dec .: "title"
+      noteContent <- dec .: "noteContent"
+      pure $ NewNote { content: { title: title, noteContent: noteContent } }
 
-      decodeServerNote :: String -> String -> Object Json -> Either JsonDecodeError Note
-      decodeServerNote title noteContent storageIdObj = do
-        version <- storageIdObj .: "version"
-        id <- storageIdObj .: "id"
-        pure $ ServerNote { content: { title: title, noteContent: noteContent }
-                          , storageId: { version: version, id: id }}
+    decodeServerNote :: String -> String -> Object Json -> Either JsonDecodeError Note
+    decodeServerNote title noteContent storageIdObj = do
+      version <- storageIdObj .: "version"
+      id <- storageIdObj .: "id"
+      pure $ ServerNote
+        { content: { title: title, noteContent: noteContent }
+        , storageId: { version: version, id: id }
+        }
 
 instance noteEncodeJson :: EncodeJson Note where
   encodeJson :: Note -> Json
   encodeJson (NewNote { content: { title, noteContent } }) =
     encodeContentObj title noteContent
-  encodeJson (ServerNote { content: { title, noteContent }, storageId: { version, id }}) =
+  encodeJson (ServerNote { content: { title, noteContent }, storageId: { version, id } }) =
     cont ~> storage ~> jsonEmptyObject
     where
-      cont :: Tuple String Json
-      cont = "content" := encodeContentObj title noteContent
-      storage :: Tuple String Json
-      storage = "storageId" := encodeStorageIdObj id version
+    cont :: Tuple String Json
+    cont = "content" := encodeContentObj title noteContent
+
+    storage :: Tuple String Json
+    storage = "storageId" := encodeStorageIdObj id version
 
 encodeContentObj :: String -> String -> Json
 encodeContentObj title noteContent =

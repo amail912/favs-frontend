@@ -65,11 +65,13 @@ parseCsvRows header rows =
       fields = splitCsvLine row.raw
       fieldAt idx = index fields idx
     in
-      case { typeVal: fieldAt header.typeIdx
-           , titleVal: fieldAt header.titleIdx
-           , startVal: fieldAt header.startIdx
-           , endVal: fieldAt header.endIdx
-           } of
+      case
+        { typeVal: fieldAt header.typeIdx
+        , titleVal: fieldAt header.titleIdx
+        , startVal: fieldAt header.startIdx
+        , endVal: fieldAt header.endIdx
+        }
+        of
         { typeVal: Just typeVal
         , titleVal: Just titleVal
         , startVal: Just startVal
@@ -139,8 +141,10 @@ normalizeHeader = toLower <<< StringCommon.trim
 
 toOptionalString :: String -> Maybe String
 toOptionalString raw =
-  let trimmed = StringCommon.trim raw
-  in if trimmed == "" then Nothing else Just trimmed
+  let
+    trimmed = StringCommon.trim raw
+  in
+    if trimmed == "" then Nothing else Just trimmed
 
 splitCsvLine :: String -> Array String
 splitCsvLine raw =
@@ -163,10 +167,11 @@ splitCsvLine raw =
 
 stripCR :: String -> String
 stripCR line =
-  let len = String.length line
-  in if len > 0 && String.charAt (len - 1) line == Just '\r'
-     then String.slice 0 (len - 1) line
-     else line
+  let
+    len = String.length line
+  in
+    if len > 0 && String.charAt (len - 1) line == Just '\r' then String.slice 0 (len - 1) line
+    else line
 
 type IcsEventDraft =
   { summary :: Maybe String
@@ -196,8 +201,10 @@ parseIcsImport raw =
         case state.current of
           Nothing -> state
           Just event ->
-            let nextIndex = state.index + 1
-            in case buildIcsItem nextIndex event of
+            let
+              nextIndex = state.index + 1
+            in
+              case buildIcsItem nextIndex event of
                 Left err -> state { errors = state.errors <> [ err ], current = Nothing, index = nextIndex }
                 Right item -> state { items = state.items <> [ item ], current = Nothing, index = nextIndex }
       _ ->
@@ -272,8 +279,10 @@ parseIcsDateTime raw =
         Just $ y <> "-" <> m <> "-" <> d <> "T" <> hh <> ":" <> mm
   where
   endsWithChar ch str =
-    let len = String.length str
-    in len > 0 && String.charAt (len - 1) str == Just ch
+    let
+      len = String.length str
+    in
+      len > 0 && String.charAt (len - 1) str == Just ch
 
 isDateTimeLocal :: String -> Boolean
 isDateTimeLocal raw =

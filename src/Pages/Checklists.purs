@@ -35,17 +35,18 @@ import Web.DOM (Element)
 type NoOutput = Void
 type ChecklistAppM = H.HalogenM State Action () NoOutput Aff
 type ErrorChecklistAppM = ExceptT FatalError ChecklistAppM
-type State = { checklists :: Array Checklist
-             , editingState :: EditingState
-             }
+type State =
+  { checklists :: Array Checklist
+  , editingState :: EditingState
+  }
 
-data EditingState = None
-                  | EditingChecklistName Int
-                  | EditingChecklistContent Int Int
+data EditingState
+  = None
+  | EditingChecklistName Int
+  | EditingChecklistContent Int Int
 
-_content  :: Lens' Checklist ChecklistContent
+_content :: Lens' Checklist ChecklistContent
 _content = lens' $ (\checklist -> Tuple (getContent checklist) (setContent checklist))
-
 
 getContent :: Checklist -> ChecklistContent
 getContent (NewChecklist n) = n.content
@@ -64,24 +65,26 @@ _checklistItems = _content <<< (lens _.items $ _ { items = _ })
 _label :: Lens' ChecklistItem String
 _label = lens' $ (\(ChecklistItem { label, checked }) -> Tuple label (\newLabel -> ChecklistItem { label: newLabel, checked: checked }))
 
-data Action = Initialize
-            | CreateNewChecklist
-            | EditChecklistName Int
-            | ChecklistNameChanged Int String
-            | ChecklistLabelChanged Int Int String
-            | EditDone
-            | EditLabelContent Int Int
-            | DeleteChecklist StorageId
-            | DeleteChecklistItem Int Int
+data Action
+  = Initialize
+  | CreateNewChecklist
+  | EditChecklistName Int
+  | ChecklistNameChanged Int String
+  | ChecklistLabelChanged Int Int String
+  | EditDone
+  | EditLabelContent Int Int
+  | DeleteChecklist StorageId
+  | DeleteChecklistItem Int Int
 
 component :: forall q i. H.Component q i NoOutput Aff
 component =
   H.mkComponent
     { initialState
     , render
-    , eval: H.mkEval $ H.defaultEval { handleAction = handleAction
-                                     , initialize = pure Initialize
-                                     }
+    , eval: H.mkEval $ H.defaultEval
+        { handleAction = handleAction
+        , initialize = pure Initialize
+        }
     }
 
 initialState :: forall i. i -> State
@@ -107,19 +110,20 @@ noChecklistsDiv =
 checklistRender :: forall w. EditingState -> Int -> Checklist -> HTML w Action
 checklistRender editingState idx checklist =
   li [ class_ "row list-group-item entity-card checklist-card" ] $
-     [ div [ class_ "col entity-card-body", ref (wrap $ "checklist-" <> show idx) ] $
-       [ checklistNameRender editingState idx (checklist ^. _name)
-       , checklistContentRender editingState idx (checklist ^. _content) ]
-       <> checklistFooterRender checklist
-     ]
+    [ div [ class_ "col entity-card-body", ref (wrap $ "checklist-" <> show idx) ] $
+        [ checklistNameRender editingState idx (checklist ^. _name)
+        , checklistContentRender editingState idx (checklist ^. _content)
+        ]
+          <> checklistFooterRender checklist
+    ]
 
 checklistFooterRender :: forall w. Checklist -> Array (HTML w Action)
 checklistFooterRender (NewChecklist _) = []
 checklistFooterRender (ServerChecklist { storageId }) =
   [ section [ class_ "row my-2 justify-content-center entity-footer" ]
-    [ button [ class_ "btn btn-sm btn-outline-danger", onClick (const $ DeleteChecklist storageId) ]
-      [ i [ class_ "bi bi-trash" ] [] ]
-    ]
+      [ button [ class_ "btn btn-sm btn-outline-danger", onClick (const $ DeleteChecklist storageId) ]
+          [ i [ class_ "bi bi-trash" ] [] ]
+      ]
   ]
 
 checklistContentRender :: forall w. EditingState -> Int -> ChecklistContent -> HTML w Action
@@ -130,21 +134,21 @@ checklistContentRender _ idx checklist = ul [ class_ "list-group checklist-items
 simpleChecklistItemRender :: forall w. Int -> Int -> ChecklistItem -> HTML w Action
 simpleChecklistItemRender checklistIdx itemIdx (ChecklistItem { label }) =
   li [ class_ "list-group-item border-0 checklist-item-row", onClick (const $ EditLabelContent checklistIdx itemIdx) ]
-    [  span [ class_ "checklist-item-label" ] [ text label ]
+    [ span [ class_ "checklist-item-label" ] [ text label ]
     , button [ type_ ButtonButton, class_ "btn btn-sm btn-danger", onClick (const $ DeleteChecklistItem checklistIdx itemIdx) ] [ i [ class_ "bi bi-trash" ] [] ]
     ]
 
 editChecklistItemRender :: forall w. Int -> Int -> Int -> ChecklistItem -> HTML w Action
 editChecklistItemRender _ currentIdx currentChecklistIdx (ChecklistItem { label }) =
-  li [ class_ "list-group-item border-0 checklist-item-row" ] [ input [ class_ "form-control label-input checklist-item-input", onBlur (const EditDone), onValueChange  $ ChecklistLabelChanged currentChecklistIdx currentIdx, value label] ]
+  li [ class_ "list-group-item border-0 checklist-item-row" ] [ input [ class_ "form-control label-input checklist-item-input", onBlur (const EditDone), onValueChange $ ChecklistLabelChanged currentChecklistIdx currentIdx, value label ] ]
 
 checklistNameRender :: forall w. EditingState -> Int -> String -> HTML w Action
 checklistNameRender editingState idx name =
   header [ class_ "row my-2 checklist-title-row" ] [ contentRender editingState ]
   where
-    contentRender (EditingChecklistName editIdx)
-      | editIdx == idx = input [ class_ "form-control fs-2 lh-2 name-input checklist-title-input", onBlur (const EditDone), onValueChange  $ ChecklistNameChanged idx, value name]
-    contentRender _ = h2 [ class_ "entity-title", onClick (const $ EditChecklistName idx) ] [ text name ]
+  contentRender (EditingChecklistName editIdx)
+    | editIdx == idx = input [ class_ "form-control fs-2 lh-2 name-input checklist-title-input", onBlur (const EditDone), onValueChange $ ChecklistNameChanged idx, value name ]
+  contentRender _ = h2 [ class_ "entity-title", onClick (const $ EditChecklistName idx) ] [ text name ]
 
 -- ============================= Action Handling =======================================
 
@@ -154,8 +158,10 @@ handleAction action = handleError $
     Initialize -> refreshChecklists
     CreateNewChecklist -> do
       st <- get
-      H.put st { checklists = snoc st.checklists newChecklist
-               , editingState = EditingChecklistName (length st.checklists)}
+      H.put st
+        { checklists = snoc st.checklists newChecklist
+        , editingState = EditingChecklistName (length st.checklists)
+        }
       goInput (length st.checklists)
     EditChecklistName idx -> do
       modify_ \st -> st { editingState = EditingChecklistName idx }
@@ -173,15 +179,14 @@ handleAction action = handleError $
       checklists <- gets _.checklists
       let retrievedChecklist = checklists ^? ix checklistIdx
       maybe (throwError $ CustomFatalError ("Unable to retrieve checklist at index " <> show checklistIdx <> " while trying to delete one of its items"))
-            (deleteChecklistItem itemIdx)
-            retrievedChecklist
-
+        (deleteChecklistItem itemIdx)
+        retrievedChecklist
 
 deleteChecklistItem :: Int -> Checklist -> ErrorChecklistAppM Unit
 deleteChecklistItem itemIdx checklist =
   maybe (throwError $ CustomFatalError ("Unable to remove checklist item at index " <> show itemIdx))
-        saveChecklistAndRefresh
-        (removeChecklistItem itemIdx checklist)
+    saveChecklistAndRefresh
+    (removeChecklistItem itemIdx checklist)
 
 removeChecklistItem :: Int -> Checklist -> Maybe Checklist
 removeChecklistItem itemIdx (NewChecklist { content: { name, items } }) = do
@@ -201,13 +206,13 @@ updateChecklistWithSaveAndRefreshChecklists idx lens_ newVal = do
   let
     modifiedChecklist = updateAtWithDefault idx newChecklist (lens_ .~ newVal) oldChecklists
   maybe (throwError $ CustomFatalError "Unable to modify checklist at index ")
-        writeAndRefreshThenStopEditing
-        modifiedChecklist
+    writeAndRefreshThenStopEditing
+    modifiedChecklist
   where
-    writeAndRefreshThenStopEditing :: Checklist -> ErrorChecklistAppM Unit
-    writeAndRefreshThenStopEditing checklist = do
-      saveChecklistAndRefresh checklist
-      lift $ modify_ \st -> st { editingState = None }
+  writeAndRefreshThenStopEditing :: Checklist -> ErrorChecklistAppM Unit
+  writeAndRefreshThenStopEditing checklist = do
+    saveChecklistAndRefresh checklist
+    lift $ modify_ \st -> st { editingState = None }
 
 goInput :: Int -> ErrorChecklistAppM Unit
 goInput idx = do
@@ -231,9 +236,8 @@ getChecklists = do
 deleteChecklist :: StorageId -> ErrorChecklistAppM Unit
 deleteChecklist storageId@{ id } = do
   jsonResponse <- withExceptT toFatalError $ ExceptT $ liftAff $ deleteChecklistResponse storageId
-  if unwrap jsonResponse.status < 200 || unwrap jsonResponse.status >= 300
-    then throwError $ CustomFatalError $ wrongStatusDelete "checklist" id jsonResponse.status
-    else pure unit
+  if unwrap jsonResponse.status < 200 || unwrap jsonResponse.status >= 300 then throwError $ CustomFatalError $ wrongStatusDelete "checklist" id jsonResponse.status
+  else pure unit
 
 writeToServer :: Checklist -> ErrorChecklistAppM (Response Json)
 writeToServer checklist = withExceptT toFatalError $ ExceptT $ liftAff $ writeChecklistResponse checklist

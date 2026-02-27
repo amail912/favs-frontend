@@ -146,12 +146,13 @@ exportIcsEvent item =
 toIcsDateTime :: String -> String
 toIcsDateTime raw =
   if String.length raw >= 16 then
-    String.slice 0 4 raw <>
-    String.slice 5 7 raw <>
-    String.slice 8 10 raw <>
-    "T" <>
-    String.slice 11 13 raw <>
-    String.slice 14 16 raw
+    String.slice 0 4 raw
+      <> String.slice 5 7 raw
+      <> String.slice 8 10 raw
+      <> "T"
+      <> String.slice 11 13 raw
+      <>
+        String.slice 14 16 raw
   else raw
 
 exportItemType :: ItemType -> String
