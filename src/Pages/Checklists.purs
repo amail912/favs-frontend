@@ -118,7 +118,7 @@ checklistFooterRender (NewChecklist _) = []
 checklistFooterRender (ServerChecklist { storageId }) =
   [ section [ class_ "row my-2 justify-content-center entity-footer" ]
     [ button [ class_ "btn btn-sm btn-outline-danger", onClick (const $ DeleteChecklist storageId) ]
-      [ i [ class_ "bi bi-trash" ] [] ]  
+      [ i [ class_ "bi bi-trash" ] [] ]
     ]
   ]
 
@@ -134,7 +134,7 @@ simpleChecklistItemRender checklistIdx itemIdx (ChecklistItem { label }) =
     , button [ type_ ButtonButton, class_ "btn btn-sm btn-danger", onClick (const $ DeleteChecklistItem checklistIdx itemIdx) ] [ i [ class_ "bi bi-trash" ] [] ]
     ]
 
-editChecklistItemRender :: forall w. Int -> Int -> Int -> ChecklistItem -> HTML w Action 
+editChecklistItemRender :: forall w. Int -> Int -> Int -> ChecklistItem -> HTML w Action
 editChecklistItemRender _ currentIdx currentChecklistIdx (ChecklistItem { label }) =
   li [ class_ "list-group-item border-0 checklist-item-row" ] [ input [ class_ "form-control label-input checklist-item-input", onBlur (const EditDone), onValueChange  $ ChecklistLabelChanged currentChecklistIdx currentIdx, value label] ]
 
@@ -241,7 +241,7 @@ writeToServer checklist = withExceptT toFatalError $ ExceptT $ liftAff $ writeCh
 -- ============================  Web manipulation wrapper ==================================
 getRef :: String -> ErrorChecklistAppM Element
 getRef refStr = do
-  ref <- lift $ H.getRef (wrap refStr) 
+  ref <- lift $ H.getRef (wrap refStr)
   maybe (throwError $ CustomFatalError $ cannotGetRef refStr) pure ref
 
 focusName :: Element -> ErrorChecklistAppM Element
