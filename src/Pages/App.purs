@@ -45,7 +45,6 @@ import Ui.Utils (class_)
 import Web.Event.Event (Event, preventDefault)
 
 type OpaqueSlot slot = forall query. H.Slot query Void slot
-type AuthSlot slot = forall query. H.Slot query AuthOutput slot
 type ChildSlots = ( notes :: OpaqueSlot Unit
                   , checklists :: OpaqueSlot Unit
                   , agenda :: OpaqueSlot Unit
@@ -59,8 +58,6 @@ derive instance definedRouteEq :: Eq DefinedRoute
 derive instance definedRouteOrd :: Ord DefinedRoute
 instance showDefinedRoute :: Show DefinedRoute where
   show = genericShow
-
-data AuthOutput = SignupSucceeded | SigninSucceeded
 
 data Route = Root | Route DefinedRoute | NotFound
 derive instance routeGeneric :: Generic Route _
@@ -143,6 +140,9 @@ probeAuth = do
   resp <- liftAff $ AffjaxWeb.get string "/api/note"
   pure $ either (const false) statusOk resp
 
+data AuthOutput = SignupSucceeded | SigninSucceeded
+type AuthSlot slot = forall query. H.Slot query AuthOutput slot
+
 handleAction :: Action -> H.HalogenM State Action ChildSlots Void Aff Unit
 handleAction (RouteChanged Root) = do
   st <- get
@@ -209,10 +209,10 @@ render { currentRoute: NotFound, isAuthenticated } =
 authMenu :: forall w. Boolean -> HTML w Action
 authMenu isAuthenticated =
   div [ class_ "auth-menu d-flex justify-content-end mb-2" ]
-    [ if isAuthenticated
-        then button [ class_ "btn btn-outline-secondary btn-sm", onClick (const SignOut) ] [ text "Se deconnecter" ]
-        else button [ class_ "btn btn-outline-secondary btn-sm", onClick (const $ NavigateTo Signup) ] [ text "Signup" ]
-    ]
+    if isAuthenticated
+      then [ button [ class_ "btn btn-outline-secondary btn-sm", onClick (const SignOut) ] [ text "Se deconnecter" ] ]
+      else [ button [ class_ "btn btn-outline-secondary btn-sm", onClick (const $ NavigateTo Signin) ] [ text "Signin" ]
+           , button [ class_ "btn btn-outline-secondary btn-sm", onClick (const $ NavigateTo Signup) ] [ text "Signup" ] ]
 
 currentComponent :: DefinedRoute -> H.ComponentHTML Action ChildSlots Aff
 currentComponent Note = slot_ (Proxy :: _ "notes") unit Notes.component unit
@@ -294,21 +294,25 @@ signinSubmitConfig =
   , resetPasswordOnSuccess: false
   }
 
+authComponent
+  :: AuthRenderConfig
+  -> AuthSubmitConfig AuthAction AuthOutput
+  -> forall q i. H.Component q i AuthOutput Aff
+authComponent renderConfig submitConfig =
+  H.mkComponent
+    { initialState: const authInitialState
+    , render: renderAuth renderConfig
+    , eval: H.mkEval $ H.defaultEval
+        { handleAction = handleAuthAction { submitConfig }
+        , initialize = pure AuthInitialize
+        }
+    }
+
 signupComponent :: forall q i. H.Component q i AuthOutput Aff
-signupComponent = H.mkComponent { initialState: const authInitialState
-                                , render: signupRender
-                                , eval: H.mkEval $ H.defaultEval { handleAction = handleAuthAction { submitConfig: signupSubmitConfig }
-                                                                 , initialize = pure AuthInitialize
-                                                                 }
-                                }
+signupComponent = authComponent signupRenderConfig signupSubmitConfig
 
 signinComponent :: forall q i. H.Component q i AuthOutput Aff
-signinComponent = H.mkComponent { initialState: const authInitialState
-                                , render: signinRender
-                                , eval: H.mkEval $ H.defaultEval { handleAction = handleAuthAction { submitConfig: signinSubmitConfig }
-                                                                 , initialize = pure AuthInitialize
-                                                                 }
-                                }
+signinComponent = authComponent signinRenderConfig signinSubmitConfig
 
 validateUsername :: String -> Maybe String
 validateUsername username
@@ -473,9 +477,3 @@ renderAuth cfg state =
             ]
         ]
     ]
-
-signupRender :: forall m. AuthState -> H.ComponentHTML AuthAction () m
-signupRender = renderAuth signupRenderConfig
-
-signinRender :: forall m. AuthState -> H.ComponentHTML AuthAction () m
-signinRender = renderAuth signinRenderConfig

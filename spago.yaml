@@ -15,6 +15,7 @@ package:
     - foreign-object
     - halogen
     - integers
+    - formatters
     - maybe
     - newtype
     - prelude

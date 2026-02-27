@@ -34,12 +34,15 @@ import Data.Either (Either(..))
 import Data.Foldable (all, any, foldl)
 import Data.Generic.Rep (class Generic)
 import Data.Int as Int
+import Data.Lens (Lens', (.~), (%~), (^.))
+import Data.Lens.Record (prop)
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.Newtype (unwrap)
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits as String
 import Data.String.Common as StringCommon
 import Data.String.Pattern (Pattern(..))
+import Data.Formatter.DateTime (unformatDateTime)
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Data.Date (Date, canonicalDate, day, exactDate, month, year)
 import Data.DateTime (DateTime(..), adjust, date, diff, time)
@@ -67,6 +70,7 @@ import Web.HTML.HTMLElement as HTMLElement
 import Web.DOM.Element (getBoundingClientRect)
 import Web.UIEvent.MouseEvent as MouseEvent
 import Web.UIEvent.KeyboardEvent as KE
+import Type.Proxy (Proxy(..))
 import Agenda.Model
   ( AgendaView(..)
   , CalendarItem(..)
@@ -110,7 +114,6 @@ import Agenda.Exports
 type NoOutput = Void
 type AgendaAppM = H.HalogenM State Action () NoOutput Aff
 type ErrorAgendaAppM = ExceptT FatalError AgendaAppM
-
 
 emptyDraft :: IntentionDraft
 emptyDraft =
@@ -163,63 +166,220 @@ validateIntention draft =
 
 isDateTimeLocal :: String -> Boolean
 isDateTimeLocal raw =
-  String.length raw == 16
-    && matchesAt 4 '-'
-    && matchesAt 7 '-'
-    && matchesAt 10 'T'
-    && matchesAt 13 ':'
-    && allDigitsAt [ 0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15 ]
-  where
-  matchesAt :: Int -> Char -> Boolean
-  matchesAt idx expected =
-    case String.charAt idx raw of
-      Just ch -> ch == expected
-      Nothing -> false
+  case unformatDateTime "YYYY-MM-DDTHH:mm" raw of
+    Right _ -> true
+    Left _ -> false
 
-  allDigitsAt :: Array Int -> Boolean
-  allDigitsAt = all (\idx -> maybe false isDigitChar (String.charAt idx raw))
-
-  isDigitChar :: Char -> Boolean
-  isDigitChar ch = ch >= '0' && ch <= '9'
-
-
-type State =
+type DataState =
   { items :: Array CalendarItem
   , draft :: IntentionDraft
   , validationError :: Maybe ValidationError
   , showConflictsOnly :: Boolean
   , conflictResolution :: Maybe ConflictResolution
-  , offlineMode :: Boolean
+  , sortMode :: SortMode
+  }
+
+type SyncState =
+  { offlineMode :: Boolean
   , pendingSync :: Array CalendarItem
   , syncConflict :: Maybe (Array CalendarItem)
-  , validationPanel :: Maybe ValidationPanel
-  , sortMode :: SortMode
-  , draggingId :: Maybe String
+  , updateError :: Maybe String
+  }
+
+type DragState =
+  { draggingId :: Maybe String
   , dragHoverIndex :: Maybe Int
   , dragOffsetMinutes :: Maybe Int
-  , updateError :: Maybe String
-  , notificationDefaults :: NotificationDefaults
+  }
+
+type NotificationState =
+  { notificationDefaults :: NotificationDefaults
   , notificationOverrides :: Array NotificationOverride
   , notificationPanelOpen :: Boolean
   , notificationEditor :: Maybe NotificationEditor
-  , templates :: Array TaskTemplate
+  }
+
+type TemplateState =
+  { templates :: Array TaskTemplate
   , templateDraft :: TemplateDraft
   , editingTemplateId :: Maybe String
-  , csvInput :: String
+  }
+
+type ImportState =
+  { csvInput :: String
   , csvImportResult :: Maybe CsvImportResult
   , icsInput :: String
   , icsImportResult :: Maybe IcsImportResult
-  , exportFormat :: ExportFormat
+  }
+
+type ExportState =
+  { exportFormat :: ExportFormat
   , exportTypeFilter :: String
   , exportStatusFilter :: String
   , exportCategoryFilter :: String
   , exportStartDate :: String
   , exportEndDate :: String
   , exportOutput :: String
-  , viewMode :: AgendaView
+  }
+
+type ViewState =
+  { viewMode :: AgendaView
   , focusDate :: String
   , activeModal :: Maybe AgendaModal
+  , validationPanel :: Maybe ValidationPanel
   }
+
+type State =
+  { data :: DataState
+  , sync :: SyncState
+  , drag :: DragState
+  , notifications :: NotificationState
+  , templates :: TemplateState
+  , imports :: ImportState
+  , exports :: ExportState
+  , view :: ViewState
+  }
+
+_data :: Lens' State DataState
+_data = prop (Proxy :: _ "data")
+
+_sync :: Lens' State SyncState
+_sync = prop (Proxy :: _ "sync")
+
+_drag :: Lens' State DragState
+_drag = prop (Proxy :: _ "drag")
+
+_notifications :: Lens' State NotificationState
+_notifications = prop (Proxy :: _ "notifications")
+
+_templates :: Lens' State TemplateState
+_templates = prop (Proxy :: _ "templates")
+
+_imports :: Lens' State ImportState
+_imports = prop (Proxy :: _ "imports")
+
+_exports :: Lens' State ExportState
+_exports = prop (Proxy :: _ "exports")
+
+_view :: Lens' State ViewState
+_view = prop (Proxy :: _ "view")
+
+_dataItems :: Lens' State (Array CalendarItem)
+_dataItems = _data <<< prop (Proxy :: _ "items")
+
+_dataDraft :: Lens' State IntentionDraft
+_dataDraft = _data <<< prop (Proxy :: _ "draft")
+
+_dataValidationError :: Lens' State (Maybe ValidationError)
+_dataValidationError = _data <<< prop (Proxy :: _ "validationError")
+
+_dataShowConflictsOnly :: Lens' State Boolean
+_dataShowConflictsOnly = _data <<< prop (Proxy :: _ "showConflictsOnly")
+
+_dataConflictResolution :: Lens' State (Maybe ConflictResolution)
+_dataConflictResolution = _data <<< prop (Proxy :: _ "conflictResolution")
+
+_dataSortMode :: Lens' State SortMode
+_dataSortMode = _data <<< prop (Proxy :: _ "sortMode")
+
+_draftTitle :: Lens' State String
+_draftTitle = _dataDraft <<< prop (Proxy :: _ "title")
+
+_draftWindowStart :: Lens' State String
+_draftWindowStart = _dataDraft <<< prop (Proxy :: _ "windowStart")
+
+_draftWindowEnd :: Lens' State String
+_draftWindowEnd = _dataDraft <<< prop (Proxy :: _ "windowEnd")
+
+_draftCategory :: Lens' State String
+_draftCategory = _dataDraft <<< prop (Proxy :: _ "category")
+
+_syncOfflineMode :: Lens' State Boolean
+_syncOfflineMode = _sync <<< prop (Proxy :: _ "offlineMode")
+
+_syncPendingSync :: Lens' State (Array CalendarItem)
+_syncPendingSync = _sync <<< prop (Proxy :: _ "pendingSync")
+
+_syncConflict :: Lens' State (Maybe (Array CalendarItem))
+_syncConflict = _sync <<< prop (Proxy :: _ "syncConflict")
+
+_syncUpdateError :: Lens' State (Maybe String)
+_syncUpdateError = _sync <<< prop (Proxy :: _ "updateError")
+
+_draggingId :: Lens' State (Maybe String)
+_draggingId = _drag <<< prop (Proxy :: _ "draggingId")
+
+_dragHoverIndex :: Lens' State (Maybe Int)
+_dragHoverIndex = _drag <<< prop (Proxy :: _ "dragHoverIndex")
+
+_dragOffsetMinutes :: Lens' State (Maybe Int)
+_dragOffsetMinutes = _drag <<< prop (Proxy :: _ "dragOffsetMinutes")
+
+_notificationDefaults :: Lens' State NotificationDefaults
+_notificationDefaults = _notifications <<< prop (Proxy :: _ "notificationDefaults")
+
+_notificationOverrides :: Lens' State (Array NotificationOverride)
+_notificationOverrides = _notifications <<< prop (Proxy :: _ "notificationOverrides")
+
+_notificationPanelOpen :: Lens' State Boolean
+_notificationPanelOpen = _notifications <<< prop (Proxy :: _ "notificationPanelOpen")
+
+_notificationEditor :: Lens' State (Maybe NotificationEditor)
+_notificationEditor = _notifications <<< prop (Proxy :: _ "notificationEditor")
+
+_templatesList :: Lens' State (Array TaskTemplate)
+_templatesList = _templates <<< prop (Proxy :: _ "templates")
+
+_templateDraft :: Lens' State TemplateDraft
+_templateDraft = _templates <<< prop (Proxy :: _ "templateDraft")
+
+_editingTemplateId :: Lens' State (Maybe String)
+_editingTemplateId = _templates <<< prop (Proxy :: _ "editingTemplateId")
+
+_csvInput :: Lens' State String
+_csvInput = _imports <<< prop (Proxy :: _ "csvInput")
+
+_csvImportResult :: Lens' State (Maybe CsvImportResult)
+_csvImportResult = _imports <<< prop (Proxy :: _ "csvImportResult")
+
+_icsInput :: Lens' State String
+_icsInput = _imports <<< prop (Proxy :: _ "icsInput")
+
+_icsImportResult :: Lens' State (Maybe IcsImportResult)
+_icsImportResult = _imports <<< prop (Proxy :: _ "icsImportResult")
+
+_exportFormat :: Lens' State ExportFormat
+_exportFormat = _exports <<< prop (Proxy :: _ "exportFormat")
+
+_exportTypeFilter :: Lens' State String
+_exportTypeFilter = _exports <<< prop (Proxy :: _ "exportTypeFilter")
+
+_exportStatusFilter :: Lens' State String
+_exportStatusFilter = _exports <<< prop (Proxy :: _ "exportStatusFilter")
+
+_exportCategoryFilter :: Lens' State String
+_exportCategoryFilter = _exports <<< prop (Proxy :: _ "exportCategoryFilter")
+
+_exportStartDate :: Lens' State String
+_exportStartDate = _exports <<< prop (Proxy :: _ "exportStartDate")
+
+_exportEndDate :: Lens' State String
+_exportEndDate = _exports <<< prop (Proxy :: _ "exportEndDate")
+
+_exportOutput :: Lens' State String
+_exportOutput = _exports <<< prop (Proxy :: _ "exportOutput")
+
+_viewMode :: Lens' State AgendaView
+_viewMode = _view <<< prop (Proxy :: _ "viewMode")
+
+_viewFocusDate :: Lens' State String
+_viewFocusDate = _view <<< prop (Proxy :: _ "focusDate")
+
+_viewActiveModal :: Lens' State (Maybe AgendaModal)
+_viewActiveModal = _view <<< prop (Proxy :: _ "activeModal")
+
+_viewValidationPanel :: Lens' State (Maybe ValidationPanel)
+_viewValidationPanel = _view <<< prop (Proxy :: _ "validationPanel")
 
 data Action
   = Initialize
@@ -312,123 +472,202 @@ component =
 
 initialState :: forall i. i -> State
 initialState = const
-  { items: []
-  , draft: emptyDraft
-  , validationError: Nothing
-  , showConflictsOnly: false
-  , conflictResolution: Nothing
-  , offlineMode: false
-  , pendingSync: []
-  , syncConflict: Nothing
-  , validationPanel: Nothing
-  , sortMode: SortByTime
-  , draggingId: Nothing
-  , dragHoverIndex: Nothing
-  , dragOffsetMinutes: Nothing
-  , updateError: Nothing
-  , notificationDefaults: defaultNotificationDefaults
-  , notificationOverrides: []
-  , notificationPanelOpen: false
-  , notificationEditor: Nothing
-  , templates: []
-  , templateDraft: emptyTemplateDraft
-  , editingTemplateId: Nothing
-  , csvInput: ""
-  , csvImportResult: Nothing
-  , icsInput: ""
-  , icsImportResult: Nothing
-  , exportFormat: ExportCSV
-  , exportTypeFilter: ""
-  , exportStatusFilter: ""
-  , exportCategoryFilter: ""
-  , exportStartDate: ""
-  , exportEndDate: ""
-  , exportOutput: ""
-  , viewMode: ViewDay
-  , focusDate: ""
-  , activeModal: Nothing
+  { data:
+      { items: []
+      , draft: emptyDraft
+      , validationError: Nothing
+      , showConflictsOnly: false
+      , conflictResolution: Nothing
+      , sortMode: SortByTime
+      }
+  , sync:
+      { offlineMode: false
+      , pendingSync: []
+      , syncConflict: Nothing
+      , updateError: Nothing
+      }
+  , drag:
+      { draggingId: Nothing
+      , dragHoverIndex: Nothing
+      , dragOffsetMinutes: Nothing
+      }
+  , notifications:
+      { notificationDefaults: defaultNotificationDefaults
+      , notificationOverrides: []
+      , notificationPanelOpen: false
+      , notificationEditor: Nothing
+      }
+  , templates:
+      { templates: []
+      , templateDraft: emptyTemplateDraft
+      , editingTemplateId: Nothing
+      }
+  , imports:
+      { csvInput: ""
+      , csvImportResult: Nothing
+      , icsInput: ""
+      , icsImportResult: Nothing
+      }
+  , exports:
+      { exportFormat: ExportCSV
+      , exportTypeFilter: ""
+      , exportStatusFilter: ""
+      , exportCategoryFilter: ""
+      , exportStartDate: ""
+      , exportEndDate: ""
+      , exportOutput: ""
+      }
+  , view:
+      { viewMode: ViewDay
+      , focusDate: ""
+      , activeModal: Nothing
+      , validationPanel: Nothing
+      }
   }
 
 handleAction :: Action -> AgendaAppM Unit
 handleAction action = handleError $
-  case action of
-    Initialize -> do
+  case handleInitAction action of
+    Just handler -> handler
+    Nothing ->
+      case handleDataAction action of
+        Just handler -> handler
+        Nothing ->
+          case handleSyncAction action of
+            Just handler -> handler
+            Nothing ->
+              case handleDragAction action of
+                Just handler -> handler
+                Nothing ->
+                  case handleViewAction action of
+                    Just handler -> handler
+                    Nothing ->
+                      case handleNotificationAction action of
+                        Just handler -> handler
+                        Nothing ->
+                          case handleTemplateAction action of
+                            Just handler -> handler
+                            Nothing ->
+                              case handleImportAction action of
+                                Just handler -> handler
+                                Nothing ->
+                                  case handleExportAction action of
+                                    Just handler -> handler
+                                    Nothing -> pure unit
+
+handleInitAction :: Action -> Maybe (ErrorAgendaAppM Unit)
+handleInitAction = case _ of
+  Initialize ->
+    Just do
       now <- liftEffect nowDateTime
-      lift $ modify_ _ { focusDate = formatDate now }
+      lift $ modify_ (_viewFocusDate .~ formatDate now)
       refreshItems
-    DraftTitleChanged title ->
-      lift $ modify_ \st -> st { draft = st.draft { title = title }, validationError = Nothing }
-    DraftStartChanged windowStart ->
-      lift $ modify_ \st -> st { draft = st.draft { windowStart = windowStart }, validationError = Nothing }
-    DraftEndChanged windowEnd ->
-      lift $ modify_ \st -> st { draft = st.draft { windowEnd = windowEnd }, validationError = Nothing }
-    DraftCategoryChanged category ->
-      lift $ modify_ \st -> st { draft = st.draft { category = category }, validationError = Nothing }
-    DraftTitleKeyDown key ->
-      when (key == "Enter") submitIntention
-    SubmitIntention ->
-      submitIntention
-    PlanifyFrom sourceId content -> do
+  _ -> Nothing
+
+handleDataAction :: Action -> Maybe (ErrorAgendaAppM Unit)
+handleDataAction = case _ of
+  DraftTitleChanged title ->
+    Just $ lift $ modify_ ((_dataValidationError .~ Nothing) <<< (_draftTitle .~ title))
+  DraftStartChanged windowStart ->
+    Just $ lift $ modify_ ((_dataValidationError .~ Nothing) <<< (_draftWindowStart .~ windowStart))
+  DraftEndChanged windowEnd ->
+    Just $ lift $ modify_ ((_dataValidationError .~ Nothing) <<< (_draftWindowEnd .~ windowEnd))
+  DraftCategoryChanged category ->
+    Just $ lift $ modify_ ((_dataValidationError .~ Nothing) <<< (_draftCategory .~ category))
+  DraftTitleKeyDown key ->
+    Just $ when (key == "Enter") submitIntention
+  SubmitIntention ->
+    Just submitIntention
+  PlanifyFrom sourceId content ->
+    Just do
       st <- get
       let item = toScheduledBlock sourceId content
-      if st.offlineMode then do
+      if st ^. _syncOfflineMode then do
         let
-          result = applyOfflineMutation true item st.items st.pendingSync
-        lift $ modify_ _ { items = result.items, pendingSync = result.pending }
+          result = applyOfflineMutation true item (st ^. _dataItems) (st ^. _syncPendingSync)
+        lift $ modify_ ((_dataItems .~ result.items) <<< (_syncPendingSync .~ result.pending))
       else do
         _ <- createItem item
         refreshItems
-    ToggleConflictFilter ->
-      lift $ modify_ \st -> st { showConflictsOnly = not st.showConflictsOnly }
-    ToggleOffline -> do
+  ToggleConflictFilter ->
+    Just $ lift $ modify_ (_dataShowConflictsOnly %~ not)
+  SortChanged raw ->
+    Just $ lift $ modify_ (_dataSortMode .~ parseSortMode raw)
+  OpenConflictResolution groupIds ->
+    Just $ lift $ modify_ (_dataConflictResolution .~ Just { groupIds, pendingStrategy: Nothing })
+  ChooseResolutionStrategy strategy ->
+    Just $ lift $ modify_ (_dataConflictResolution %~ map (\res -> res { pendingStrategy = Just strategy }))
+  ConfirmResolution ->
+    Just $ lift $ modify_ (_dataConflictResolution .~ Nothing)
+  CancelResolution ->
+    Just $ lift $ modify_ (_dataConflictResolution .~ Nothing)
+  _ -> Nothing
+
+handleSyncAction :: Action -> Maybe (ErrorAgendaAppM Unit)
+handleSyncAction = case _ of
+  ToggleOffline ->
+    Just do
       st <- get
-      if st.offlineMode then do
-        lift $ modify_ _ { offlineMode = false }
+      if st ^. _syncOfflineMode then do
+        lift $ modify_ (_syncOfflineMode .~ false)
         syncPending
-      else lift $ modify_ _ { offlineMode = true }
-    SortChanged raw ->
-      lift $ modify_ \st -> st { sortMode = parseSortMode raw }
-    DragStart itemId ev -> do
+      else lift $ modify_ (_syncOfflineMode .~ true)
+  ResolveSyncKeepLocal ->
+    Just $ lift $ modify_ ((_syncConflict .~ Nothing) <<< (_syncOfflineMode .~ true))
+  ResolveSyncDiscardLocal ->
+    Just do
+      lift $ modify_ ((_syncConflict .~ Nothing) <<< (_syncPendingSync .~ []))
+      refreshItems
+  DismissUpdateError ->
+    Just $ lift $ modify_ (_syncUpdateError .~ Nothing)
+  _ -> Nothing
+
+handleDragAction :: Action -> Maybe (ErrorAgendaAppM Unit)
+handleDragAction = case _ of
+  DragStart itemId ev ->
+    Just do
       st <- get
       let duration =
             find (\item -> case item of
               ServerCalendarItem { id } -> id == itemId
               _ -> false
-            ) st.items >>= \item ->
+            ) (st ^. _dataItems) >>= \item ->
               durationMinutesBetween (calendarItemContent item).windowStart (calendarItemContent item).windowEnd
       offset <- liftEffect $ dragOffsetFromEvent ev duration
-      lift $ modify_ _ { draggingId = Just itemId, dragOffsetMinutes = offset }
-    DragOver _ ev ->
-      liftEffect $ preventDefault (toEvent ev)
-    DropOn targetId -> do
+      lift $ modify_ ((_draggingId .~ Just itemId) <<< (_dragOffsetMinutes .~ offset))
+  DragOver _ ev ->
+    Just $ liftEffect $ preventDefault (toEvent ev)
+  DropOn targetId ->
+    Just do
       st <- get
-      case st.draggingId of
+      case st ^. _draggingId of
         Nothing -> pure unit
         Just draggingId -> do
-          let reordered = moveItemBefore draggingId targetId st.items
-          lift $ modify_ _ { items = reordered, draggingId = Nothing }
-    DragEnd ->
-      lift $ modify_ _ { draggingId = Nothing, dragHoverIndex = Nothing, dragOffsetMinutes = Nothing }
-    DismissUpdateError ->
-      lift $ modify_ _ { updateError = Nothing }
-    DragOverCalendar ev -> do
+          let reordered = moveItemBefore draggingId targetId (st ^. _dataItems)
+          lift $ modify_ ((_dataItems .~ reordered) <<< (_draggingId .~ Nothing))
+  DragEnd ->
+    Just $ lift $ modify_
+      ((_draggingId .~ Nothing) <<< (_dragHoverIndex .~ Nothing) <<< (_dragOffsetMinutes .~ Nothing))
+  DragOverCalendar ev ->
+    Just do
       liftEffect $ preventDefault (toEvent ev)
       idx <- liftEffect $ dragMinuteIndexFromEvent ev
       st <- get
       let
-        offset = fromMaybe 0 st.dragOffsetMinutes
+        offset = fromMaybe 0 (st ^. _dragOffsetMinutes)
         adjusted = idx <#> \minuteIndex -> computeDropMinuteIndex minuteIndex offset
-      lift $ modify_ _ { dragHoverIndex = adjusted }
-    DropOnCalendar ev -> do
+      lift $ modify_ (_dragHoverIndex .~ adjusted)
+  DropOnCalendar ev ->
+    Just do
       liftEffect $ preventDefault (toEvent ev)
       idx <- liftEffect $ dragMinuteIndexFromEvent ev
       st <- get
-      case st.draggingId of
+      case st ^. _draggingId of
         Nothing -> pure unit
         Just draggingId -> do
           let
-            baseDateTime = st.focusDate <> "T00:00"
-            offset = fromMaybe 0 st.dragOffsetMinutes
+            baseDateTime = st ^. _viewFocusDate <> "T00:00"
+            offset = fromMaybe 0 (st ^. _dragOffsetMinutes)
             minuteIndex = fromMaybe 0 idx
             adjustedIndex = computeDropMinuteIndex minuteIndex offset
             totalMinutes = indexToMinutes adjustedIndex
@@ -440,50 +679,60 @@ handleAction action = handleError $
                 find (\item -> case item of
                   ServerCalendarItem { id } -> id == draggingId
                   _ -> false
-                ) st.items >>= \item ->
+                ) (st ^. _dataItems) >>= \item ->
                   durationMinutesBetween (calendarItemContent item).windowStart (calendarItemContent item).windowEnd >>= \mins ->
                     shiftMinutes mins start >>= \end ->
                       Just { start, end }
           case updated of
-            Nothing -> lift $ modify_ _ { draggingId = Nothing, dragHoverIndex = Nothing, dragOffsetMinutes = Nothing }
+            Nothing ->
+              lift $ modify_
+                ((_draggingId .~ Nothing) <<< (_dragHoverIndex .~ Nothing) <<< (_dragOffsetMinutes .~ Nothing))
             Just { start, end } -> do
               let
-                result = updateItemWindowById draggingId start end st.items
+                result = updateItemWindowById draggingId start end (st ^. _dataItems)
               case result.updated of
-                Nothing -> lift $ modify_ _ { draggingId = Nothing, dragHoverIndex = Nothing, dragOffsetMinutes = Nothing }
+                Nothing ->
+                  lift $ modify_
+                    ((_draggingId .~ Nothing) <<< (_dragHoverIndex .~ Nothing) <<< (_dragOffsetMinutes .~ Nothing))
                 Just updatedItem -> do
-                  if st.offlineMode then
-                    lift $ modify_ _ { items = result.items
-                                    , pendingSync = upsertPendingItem updatedItem st.pendingSync
-                                    , draggingId = Nothing
-                                    , dragHoverIndex = Nothing
-                                    , dragOffsetMinutes = Nothing
-                                    , updateError = Nothing
-                                    }
+                  if st ^. _syncOfflineMode then
+                    lift $ modify_
+                      ((_dataItems .~ result.items)
+                        <<< (_syncPendingSync %~ upsertPendingItem updatedItem)
+                        <<< (_syncUpdateError .~ Nothing)
+                        <<< (_draggingId .~ Nothing)
+                        <<< (_dragHoverIndex .~ Nothing)
+                        <<< (_dragOffsetMinutes .~ Nothing))
                   else do
                     resp <- updateItem draggingId updatedItem
                     if statusOk resp then do
-                      lift $ modify_ _ { draggingId = Nothing
-                                      , dragHoverIndex = Nothing
-                                      , dragOffsetMinutes = Nothing
-                                      , updateError = Nothing
-                                      }
+                      lift $ modify_
+                        ((_draggingId .~ Nothing)
+                          <<< (_dragHoverIndex .~ Nothing)
+                          <<< (_dragOffsetMinutes .~ Nothing)
+                          <<< (_syncUpdateError .~ Nothing))
                       refreshItems
                     else do
-                      lift $ modify_ _ { draggingId = Nothing
-                                      , dragHoverIndex = Nothing
-                                      , dragOffsetMinutes = Nothing
-                                      , updateError = Just (updateErrorMessage (unwrap resp.status))
-                                      }
+                      lift $ modify_
+                        ((_draggingId .~ Nothing)
+                          <<< (_dragHoverIndex .~ Nothing)
+                          <<< (_dragOffsetMinutes .~ Nothing)
+                          <<< (_syncUpdateError .~ Just (updateErrorMessage (unwrap resp.status))))
                       refreshItems
-    OpenValidation itemId content -> do
+  _ -> Nothing
+
+handleViewAction :: Action -> Maybe (ErrorAgendaAppM Unit)
+handleViewAction = case _ of
+  OpenValidation itemId content ->
+    Just do
       suggested <- liftEffect $ suggestDurationMinutes content.windowStart
-      lift $ modify_ _ { validationPanel = Just { itemId, proposedMinutes: suggested, inputValue: "" } }
-    ValidationMinutesChanged raw ->
-      lift $ modify_ \st -> st { validationPanel = st.validationPanel <#> \panel -> panel { inputValue = raw } }
-    ConfirmValidation -> do
+      lift $ modify_ (_viewValidationPanel .~ Just { itemId, proposedMinutes: suggested, inputValue: "" })
+  ValidationMinutesChanged raw ->
+    Just $ lift $ modify_ (_viewValidationPanel %~ map (\panel -> panel { inputValue = raw }))
+  ConfirmValidation ->
+    Just do
       st <- get
-      case st.validationPanel of
+      case st ^. _viewValidationPanel of
         Nothing -> pure unit
         Just panel -> do
           let duration = parsePositiveInt panel.inputValue <|> panel.proposedMinutes
@@ -491,80 +740,87 @@ handleAction action = handleError $
             Nothing -> pure unit
             Just minutes -> do
               _ <- validateItem panel.itemId minutes
-              lift $ modify_ _ { validationPanel = Nothing }
+              lift $ modify_ (_viewValidationPanel .~ Nothing)
               refreshItems
-    CancelValidation ->
-      lift $ modify_ _ { validationPanel = Nothing }
-    OpenConflictResolution groupIds ->
-      lift $ modify_ \st -> st { conflictResolution = Just { groupIds, pendingStrategy: Nothing } }
-    ChooseResolutionStrategy strategy ->
-      lift $ modify_ \st -> st { conflictResolution = st.conflictResolution <#> \res -> res { pendingStrategy = Just strategy } }
-    ConfirmResolution ->
-      lift $ modify_ \st -> st { conflictResolution = Nothing }
-    CancelResolution ->
-      lift $ modify_ \st -> st { conflictResolution = Nothing }
-    ResolveSyncKeepLocal ->
-      lift $ modify_ \st -> st { syncConflict = Nothing, offlineMode = true }
-    ResolveSyncDiscardLocal -> do
-      lift $ modify_ \st -> st { syncConflict = Nothing, pendingSync = [] }
-      refreshItems
-    ToggleNotificationPanel ->
-      lift $ modify_ \st -> st { notificationPanelOpen = not st.notificationPanelOpen }
-    DefaultStartTimeChanged raw ->
-      lift $ modify_ \st ->
-        if isTimeLocal raw then st { notificationDefaults = st.notificationDefaults { startDayTime = raw } } else st
-    DefaultBeforeEndChanged raw ->
-      lift $ modify_ \st ->
-        case parsePositiveInt raw of
-          Just hours -> st { notificationDefaults = st.notificationDefaults { beforeEndHours = hours } }
-          Nothing -> st
-    OpenNotificationEditor itemId -> do
+  CancelValidation ->
+    Just $ lift $ modify_ (_viewValidationPanel .~ Nothing)
+  ViewChanged raw ->
+    Just $ lift $ modify_ (_viewMode .~ parseAgendaView raw)
+  FocusDateChanged raw ->
+    Just $ lift $ modify_ (_viewFocusDate .~ raw)
+  OpenModal modal ->
+    Just $ lift $ modify_ (_viewActiveModal .~ Just modal)
+  CloseModal ->
+    Just $ lift $ modify_ (_viewActiveModal .~ Nothing)
+  _ -> Nothing
+
+handleNotificationAction :: Action -> Maybe (ErrorAgendaAppM Unit)
+handleNotificationAction = case _ of
+  ToggleNotificationPanel ->
+    Just $ lift $ modify_ (_notificationPanelOpen %~ not)
+  DefaultStartTimeChanged raw ->
+    Just $
+      if isTimeLocal raw
+        then lift $ modify_ (_notificationDefaults %~ _ { startDayTime = raw })
+        else pure unit
+  DefaultBeforeEndChanged raw ->
+    Just $
+      case parsePositiveInt raw of
+        Just hours -> lift $ modify_ (_notificationDefaults %~ _ { beforeEndHours = hours })
+        Nothing -> pure unit
+  OpenNotificationEditor itemId ->
+    Just do
       st <- get
       let
-        existing = lookupNotificationOverride itemId st.notificationOverrides
-        startTime = fromMaybe st.notificationDefaults.startDayTime (existing >>= _.startDayTime)
-        beforeEnd = fromMaybe st.notificationDefaults.beforeEndHours (existing >>= _.beforeEndHours)
-      lift $ modify_ _ { notificationEditor = Just { itemId, startTime, beforeEndRaw: show beforeEnd } }
-    NotificationStartTimeChanged raw ->
-      lift $ modify_ \st ->
-        st { notificationEditor = st.notificationEditor <#> \editor -> editor { startTime = raw } }
-    NotificationBeforeEndChanged raw ->
-      lift $ modify_ \st ->
-        st { notificationEditor = st.notificationEditor <#> \editor -> editor { beforeEndRaw = raw } }
-    SaveNotificationOverride -> do
+        existing = lookupNotificationOverride itemId (st ^. _notificationOverrides)
+        startTime =
+          fromMaybe (st ^. _notificationDefaults).startDayTime (existing >>= _.startDayTime)
+        beforeEnd =
+          fromMaybe (st ^. _notificationDefaults).beforeEndHours (existing >>= _.beforeEndHours)
+      lift $ modify_ (_notificationEditor .~ Just { itemId, startTime, beforeEndRaw: show beforeEnd })
+  NotificationStartTimeChanged raw ->
+    Just $ lift $ modify_ (_notificationEditor %~ map (\editor -> editor { startTime = raw }))
+  NotificationBeforeEndChanged raw ->
+    Just $ lift $ modify_ (_notificationEditor %~ map (\editor -> editor { beforeEndRaw = raw }))
+  SaveNotificationOverride ->
+    Just do
       st <- get
-      case st.notificationEditor of
+      case st ^. _notificationEditor of
         Nothing -> pure unit
         Just editor -> do
           let
             cleanedTime = if isTimeLocal editor.startTime then Just editor.startTime else Nothing
             cleanedHours = parsePositiveInt editor.beforeEndRaw
-          lift $ modify_ _ { notificationOverrides = upsertNotificationOverride editor.itemId cleanedTime cleanedHours st.notificationOverrides
-                          , notificationEditor = Nothing
-                          }
-    ResetNotificationOverride itemId ->
-      lift $ modify_ \st -> st { notificationOverrides = removeNotificationOverride itemId st.notificationOverrides
-                              , notificationEditor = Nothing
-                              }
-    CancelNotificationOverride ->
-      lift $ modify_ _ { notificationEditor = Nothing }
-    TemplateTitleChanged title ->
-      lift $ modify_ \st -> st { templateDraft = st.templateDraft { title = title } }
-    TemplateDurationChanged duration ->
-      lift $ modify_ \st -> st { templateDraft = st.templateDraft { durationMinutes = duration } }
-    TemplateCategoryChanged category ->
-      lift $ modify_ \st -> st { templateDraft = st.templateDraft { category = category } }
-    SubmitTemplate -> do
+          lift $ modify_
+            ((_notificationOverrides %~ upsertNotificationOverride editor.itemId cleanedTime cleanedHours)
+              <<< (_notificationEditor .~ Nothing))
+  ResetNotificationOverride itemId ->
+    Just $ lift $ modify_
+      ((_notificationOverrides %~ removeNotificationOverride itemId) <<< (_notificationEditor .~ Nothing))
+  CancelNotificationOverride ->
+    Just $ lift $ modify_ (_notificationEditor .~ Nothing)
+  _ -> Nothing
+
+handleTemplateAction :: Action -> Maybe (ErrorAgendaAppM Unit)
+handleTemplateAction = case _ of
+  TemplateTitleChanged title ->
+    Just $ lift $ modify_ (_templateDraft %~ _ { title = title })
+  TemplateDurationChanged duration ->
+    Just $ lift $ modify_ (_templateDraft %~ _ { durationMinutes = duration })
+  TemplateCategoryChanged category ->
+    Just $ lift $ modify_ (_templateDraft %~ _ { category = category })
+  SubmitTemplate ->
+    Just do
       st <- get
       let
-        draft = st.templateDraft
+        draft = st ^. _templateDraft
         duration = parsePositiveInt draft.durationMinutes
       case duration of
         Nothing -> pure unit
         Just minutes -> do
           let
             template =
-              { id: fromMaybe "" st.editingTemplateId
+              { id: fromMaybe "" (st ^. _editingTemplateId)
               , title: StringCommon.trim draft.title
               , durationMinutes: minutes
               , category: draft.category
@@ -573,141 +829,149 @@ handleAction action = handleError $
           else do
             let
               nextTemplates =
-                case st.editingTemplateId of
-                  Nothing -> addTemplate template st.templates
-                  Just _ -> updateTemplate template st.templates
-            lift $ modify_ _ { templates = nextTemplates
-                            , templateDraft = emptyTemplateDraft
-                            , editingTemplateId = Nothing
-                            }
-    EditTemplate templateId -> do
+                case st ^. _editingTemplateId of
+                  Nothing -> addTemplate template (st ^. _templatesList)
+                  Just _ -> updateTemplate template (st ^. _templatesList)
+            lift $ modify_
+              ((_templatesList .~ nextTemplates)
+                <<< (_templateDraft .~ emptyTemplateDraft)
+                <<< (_editingTemplateId .~ Nothing))
+  EditTemplate templateId ->
+    Just do
       st <- get
-      case find (\tpl -> tpl.id == templateId) st.templates of
+      case find (\tpl -> tpl.id == templateId) (st ^. _templatesList) of
         Nothing -> pure unit
         Just template ->
-          lift $ modify_ _ { templateDraft =
-                              { title: template.title
-                              , durationMinutes: show template.durationMinutes
-                              , category: template.category
-                              }
-                          , editingTemplateId = Just template.id
-                          }
-    CancelTemplateEdit ->
-      lift $ modify_ _ { templateDraft = emptyTemplateDraft, editingTemplateId = Nothing }
-    DeleteTemplate templateId ->
-      lift $ modify_ \st -> st { templates = removeTemplate templateId st.templates
-                              , templateDraft = emptyTemplateDraft
-                              , editingTemplateId = Nothing
-                              }
-    UseTemplate templateId -> do
+          lift $ modify_
+            ((_templateDraft .~ { title: template.title
+                                , durationMinutes: show template.durationMinutes
+                                , category: template.category
+                                })
+              <<< (_editingTemplateId .~ Just template.id))
+  CancelTemplateEdit ->
+    Just $ lift $ modify_
+      ((_templateDraft .~ emptyTemplateDraft) <<< (_editingTemplateId .~ Nothing))
+  DeleteTemplate templateId ->
+    Just $ lift $ modify_
+      ((_templatesList %~ removeTemplate templateId)
+        <<< (_templateDraft .~ emptyTemplateDraft)
+        <<< (_editingTemplateId .~ Nothing))
+  UseTemplate templateId ->
+    Just do
       st <- get
-      case find (\tpl -> tpl.id == templateId) st.templates of
+      case find (\tpl -> tpl.id == templateId) (st ^. _templatesList) of
         Nothing -> pure unit
         Just template -> do
           now <- liftEffect nowDateTime
           let startStr = formatDateTimeLocal now
           let endStr = fromMaybe startStr (shiftMinutes template.durationMinutes startStr)
-          lift $ modify_ \st' -> st' { draft = applyTemplateToDraft template startStr endStr }
-    CsvInputChanged raw ->
-      lift $ modify_ \st -> st { csvInput = raw }
-    ParseCsvInput -> do
+          lift $ modify_ (_dataDraft .~ applyTemplateToDraft template startStr endStr)
+  _ -> Nothing
+
+handleImportAction :: Action -> Maybe (ErrorAgendaAppM Unit)
+handleImportAction = case _ of
+  CsvInputChanged raw ->
+    Just $ lift $ modify_ (_csvInput .~ raw)
+  ParseCsvInput ->
+    Just do
       st <- get
-      let result = parseCsvImport st.csvInput
-      lift $ modify_ _ { csvImportResult = Just result }
-    ApplyCsvImport -> do
+      let result = parseCsvImport (st ^. _csvInput)
+      lift $ modify_ (_csvImportResult .~ Just result)
+  ApplyCsvImport ->
+    Just do
       st <- get
-      case st.csvImportResult of
+      case st ^. _csvImportResult of
         Nothing -> pure unit
         Just result ->
           if null result.items then pure unit
-          else if st.offlineMode then do
+          else if st ^. _syncOfflineMode then do
             let
-              initial = { items: st.items, pending: st.pendingSync }
+              initial = { items: st ^. _dataItems, pending: st ^. _syncPendingSync }
               final = foldl (\acc item -> applyOfflineMutation true item acc.items acc.pending) initial result.items
-            lift $ modify_ _ { items = final.items
-                            , pendingSync = final.pending
-                            , csvInput = ""
-                            , csvImportResult = Nothing
-                            }
+            lift $ modify_
+              ((_dataItems .~ final.items)
+                <<< (_syncPendingSync .~ final.pending)
+                <<< (_csvInput .~ "")
+                <<< (_csvImportResult .~ Nothing))
           else
-            lift $ modify_ _ { items = st.items <> result.items
-                            , csvInput = ""
-                            , csvImportResult = Nothing
-                            }
-    ClearCsvImport ->
-      lift $ modify_ _ { csvInput = "", csvImportResult = Nothing }
-    IcsInputChanged raw ->
-      lift $ modify_ \st -> st { icsInput = raw }
-    ParseIcsInput -> do
+            lift $ modify_
+              ((_dataItems %~ (_ <> result.items))
+                <<< (_csvInput .~ "")
+                <<< (_csvImportResult .~ Nothing))
+  ClearCsvImport ->
+    Just $ lift $ modify_ ((_csvInput .~ "") <<< (_csvImportResult .~ Nothing))
+  IcsInputChanged raw ->
+    Just $ lift $ modify_ (_icsInput .~ raw)
+  ParseIcsInput ->
+    Just do
       st <- get
-      let result = parseIcsImport st.icsInput
-      lift $ modify_ _ { icsImportResult = Just result }
-    ApplyIcsImport -> do
+      let result = parseIcsImport (st ^. _icsInput)
+      lift $ modify_ (_icsImportResult .~ Just result)
+  ApplyIcsImport ->
+    Just do
       st <- get
-      case st.icsImportResult of
+      case st ^. _icsImportResult of
         Nothing -> pure unit
         Just result ->
           if null result.items then pure unit
-          else if st.offlineMode then do
+          else if st ^. _syncOfflineMode then do
             let
-              initial = { items: st.items, pending: st.pendingSync }
+              initial = { items: st ^. _dataItems, pending: st ^. _syncPendingSync }
               final = foldl (\acc item -> applyOfflineMutation true item acc.items acc.pending) initial result.items
-            lift $ modify_ _ { items = final.items
-                            , pendingSync = final.pending
-                            , icsInput = ""
-                            , icsImportResult = Nothing
-                            }
+            lift $ modify_
+              ((_dataItems .~ final.items)
+                <<< (_syncPendingSync .~ final.pending)
+                <<< (_icsInput .~ "")
+                <<< (_icsImportResult .~ Nothing))
           else
-            lift $ modify_ _ { items = st.items <> result.items
-                            , icsInput = ""
-                            , icsImportResult = Nothing
-                            }
-    ClearIcsImport ->
-      lift $ modify_ _ { icsInput = "", icsImportResult = Nothing }
-    ExportFormatChanged raw ->
-      lift $ modify_ \st -> st { exportFormat = parseExportFormat raw }
-    ExportTypeFilterChanged raw ->
-      lift $ modify_ \st -> st { exportTypeFilter = raw }
-    ExportStatusFilterChanged raw ->
-      lift $ modify_ \st -> st { exportStatusFilter = raw }
-    ExportCategoryFilterChanged raw ->
-      lift $ modify_ \st -> st { exportCategoryFilter = raw }
-    ExportStartDateChanged raw ->
-      lift $ modify_ \st -> st { exportStartDate = raw }
-    ExportEndDateChanged raw ->
-      lift $ modify_ \st -> st { exportEndDate = raw }
-    GenerateExport -> do
+            lift $ modify_
+              ((_dataItems %~ (_ <> result.items))
+                <<< (_icsInput .~ "")
+                <<< (_icsImportResult .~ Nothing))
+  ClearIcsImport ->
+    Just $ lift $ modify_ ((_icsInput .~ "") <<< (_icsImportResult .~ Nothing))
+  _ -> Nothing
+
+handleExportAction :: Action -> Maybe (ErrorAgendaAppM Unit)
+handleExportAction = case _ of
+  ExportFormatChanged raw ->
+    Just $ lift $ modify_ (_exportFormat .~ parseExportFormat raw)
+  ExportTypeFilterChanged raw ->
+    Just $ lift $ modify_ (_exportTypeFilter .~ raw)
+  ExportStatusFilterChanged raw ->
+    Just $ lift $ modify_ (_exportStatusFilter .~ raw)
+  ExportCategoryFilterChanged raw ->
+    Just $ lift $ modify_ (_exportCategoryFilter .~ raw)
+  ExportStartDateChanged raw ->
+    Just $ lift $ modify_ (_exportStartDate .~ raw)
+  ExportEndDateChanged raw ->
+    Just $ lift $ modify_ (_exportEndDate .~ raw)
+  GenerateExport ->
+    Just do
       st <- get
       let
         filter =
-          { itemType: parseExportItemType st.exportTypeFilter
-          , status: parseExportStatus st.exportStatusFilter
-          , category: toOptionalString st.exportCategoryFilter
-          , startDate: toOptionalString st.exportStartDate
-          , endDate: toOptionalString st.exportEndDate
+          { itemType: parseExportItemType (st ^. _exportTypeFilter)
+          , status: parseExportStatus (st ^. _exportStatusFilter)
+          , category: toOptionalString (st ^. _exportCategoryFilter)
+          , startDate: toOptionalString (st ^. _exportStartDate)
+          , endDate: toOptionalString (st ^. _exportEndDate)
           }
-        filtered = filterItemsForExport filter st.items
+        filtered = filterItemsForExport filter (st ^. _dataItems)
         output =
-          case st.exportFormat of
+          case st ^. _exportFormat of
             ExportCSV -> exportItemsToCsv filtered
             ExportICS -> exportItemsToIcs filtered
-      lift $ modify_ _ { exportOutput = output }
-    ClearExportOutput ->
-      lift $ modify_ _ { exportOutput = "" }
-    ViewChanged raw ->
-      lift $ modify_ \st -> st { viewMode = parseAgendaView raw }
-    FocusDateChanged raw ->
-      lift $ modify_ \st -> st { focusDate = raw }
-    OpenModal modal ->
-      lift $ modify_ \st -> st { activeModal = Just modal }
-    CloseModal ->
-      lift $ modify_ \st -> st { activeModal = Nothing }
+      lift $ modify_ (_exportOutput .~ output)
+  ClearExportOutput ->
+    Just $ lift $ modify_ (_exportOutput .~ "")
+  _ -> Nothing
 
 refreshItems :: ErrorAgendaAppM Unit
 refreshItems = do
   jsonResponse <- withExceptT toFatalError $ ExceptT $ liftAff getItemsResponse
   items <- (_.body >>> decodeJson >>> lmap toFatalError >>> pure >>> ExceptT) jsonResponse
-  lift $ modify_ \st -> st { items = items }
+  lift $ modify_ (_dataItems .~ items)
 
 createItem :: CalendarItem -> ErrorAgendaAppM (Response Json)
 createItem item = withExceptT toFatalError $ ExceptT $ liftAff $ createItemResponse item
@@ -725,7 +989,7 @@ statusOk r = unwrap r.status >= 200 && unwrap r.status < 300
 syncPending :: ErrorAgendaAppM Unit
 syncPending = do
   st <- get
-  if null st.pendingSync then refreshItems
+  if null (st ^. _syncPendingSync) then refreshItems
   else do
     ok <- foldM
       (\acc item ->
@@ -735,35 +999,51 @@ syncPending = do
           pure (statusOk resp)
       )
       true
-      st.pendingSync
+      (st ^. _syncPendingSync)
     if ok then do
-      lift $ modify_ _ { pendingSync = [], syncConflict = Nothing }
+      lift $ modify_ ((_syncPendingSync .~ []) <<< (_syncConflict .~ Nothing))
       refreshItems
-    else lift $ modify_ _ { syncConflict = Just st.pendingSync }
+    else lift $ modify_ (_syncConflict .~ Just (st ^. _syncPendingSync))
 
 submitIntention :: ErrorAgendaAppM Unit
 submitIntention = do
   st <- get
-  case validateIntention st.draft of
-    Left err -> lift $ modify_ _ { validationError = Just err }
+  case validateIntention (st ^. _dataDraft) of
+    Left err -> lift $ modify_ (_dataValidationError .~ Just err)
     Right validDraft -> do
       let item = toNewIntention validDraft
-      if st.offlineMode then do
+      if st ^. _syncOfflineMode then do
         let
-          result = applyOfflineMutation true item st.items st.pendingSync
-        lift $ modify_ _ { items = result.items
-                        , pendingSync = result.pending
-                        , draft = emptyDraft
-                        , validationError = Nothing
-                        }
+          result = applyOfflineMutation true item (st ^. _dataItems) (st ^. _syncPendingSync)
+        lift $ modify_
+          ((_dataItems .~ result.items)
+            <<< (_dataDraft .~ emptyDraft)
+            <<< (_dataValidationError .~ Nothing)
+            <<< (_syncPendingSync .~ result.pending))
       else do
         _ <- createItem item
-        lift $ modify_ _ { draft = emptyDraft, validationError = Nothing }
+        lift $ modify_ ((_dataDraft .~ emptyDraft) <<< (_dataValidationError .~ Nothing))
         refreshItems
 
 render :: forall m. State -> H.ComponentHTML Action () m
-render { items, draft, validationError, showConflictsOnly, conflictResolution, offlineMode, syncConflict, validationPanel, sortMode, notificationDefaults, notificationOverrides, notificationPanelOpen, notificationEditor, templates, templateDraft, editingTemplateId, csvInput, csvImportResult, icsInput, icsImportResult, exportFormat, exportTypeFilter, exportStatusFilter, exportCategoryFilter, exportStartDate, exportEndDate, exportOutput, viewMode, focusDate, activeModal, draggingId, dragHoverIndex, updateError } =
+render st =
   let
+    dataState = st ^. _data
+    syncState = st ^. _sync
+    dragState = st ^. _drag
+    notifications = st ^. _notifications
+    templates = st ^. _templates
+    imports = st ^. _imports
+    exports = st ^. _exports
+    viewState = st ^. _view
+    { items, draft, validationError, showConflictsOnly, conflictResolution, sortMode } = dataState
+    { offlineMode, syncConflict, updateError } = syncState
+    { draggingId, dragHoverIndex } = dragState
+    { notificationDefaults, notificationOverrides, notificationPanelOpen, notificationEditor } = notifications
+    { templates: templateItems, templateDraft, editingTemplateId } = templates
+    { csvInput, csvImportResult, icsInput, icsImportResult } = imports
+    { exportFormat, exportTypeFilter, exportStatusFilter, exportCategoryFilter, exportStartDate, exportEndDate, exportOutput } = exports
+    { viewMode, focusDate, activeModal, validationPanel } = viewState
     conflictIds = detectConflictIds items
     conflictGroups = detectConflictGroups items
     itemsToShow =
@@ -805,13 +1085,13 @@ render { items, draft, validationError, showConflictsOnly, conflictResolution, o
             ]
         , div [ class_ "agenda-side" ]
             [ renderNotificationsPanel notificationPanelOpen notificationDefaults notificationOverrides notificationEditor unplannedIntentions
-            , renderAccordion "Templates de taches" "agenda-accordion templates" $ renderTemplatesPanel templates templateDraft editingTemplateId
+            , renderAccordion "Templates de taches" "agenda-accordion templates" $ renderTemplatesPanel templateItems templateDraft editingTemplateId
             , renderAccordion "Import CSV" "agenda-accordion import-csv" $ renderCsvImportPanel csvInput csvImportResult
             , renderAccordion "Import ICS" "agenda-accordion import-ics" $ renderIcsImportPanel icsInput icsImportResult
             , renderAccordion "Export" "agenda-accordion export" $ renderExportPanel exportFormat exportTypeFilter exportStatusFilter exportCategoryFilter exportStartDate exportEndDate exportOutput
             ]
         ]
-    , renderAgendaModals activeModal showConflictsOnly conflictGroups offlineMode sortMode notificationDefaults notificationOverrides notificationEditor draft unplannedIntentions templates templateDraft editingTemplateId csvInput csvImportResult icsInput icsImportResult exportFormat exportTypeFilter exportStatusFilter exportCategoryFilter exportStartDate exportEndDate exportOutput
+    , renderAgendaModals activeModal showConflictsOnly conflictGroups offlineMode sortMode notificationDefaults notificationOverrides notificationEditor draft unplannedIntentions templateItems templateDraft editingTemplateId csvInput csvImportResult icsInput icsImportResult exportFormat exportTypeFilter exportStatusFilter exportCategoryFilter exportStartDate exportEndDate exportOutput
     ]
 
 renderAccordion :: forall w i. String -> String -> HTML w i -> HTML w i

@@ -18,6 +18,7 @@
             "effect",
             "either",
             "foreign-object",
+            "formatters",
             "halogen",
             "integers",
             "maybe",
@@ -4929,6 +4930,17 @@
         "unsafe-coerce"
       ]
     },
+    "fixed-points": {
+      "type": "git",
+      "url": "https://github.com/purescript-contrib/purescript-fixed-points.git",
+      "rev": "2b7f480038a15c707adf49178181cefed167afb2",
+      "dependencies": [
+        "exists",
+        "newtype",
+        "prelude",
+        "transformers"
+      ]
+    },
     "foldable-traversable": {
       "type": "git",
       "url": "https://github.com/purescript/purescript-foldable-traversable.git",
@@ -5002,6 +5014,20 @@
         "prelude",
         "strings",
         "tuples"
+      ]
+    },
+    "formatters": {
+      "type": "git",
+      "url": "https://github.com/purescript-contrib/purescript-formatters.git",
+      "rev": "0b4deda4c6664209173e3e21b8fcbc6151a4549c",
+      "dependencies": [
+        "datetime",
+        "fixed-points",
+        "lists",
+        "numbers",
+        "parsing",
+        "prelude",
+        "transformers"
       ]
     },
     "free": {
@@ -5358,6 +5384,25 @@
         "transformers"
       ]
     },
+    "parsing": {
+      "type": "git",
+      "url": "https://github.com/purescript-contrib/purescript-parsing.git",
+      "rev": "f806ce69c52d36200a8fc6e4fee6e6f40a92d407",
+      "dependencies": [
+        "arrays",
+        "either",
+        "foldable-traversable",
+        "identity",
+        "integers",
+        "lists",
+        "maybe",
+        "nullable",
+        "prelude",
+        "strings",
+        "transformers",
+        "unicode"
+      ]
+    },
     "partial": {
       "type": "git",
       "url": "https://github.com/purescript/purescript-partial.git",
@@ -5630,6 +5675,16 @@
         "partial",
         "prelude",
         "tuples"
+      ]
+    },
+    "unicode": {
+      "type": "git",
+      "url": "https://github.com/purescript-contrib/purescript-unicode.git",
+      "rev": "6454d59d9e1fd1bc5a72e80e985d8282022a567a",
+      "dependencies": [
+        "foldable-traversable",
+        "maybe",
+        "strings"
       ]
     },
     "unsafe-coerce": {
