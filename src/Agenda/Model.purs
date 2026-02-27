@@ -40,12 +40,14 @@ import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Show.Generic (genericShow)
 
 data ItemType = Intention | ScheduledBlock
+
 derive instance itemTypeGeneric :: Generic ItemType _
 derive instance itemTypeEq :: Eq ItemType
 instance itemTypeShow :: Show ItemType where
   show = genericShow
 
 data ItemStatus = Todo | EnCours | Fait | Annule
+
 derive instance itemStatusGeneric :: Generic ItemStatus _
 derive instance itemStatusEq :: Eq ItemStatus
 instance itemStatusShow :: Show ItemStatus where
@@ -175,6 +177,7 @@ type IcsImportResult =
   }
 
 data ExportFormat = ExportCSV | ExportICS
+
 derive instance exportFormatGeneric :: Generic ExportFormat _
 derive instance exportFormatEq :: Eq ExportFormat
 instance exportFormatShow :: Show ExportFormat where
@@ -319,8 +322,8 @@ instance calendarItemDecodeJson :: DecodeJson CalendarItem where
         , recurrenceExceptionDates: fromMaybe [] recurrenceExceptionDates
         }
     either (const $ pure $ NewCalendarItem { content })
-           (\id -> pure $ ServerCalendarItem { content, id })
-           (obj .: "id")
+      (\id -> pure $ ServerCalendarItem { content, id })
+      (obj .: "id")
 
 instance calendarItemEncodeJson :: EncodeJson CalendarItem where
   encodeJson (NewCalendarItem { content }) =

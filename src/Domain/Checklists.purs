@@ -20,9 +20,12 @@ import Data.Show.Generic (genericShow)
 import Data.Tuple (Tuple)
 import Foreign.Object (Object)
 
-data Checklist = NewChecklist { content :: ChecklistContent }
-               | ServerChecklist { content :: ChecklistContent
-                                 , storageId :: StorageId }
+data Checklist
+  = NewChecklist { content :: ChecklistContent }
+  | ServerChecklist
+      { content :: ChecklistContent
+      , storageId :: StorageId
+      }
 
 derive instance checklistGenericInstance :: Generic Checklist _
 derive instance checklistEqInstance :: Eq Checklist
@@ -46,29 +49,31 @@ instance checklistDecodeJsonInstance :: DecodeJson Checklist where
   decodeJson :: Json -> Either JsonDecodeError Checklist
   decodeJson json = decodeWrappedChecklist json <|> decodeFlatChecklist json
     where
-      decodeWrappedChecklist :: Json -> Either JsonDecodeError Checklist
-      decodeWrappedChecklist wrappedJson = do
-        dec <- decodeJson wrappedJson
-        content <- dec .: "content"
-        name <- content .: "name"
-        items <- content .: "items"
-        either (const $ pure $ NewChecklist { content: { name: name, items: items } })
-               (decodeServerChecklist name items)
-               (dec .: "storageId")
+    decodeWrappedChecklist :: Json -> Either JsonDecodeError Checklist
+    decodeWrappedChecklist wrappedJson = do
+      dec <- decodeJson wrappedJson
+      content <- dec .: "content"
+      name <- content .: "name"
+      items <- content .: "items"
+      either (const $ pure $ NewChecklist { content: { name: name, items: items } })
+        (decodeServerChecklist name items)
+        (dec .: "storageId")
 
-      decodeFlatChecklist :: Json -> Either JsonDecodeError Checklist
-      decodeFlatChecklist flatJson = do
-        dec <- decodeJson flatJson
-        name <- dec .: "name"
-        items <- dec .: "items"
-        pure $ NewChecklist { content: { name: name, items: items } }
+    decodeFlatChecklist :: Json -> Either JsonDecodeError Checklist
+    decodeFlatChecklist flatJson = do
+      dec <- decodeJson flatJson
+      name <- dec .: "name"
+      items <- dec .: "items"
+      pure $ NewChecklist { content: { name: name, items: items } }
 
-      decodeServerChecklist :: String -> Array ChecklistItem -> Object Json -> Either JsonDecodeError Checklist
-      decodeServerChecklist name items storageIdObj = do
-        version <- storageIdObj .: "version"
-        id <- storageIdObj .: "id"
-        pure $ ServerChecklist { content: { name: name, items: items }
-                               , storageId: { version: version, id: id }}
+    decodeServerChecklist :: String -> Array ChecklistItem -> Object Json -> Either JsonDecodeError Checklist
+    decodeServerChecklist name items storageIdObj = do
+      version <- storageIdObj .: "version"
+      id <- storageIdObj .: "id"
+      pure $ ServerChecklist
+        { content: { name: name, items: items }
+        , storageId: { version: version, id: id }
+        }
 
 instance checklistItemEncodeJson :: EncodeJson ChecklistItem where
   encodeJson :: ChecklistItem -> Json
@@ -89,13 +94,14 @@ instance checklistEncodeJson :: EncodeJson Checklist where
   encodeJson :: Checklist -> Json
   encodeJson (NewChecklist { content: { name, items } }) =
     encodeContentObj name items
-  encodeJson (ServerChecklist { content: { name, items }, storageId: { version, id }}) =
+  encodeJson (ServerChecklist { content: { name, items }, storageId: { version, id } }) =
     cont ~> storage ~> jsonEmptyObject
     where
-      cont :: Tuple String Json
-      cont = "content" := encodeContentObj name items
-      storage :: Tuple String Json
-      storage = "storageId" := encodeStorageIdObj id version
+    cont :: Tuple String Json
+    cont = "content" := encodeContentObj name items
+
+    storage :: Tuple String Json
+    storage = "storageId" := encodeStorageIdObj id version
 
 encodeContentObj :: String -> Array ChecklistItem -> Json
 encodeContentObj name items =

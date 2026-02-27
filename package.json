@@ -10,6 +10,7 @@
     "build": "spago bundle --bundle-type app --platform browser --outfile static/index.js",
     "start-dev": "node dev/proxy-server.js",
     "start-dev-proxy-prod": "node dev/proxy-server-prod.js",
+    "format": "purs-tidy format-in-place \"src/**/*.purs\" \"test/**/*.purs\"",
     "test": "spago test",
     "pw:open-session": "node dev/playwright-open-session.mjs",
     "e2e": "npm run build && playwright test",
@@ -25,6 +26,7 @@
     "express": "^4.18.1",
     "http-proxy-middleware": "^2.0.6",
     "playwright": "^1.58.2",
+    "purs-tidy": "^0.11.1",
     "spago": "^1.0.3"
   }
 }
