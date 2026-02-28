@@ -44,6 +44,6 @@ authTest("authenticated user can sign out from auth menu", async ({ authenticate
   await page.goto("/notes");
   await authExpect(signoutMenuButton(page)).toBeVisible();
   await signoutMenuButton(page).click();
-  await authExpect(page).toHaveURL(/\/signup$/);
+  await authExpect(page).toHaveURL(/\/signin$/);
   await authExpect(signupMenuButton(page)).toBeVisible();
 });

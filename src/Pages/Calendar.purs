@@ -160,6 +160,9 @@ calendarUiToAction = case _ of
   CalendarUiView action -> ViewAction action
   CalendarUiDrag action -> DragAction action
 
+mapCalendarUi :: forall w. HTML w CalendarUiAction -> HTML w Action
+mapCalendarUi = map calendarUiToAction
+
 renderOfflineToggle :: forall w. Boolean -> HTML w Action
 renderOfflineToggle = map SyncAction <<< Sync.renderOfflineToggle
 
@@ -170,22 +173,22 @@ renderSyncConflict :: forall w. Array CalendarItem -> HTML w Action
 renderSyncConflict = map SyncAction <<< Sync.renderSyncConflict
 
 renderSortPicker :: forall w. SortMode -> HTML w Action
-renderSortPicker = map calendarUiToAction <<< Cal.renderSortPicker
+renderSortPicker = mapCalendarUi <<< Cal.renderSortPicker
 
 renderConflictActions :: forall w. Array (Array String) -> HTML w Action
-renderConflictActions = map calendarUiToAction <<< Cal.renderConflictActions
+renderConflictActions = mapCalendarUi <<< Cal.renderConflictActions
 
 renderConflictResolution :: forall w. Array CalendarItem -> Cal.ConflictResolution -> HTML w Action
 renderConflictResolution items resolution =
-  map calendarUiToAction (Cal.renderConflictResolution items resolution)
+  mapCalendarUi (Cal.renderConflictResolution items resolution)
 
 renderForm :: forall w. IntentionDraft -> Maybe ValidationError -> HTML w Action
 renderForm draft validationError =
-  map calendarUiToAction (Cal.renderForm draft validationError)
+  mapCalendarUi (Cal.renderForm draft validationError)
 
 renderDateTimeContent :: forall w. IntentionDraft -> HTML w Action
 renderDateTimeContent draft =
-  map calendarUiToAction (Cal.renderDateTimeContent draft)
+  mapCalendarUi (Cal.renderDateTimeContent draft)
 
 renderAgendaView
   :: forall w
@@ -197,7 +200,7 @@ renderAgendaView
   -> Maybe Int
   -> HTML w Action
 renderAgendaView viewMode focusDate conflictIds items draggingId dragHoverIndex =
-  map calendarUiToAction (Cal.renderAgendaView viewMode focusDate conflictIds items draggingId dragHoverIndex)
+  mapCalendarUi (Cal.renderAgendaView viewMode focusDate conflictIds items draggingId dragHoverIndex)
 
 renderViewSelector :: forall w. AgendaView -> String -> HTML w Action
 renderViewSelector viewMode focusDate =

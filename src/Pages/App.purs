@@ -6,7 +6,7 @@ import Affjax.Web (Response, post)
 import Affjax.Web as AffjaxWeb
 import Affjax.RequestBody (RequestBody(..))
 import Affjax.ResponseFormat (string)
-import Pages.Calendar (component) as Agenda
+import Pages.Calendar (component) as Calendar
 import Pages.Checklists (component) as Checklists
 import Control.Monad.RWS (get, modify_)
 import Data.Array (head)
@@ -48,12 +48,12 @@ type OpaqueSlot slot = forall query. H.Slot query Void slot
 type ChildSlots =
   ( notes :: OpaqueSlot Unit
   , checklists :: OpaqueSlot Unit
-  , agenda :: OpaqueSlot Unit
+  , calendar :: OpaqueSlot Unit
   , signup :: AuthSlot Unit
   , signin :: AuthSlot Unit
   )
 
-data DefinedRoute = Note | Checklist | Agenda | Signup | Signin
+data DefinedRoute = Note | Checklist | Calendar | Signup | Signin
 
 derive instance definedRouteGeneric :: Generic DefinedRoute _
 derive instance definedRouteEq :: Eq DefinedRoute
@@ -73,7 +73,7 @@ routeCodec :: RouteDuplex' DefinedRoute
 routeCodec = root $ sum
   { "Note": "notes" / noArgs
   , "Checklist": "checklists" / noArgs
-  , "Agenda": "agenda" / noArgs
+  , "Calendar": "calendar" / noArgs
   , "Signup": "signup" / noArgs
   , "Signin": "signin" / noArgs
   }
@@ -191,7 +191,7 @@ render { currentRoute: Route route, isAuthenticated } =
     ( [ h1 [ class_ "text-center" ] [ text "FAVS" ]
       , authMenu isAuthenticated
       ]
-        <> (if route /= Signup && route /= Signin then [ nav [ class_ "row nav nav-tabs" ] [ tab Note route, tab Checklist route, tab Agenda route ] ] else [])
+        <> (if route /= Signup && route /= Signin then [ nav [ class_ "row nav nav-tabs" ] [ tab Note route, tab Checklist route, tab Calendar route ] ] else [])
         <>
           [ currentComponent route
           ]
@@ -229,7 +229,7 @@ authMenu isAuthenticated =
 currentComponent :: DefinedRoute -> H.ComponentHTML Action ChildSlots Aff
 currentComponent Note = slot_ (Proxy :: _ "notes") unit Notes.component unit
 currentComponent Checklist = slot_ (Proxy :: _ "checklists") unit Checklists.component unit
-currentComponent Agenda = slot_ (Proxy :: _ "agenda") unit Agenda.component unit
+currentComponent Calendar = slot_ (Proxy :: _ "calendar") unit Calendar.component unit
 currentComponent Signup = slot (Proxy :: _ "signup") unit signupComponent unit HandleAuthOutput
 currentComponent Signin = slot (Proxy :: _ "signin") unit signinComponent unit HandleAuthOutput
 
@@ -246,7 +246,7 @@ tab tabRoute activeRoute =
 tabLabel :: DefinedRoute -> String
 tabLabel Note = "Notes"
 tabLabel Checklist = "Checklists"
-tabLabel Agenda = "Agenda"
+tabLabel Calendar = "Calendar"
 tabLabel Signup = "Signup"
 tabLabel Signin = "Signin"
 

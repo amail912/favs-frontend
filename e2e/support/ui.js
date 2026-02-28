@@ -7,7 +7,7 @@ function checklistsTab(page) {
 }
 
 function agendaTab(page) {
-  return page.locator("a.nav-link", { hasText: "Agenda" });
+  return page.locator("a.nav-link", { hasText: "Calendar" });
 }
 
 function signupMenuButton(page) {

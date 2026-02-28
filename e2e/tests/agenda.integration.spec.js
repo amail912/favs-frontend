@@ -17,7 +17,7 @@ test("agenda integration: create intention then validate", async ({ authenticate
   const title = `Intention ${Date.now()}`;
 
   await agendaTab(page).click();
-  await expect(page).toHaveURL(/\/agenda$/);
+  await expect(page).toHaveURL(/\/calendar$/);
 
   await page.getByPlaceholder("Titre de l'intention").fill(title);
   await page.getByPlaceholder("Debut").fill(toLocalDatetimeInput(start));
