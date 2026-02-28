@@ -1,12 +1,16 @@
-module Agenda.Data
-  ( DataState
-  , DataAction(..)
+module Agenda.Calendar
+  ( CalendarState
+  , CalendarAction(..)
+  , CalendarUiAction(..)
   , ResolutionStrategy(..)
   , ConflictResolution
   , emptyDraft
-  , dataInitialState
-  , handleDataAction
-  , applyDataAction
+  , calendarInitialState
+  , _items
+  , _draft
+  , _validationError
+  , handleCalendarAction
+  , applyCalendarAction
   , validateIntention
   , toNewIntention
   , renderForm
@@ -73,7 +77,7 @@ import Web.UIEvent.KeyboardEvent as KE
 import Ui.Utils (class_)
 
 
-type DataState =
+type CalendarState =
   { items :: Array CalendarItem
   , draft :: IntentionDraft
   , validationError :: Maybe ValidationError
@@ -83,8 +87,8 @@ type DataState =
   }
 
 
-dataInitialState :: DataState
-dataInitialState =
+calendarInitialState :: CalendarState
+calendarInitialState =
   { items: []
   , draft: emptyDraft
   , validationError: Nothing
@@ -103,17 +107,23 @@ emptyDraft =
   }
 
 
-data DataAction
-  = DataDraftTitleChanged String
-  | DataDraftStartChanged String
-  | DataDraftEndChanged String
-  | DataDraftCategoryChanged String
-  | DataToggleConflictFilter
-  | DataSortChanged String
-  | DataOpenConflictResolution (Array String)
-  | DataChooseResolutionStrategy ResolutionStrategy
-  | DataConfirmResolution
-  | DataCancelResolution
+data CalendarAction
+  = CalendarDraftTitleChanged String
+  | CalendarDraftStartChanged String
+  | CalendarDraftEndChanged String
+  | CalendarDraftCategoryChanged String
+  | CalendarToggleConflictFilter
+  | CalendarSortChanged String
+  | CalendarOpenConflictResolution (Array String)
+  | CalendarChooseResolutionStrategy ResolutionStrategy
+  | CalendarConfirmResolution
+  | CalendarCancelResolution
+
+data CalendarUiAction
+  = CalendarUiCalendar CalendarAction
+  | CalendarUiSync SyncAction
+  | CalendarUiView ViewAction
+  | CalendarUiDrag DragAction
 
 
 type ConflictResolution =
@@ -133,60 +143,63 @@ instance resolutionStrategyShow :: Show ResolutionStrategy where
   show = genericShow
 
 
-_draftS :: Lens' DataState IntentionDraft
-_draftS = prop (Proxy :: _ "draft")
+_items :: Lens' CalendarState (Array CalendarItem)
+_items = prop (Proxy :: _ "items")
 
-_validationErrorS :: Lens' DataState (Maybe ValidationError)
-_validationErrorS = prop (Proxy :: _ "validationError")
+_draft :: Lens' CalendarState IntentionDraft
+_draft = prop (Proxy :: _ "draft")
 
-_showConflictsOnlyS :: Lens' DataState Boolean
+_validationError :: Lens' CalendarState (Maybe ValidationError)
+_validationError = prop (Proxy :: _ "validationError")
+
+_showConflictsOnlyS :: Lens' CalendarState Boolean
 _showConflictsOnlyS = prop (Proxy :: _ "showConflictsOnly")
 
-_conflictResolutionS :: Lens' DataState (Maybe ConflictResolution)
+_conflictResolutionS :: Lens' CalendarState (Maybe ConflictResolution)
 _conflictResolutionS = prop (Proxy :: _ "conflictResolution")
 
-_sortModeS :: Lens' DataState SortMode
+_sortModeS :: Lens' CalendarState SortMode
 _sortModeS = prop (Proxy :: _ "sortMode")
 
-_draftTitleS :: Lens' DataState String
-_draftTitleS = _draftS <<< prop (Proxy :: _ "title")
+_draftTitleS :: Lens' CalendarState String
+_draftTitleS = _draft <<< prop (Proxy :: _ "title")
 
-_draftWindowStartS :: Lens' DataState String
-_draftWindowStartS = _draftS <<< prop (Proxy :: _ "windowStart")
+_draftWindowStartS :: Lens' CalendarState String
+_draftWindowStartS = _draft <<< prop (Proxy :: _ "windowStart")
 
-_draftWindowEndS :: Lens' DataState String
-_draftWindowEndS = _draftS <<< prop (Proxy :: _ "windowEnd")
+_draftWindowEndS :: Lens' CalendarState String
+_draftWindowEndS = _draft <<< prop (Proxy :: _ "windowEnd")
 
-_draftCategoryS :: Lens' DataState String
-_draftCategoryS = _draftS <<< prop (Proxy :: _ "category")
+_draftCategoryS :: Lens' CalendarState String
+_draftCategoryS = _draft <<< prop (Proxy :: _ "category")
 
 
-handleDataAction :: DataAction -> StateT DataState (WriterT (Array Command) Aff) Unit
-handleDataAction action =
-  modify_ $ applyDataAction action
+handleCalendarAction :: CalendarAction -> StateT CalendarState (WriterT (Array Command) Aff) Unit
+handleCalendarAction action =
+  modify_ $ applyCalendarAction action
 
-applyDataAction :: DataAction -> DataState -> DataState
-applyDataAction action dataState =
+applyCalendarAction :: CalendarAction -> CalendarState -> CalendarState
+applyCalendarAction action dataState =
   case action of
-    DataDraftTitleChanged title ->
-      ((_draftTitleS .~ title) <<< (_validationErrorS .~ Nothing)) dataState
-    DataDraftStartChanged windowStart ->
-      ((_draftWindowStartS .~ windowStart) <<< (_validationErrorS .~ Nothing)) dataState
-    DataDraftEndChanged windowEnd ->
-      ((_draftWindowEndS .~ windowEnd) <<< (_validationErrorS .~ Nothing)) dataState
-    DataDraftCategoryChanged category ->
-      ((_draftCategoryS .~ category) <<< (_validationErrorS .~ Nothing)) dataState
-    DataToggleConflictFilter ->
+    CalendarDraftTitleChanged title ->
+      ((_draftTitleS .~ title) <<< (_validationError .~ Nothing)) dataState
+    CalendarDraftStartChanged windowStart ->
+      ((_draftWindowStartS .~ windowStart) <<< (_validationError .~ Nothing)) dataState
+    CalendarDraftEndChanged windowEnd ->
+      ((_draftWindowEndS .~ windowEnd) <<< (_validationError .~ Nothing)) dataState
+    CalendarDraftCategoryChanged category ->
+      ((_draftCategoryS .~ category) <<< (_validationError .~ Nothing)) dataState
+    CalendarToggleConflictFilter ->
       (_showConflictsOnlyS %~ not) dataState
-    DataSortChanged raw ->
+    CalendarSortChanged raw ->
       (_sortModeS .~ parseSortMode raw) dataState
-    DataOpenConflictResolution groupIds ->
+    CalendarOpenConflictResolution groupIds ->
       (_conflictResolutionS .~ Just { groupIds, pendingStrategy: Nothing }) dataState
-    DataChooseResolutionStrategy strategy ->
+    CalendarChooseResolutionStrategy strategy ->
       (_conflictResolutionS %~ map (\res -> res { pendingStrategy = Just strategy })) dataState
-    DataConfirmResolution ->
+    CalendarConfirmResolution ->
       (_conflictResolutionS .~ Nothing) dataState
-    DataCancelResolution ->
+    CalendarCancelResolution ->
       (_conflictResolutionS .~ Nothing) dataState
 
 
@@ -219,20 +232,17 @@ toNewIntention { title, windowStart, windowEnd, category } =
 
 
 renderForm
-  :: forall w action
-   . (DataAction -> action)
-  -> (SyncAction -> action)
-  -> (ViewAction -> action)
-  -> IntentionDraft
+  :: forall w
+   . IntentionDraft
   -> Maybe ValidationError
-  -> HTML w action
-renderForm onData onSync onView draft validationError =
+  -> HTML w CalendarUiAction
+renderForm draft validationError =
   section [ class_ "agenda-form" ]
     [ input
         [ class_ "form-control agenda-input"
         , placeholder "Titre de l'intention"
-        , onValueChange (onData <<< DataDraftTitleChanged)
-        , onKeyDown (\ev -> onSync (SyncDraftTitleKeyDown (KE.key ev)))
+        , onValueChange (CalendarUiCalendar <<< CalendarDraftTitleChanged)
+        , onKeyDown (\ev -> CalendarUiSync (SyncDraftTitleKeyDown (KE.key ev)))
         , value draft.title
         ]
     , div [ class_ "agenda-time-row" ]
@@ -241,7 +251,7 @@ renderForm onData onSync onView draft validationError =
             , type_ InputDatetimeLocal
             , attr (AttrName "lang") "fr"
             , placeholder "Debut"
-            , onValueChange (onData <<< DataDraftStartChanged)
+            , onValueChange (CalendarUiCalendar <<< CalendarDraftStartChanged)
             , value draft.windowStart
             ]
         , input
@@ -249,31 +259,31 @@ renderForm onData onSync onView draft validationError =
             , type_ InputDatetimeLocal
             , attr (AttrName "lang") "fr"
             , placeholder "Fin"
-            , onValueChange (onData <<< DataDraftEndChanged)
+            , onValueChange (CalendarUiCalendar <<< CalendarDraftEndChanged)
             , value draft.windowEnd
             ]
         ]
     , input
         [ class_ "form-control agenda-input"
         , placeholder "Categorie (optionnelle)"
-        , onValueChange (onData <<< DataDraftCategoryChanged)
+        , onValueChange (CalendarUiCalendar <<< CalendarDraftCategoryChanged)
         , value draft.category
         ]
     , div [ class_ "agenda-datetime-row" ]
         [ button
             [ class_ "btn btn-outline-secondary agenda-datetime-button"
-            , onClick (const $ onView (ViewOpenModal ModalDateTime))
+            , onClick (const (CalendarUiView (ViewOpenModal ModalDateTime)))
             ]
             [ text "Dates & heures" ]
         , div [ class_ "agenda-datetime-summary" ]
             [ text $ summarizeDateRange draft.windowStart draft.windowEnd ]
         ]
     , maybe (text "") renderValidationError validationError
-    , button [ class_ "btn btn-primary agenda-submit", onClick (const (onSync SyncSubmitIntention)) ] [ text "Creer l'intention" ]
+    , button [ class_ "btn btn-primary agenda-submit", onClick (const (CalendarUiSync SyncSubmitIntention)) ] [ text "Creer l'intention" ]
     ]
 
-renderDateTimeContent :: forall w action. (DataAction -> action) -> IntentionDraft -> HTML w action
-renderDateTimeContent onData draft =
+renderDateTimeContent :: forall w. IntentionDraft -> HTML w CalendarUiAction
+renderDateTimeContent draft =
   div [ class_ "agenda-modal-stack" ]
     [ div [ class_ "agenda-modal-field" ]
         [ div [ class_ "agenda-notifications-label" ] [ text "Debut" ]
@@ -282,7 +292,7 @@ renderDateTimeContent onData draft =
             , type_ InputDatetimeLocal
             , attr (AttrName "lang") "fr"
             , placeholder "Debut"
-            , onValueChange (onData <<< DataDraftStartChanged)
+            , onValueChange (CalendarUiCalendar <<< CalendarDraftStartChanged)
             , value draft.windowStart
             ]
         ]
@@ -293,7 +303,7 @@ renderDateTimeContent onData draft =
             , type_ InputDatetimeLocal
             , attr (AttrName "lang") "fr"
             , placeholder "Fin"
-            , onValueChange (onData <<< DataDraftEndChanged)
+            , onValueChange (CalendarUiCalendar <<< CalendarDraftEndChanged)
             , value draft.windowEnd
             ]
         ]
@@ -335,13 +345,13 @@ renderValidationError err =
         WindowOrderInvalid -> "La fin doit etre apres le debut."
     ]
 
-renderSortPicker :: forall w action. (DataAction -> action) -> SortMode -> HTML w action
-renderSortPicker onData sortMode =
+renderSortPicker :: forall w. SortMode -> HTML w CalendarUiAction
+renderSortPicker sortMode =
   div [ class_ "agenda-sort" ]
     [ text "Trier:"
     , select
         [ class_ "form-select agenda-sort-select"
-        , onValueChange (onData <<< DataSortChanged)
+        , onValueChange (CalendarUiCalendar <<< CalendarSortChanged)
         , value (sortModeValue sortMode)
         ]
         [ option [ value "time" ] [ text "Horaire" ]
@@ -351,14 +361,14 @@ renderSortPicker onData sortMode =
         ]
     ]
 
-renderConflictActions :: forall w action. (DataAction -> action) -> Array (Array String) -> HTML w action
-renderConflictActions onData conflictGroups =
+renderConflictActions :: forall w. Array (Array String) -> HTML w CalendarUiAction
+renderConflictActions conflictGroups =
   if null conflictGroups then text ""
   else
     div [ class_ "agenda-conflict-actions" ]
       [ button
           [ class_ "btn btn-sm btn-outline-danger agenda-conflict-button"
-          , onClick (const $ onData (DataOpenConflictResolution (headOrEmpty conflictGroups)))
+          , onClick (const (CalendarUiCalendar (CalendarOpenConflictResolution (headOrEmpty conflictGroups))))
           ]
           [ text "Resoudre un conflit" ]
       ]
@@ -368,8 +378,8 @@ renderConflictActions onData conflictGroups =
       Just { head } -> head
       Nothing -> []
 
-renderConflictResolution :: forall w action. (DataAction -> action) -> Array CalendarItem -> ConflictResolution -> HTML w action
-renderConflictResolution onData items resolution =
+renderConflictResolution :: forall w. Array CalendarItem -> ConflictResolution -> HTML w CalendarUiAction
+renderConflictResolution items resolution =
   div [ class_ "agenda-conflict-panel" ]
     [ div [ class_ "agenda-conflict-title" ] [ text "Resolution de conflit" ]
     , div [ class_ "agenda-conflict-subtitle" ] [ text "Choisissez une strategie puis confirmez." ]
@@ -377,17 +387,17 @@ renderConflictResolution onData items resolution =
     , div [ class_ "agenda-conflict-strategies" ]
         [ button
             [ class_ "btn btn-sm btn-outline-primary"
-            , onClick (const $ onData (DataChooseResolutionStrategy StrategyShift30))
+            , onClick (const (CalendarUiCalendar (CalendarChooseResolutionStrategy StrategyShift30)))
             ]
             [ text "Decaler de 30 min" ]
         , button
             [ class_ "btn btn-sm btn-outline-primary"
-            , onClick (const $ onData (DataChooseResolutionStrategy StrategySwap))
+            , onClick (const (CalendarUiCalendar (CalendarChooseResolutionStrategy StrategySwap)))
             ]
             [ text "Echanger" ]
         ]
-    , renderConfirmation onData resolution.pendingStrategy
-    , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const (onData DataCancelResolution)) ] [ text "Fermer" ]
+    , renderConfirmation resolution.pendingStrategy
+    , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const (CalendarUiCalendar CalendarCancelResolution)) ] [ text "Fermer" ]
     ]
 
 renderConflictItem :: forall w action. Array CalendarItem -> String -> HTML w action
@@ -407,8 +417,8 @@ renderConflictItem items itemId =
   matchId id (ServerCalendarItem { id: candidate }) = id == candidate
   matchId _ _ = false
 
-renderConfirmation :: forall w action. (DataAction -> action) -> Maybe ResolutionStrategy -> HTML w action
-renderConfirmation onData pending =
+renderConfirmation :: forall w. Maybe ResolutionStrategy -> HTML w CalendarUiAction
+renderConfirmation pending =
   case pending of
     Nothing -> text ""
     Just strategy ->
@@ -416,31 +426,28 @@ renderConfirmation onData pending =
         [ div [ class_ "agenda-conflict-confirmation-text" ]
             [ text $ "Confirmer la strategie: " <> show strategy <> " ?" ]
         , div [ class_ "agenda-conflict-confirmation-actions" ]
-            [ button [ class_ "btn btn-sm btn-danger", onClick (const (onData DataConfirmResolution)) ] [ text "Confirmer" ]
-            , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const (onData DataCancelResolution)) ] [ text "Annuler" ]
+            [ button [ class_ "btn btn-sm btn-danger", onClick (const (CalendarUiCalendar CalendarConfirmResolution)) ] [ text "Confirmer" ]
+            , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const (CalendarUiCalendar CalendarCancelResolution)) ] [ text "Annuler" ]
             ]
         ]
 
 renderAgendaView
-  :: forall w action
-   . (DragAction -> action)
-  -> (SyncAction -> action)
-  -> (ViewAction -> action)
-  -> AgendaView
+  :: forall w
+   . AgendaView
   -> String
   -> Array String
   -> Array CalendarItem
   -> Maybe String
   -> Maybe Int
-  -> HTML w action
-renderAgendaView onDrag onSync onView viewMode focusDate conflictIds items draggingId dragHoverIndex =
+  -> HTML w CalendarUiAction
+renderAgendaView viewMode focusDate conflictIds items draggingId dragHoverIndex =
   case viewMode of
     ViewDay ->
-      renderDayCalendar onDrag onSync onView focusDate conflictIds items draggingId dragHoverIndex
+      renderDayCalendar focusDate conflictIds items draggingId dragHoverIndex
     ViewWeek ->
-      renderRangeView onDrag onSync onView "Semaine" (generateDateRange focusDate 7) conflictIds items
+      renderRangeView "Semaine" (generateDateRange focusDate 7) conflictIds items
     ViewMonth ->
-      renderRangeView onDrag onSync onView "Mois" (generateMonthDates focusDate) conflictIds items
+      renderRangeView "Mois" (generateMonthDates focusDate) conflictIds items
 
 
 type TimelineBlock =
@@ -458,17 +465,14 @@ type TimelineLayout =
   }
 
 renderDayCalendar
-  :: forall w action
-   . (DragAction -> action)
-  -> (SyncAction -> action)
-  -> (ViewAction -> action)
-  -> String
+  :: forall w
+   . String
   -> Array String
   -> Array CalendarItem
   -> Maybe String
   -> Maybe Int
-  -> HTML w action
-renderDayCalendar onDrag onSync onView focusDate conflictIds items draggingId dragHoverIndex =
+  -> HTML w CalendarUiAction
+renderDayCalendar focusDate conflictIds items draggingId dragHoverIndex =
   let
     itemsForDate = filter (isItemOnDate focusDate) items
     sorted = sortItems SortByTime conflictIds itemsForDate
@@ -486,15 +490,15 @@ renderDayCalendar onDrag onSync onView focusDate conflictIds items draggingId dr
                 (map renderHourLabel (enumFromTo 0 23) <> [ renderHourLabelEnd ])
             , div
                 [ class_ "agenda-calendar-grid"
-                , onDragOver (\ev -> onDrag (DragOverCalendar ev))
-                , onDrop (\ev -> onDrag (DropOnCalendar ev))
+                , onDragOver (\ev -> CalendarUiDrag (DragOverCalendar ev))
+                , onDrop (\ev -> CalendarUiDrag (DropOnCalendar ev))
                 ]
                 [ div [ class_ "agenda-calendar-lines" ]
                     (map renderHourLine (enumFromTo 0 23))
                 , maybe (text "") renderDropIndicator dragHoverIndex
                 , div
                     [ class_ $ "agenda-calendar-items" <> if draggingId == Nothing then "" else " agenda-calendar-items--dragging" ]
-                    (map (renderTimelineItem onDrag onSync onView conflictIds) layout)
+                    (map (renderTimelineItem conflictIds) layout)
                 ]
             ]
         ]
@@ -514,14 +518,11 @@ renderHourLine _ =
     []
 
 renderTimelineItem
-  :: forall w action
-   . (DragAction -> action)
-  -> (SyncAction -> action)
-  -> (ViewAction -> action)
-  -> Array String
+  :: forall w
+   . Array String
   -> TimelineLayout
-  -> HTML w action
-renderTimelineItem onDrag onSync onView conflictIds layout =
+  -> HTML w CalendarUiAction
+renderTimelineItem conflictIds layout =
   let
     content = calendarItemContent layout.item
     typeClass =
@@ -540,7 +541,7 @@ renderTimelineItem onDrag onSync onView conflictIds layout =
         <> " --columns:"
         <> show layout.columnCount
         <> ";"
-    dragProps = dragCalendarHandlers onDrag layout.item
+    dragProps = dragCalendarHandlers CalendarUiDrag layout.item
   in
     div
       ( [ class_ $ "agenda-calendar-item" <> typeClass <> conflictClass
@@ -554,8 +555,8 @@ renderTimelineItem onDrag onSync onView conflictIds layout =
           , div [ class_ "agenda-calendar-footer" ]
               [ renderCategory content.category
               , div [ class_ "agenda-calendar-actions" ]
-                  [ renderValidationAction onView layout.item content
-                  , renderPlanifyAction onSync layout.item content
+                  [ renderValidationAction layout.item content
+                  , renderPlanifyAction layout.item content
                   ]
               ]
           ]
@@ -631,32 +632,26 @@ toTimelineBlock item = do
   else Just { item, startMin: startClamped, endMin: endClamped }
 
 renderRangeView
-  :: forall w action
-   . (DragAction -> action)
-  -> (SyncAction -> action)
-  -> (ViewAction -> action)
-  -> String
+  :: forall w
+   . String
   -> Array String
   -> Array String
   -> Array CalendarItem
-  -> HTML w action
-renderRangeView onDrag onSync onView label dates conflictIds items =
+  -> HTML w CalendarUiAction
+renderRangeView label dates conflictIds items =
   if null dates then emptyAgendaRange label
   else
     div [ class_ "agenda-range" ]
-      (map (renderDateSection onDrag onSync onView label conflictIds items) dates)
+      (map (renderDateSection label conflictIds items) dates)
 
 renderDateSection
-  :: forall w action
-   . (DragAction -> action)
-  -> (SyncAction -> action)
-  -> (ViewAction -> action)
-  -> String
+  :: forall w
+   . String
   -> Array String
   -> Array CalendarItem
   -> String
-  -> HTML w action
-renderDateSection onDrag onSync onView _ conflictIds items dateStr =
+  -> HTML w CalendarUiAction
+renderDateSection _ conflictIds items dateStr =
   let
     itemsForDate = filter (isItemOnDate dateStr) items
     sorted = sortItems SortByTime conflictIds itemsForDate
@@ -664,7 +659,7 @@ renderDateSection onDrag onSync onView _ conflictIds items dateStr =
     section [ class_ "agenda-date-section" ]
       [ div [ class_ "agenda-date-title" ] [ text dateStr ]
       , if null sorted then div [ class_ "agenda-date-empty" ] [ text "Aucun item" ]
-        else agendaList onDrag onSync onView conflictIds sorted
+        else agendaList conflictIds sorted
       ]
 
 emptyAgendaRange :: forall w action. String -> HTML w action
@@ -675,30 +670,24 @@ emptyAgendaRange label =
     ]
 
 agendaList
-  :: forall w action
-   . (DragAction -> action)
-  -> (SyncAction -> action)
-  -> (ViewAction -> action)
-  -> Array String
+  :: forall w
+   . Array String
   -> Array CalendarItem
-  -> HTML w action
-agendaList onDrag onSync onView conflictIds items =
-  ul [ class_ "list-group entity-list agenda-list" ] (mapWithIndex (renderItem onDrag onSync onView conflictIds) items)
+  -> HTML w CalendarUiAction
+agendaList conflictIds items =
+  ul [ class_ "list-group entity-list agenda-list" ] (mapWithIndex (renderItem conflictIds) items)
 
 renderItem
-  :: forall w action
-   . (DragAction -> action)
-  -> (SyncAction -> action)
-  -> (ViewAction -> action)
-  -> Array String
+  :: forall w
+   . Array String
   -> Int
   -> CalendarItem
-  -> HTML w action
-renderItem onDrag onSync onView conflictIds _ item =
+  -> HTML w CalendarUiAction
+renderItem conflictIds _ item =
   let
     content = calendarItemContent item
     conflictClass = if isConflict conflictIds item then " agenda-card--conflict" else ""
-    dragProps = dragHandlers onDrag item
+    dragProps = dragHandlers CalendarUiDrag item
   in
     li ([ class_ $ "row list-group-item entity-card agenda-card" <> conflictClass ] <> dragProps)
       [ div [ class_ "col entity-card-body" ]
@@ -707,32 +696,30 @@ renderItem onDrag onSync onView conflictIds _ item =
           , div [ class_ "agenda-card-window" ]
               [ text $ content.windowStart <> " → " <> content.windowEnd ]
           , renderCategory content.category
-          , renderValidationAction onView item content
-          , renderPlanifyAction onSync item content
+          , renderValidationAction item content
+          , renderPlanifyAction item content
           ]
       ]
 
 renderPlanifyAction
-  :: forall w action
-   . (SyncAction -> action)
-  -> CalendarItem
+  :: forall w
+   . CalendarItem
   -> CalendarItemContent
-  -> HTML w action
-renderPlanifyAction onSync (ServerCalendarItem { id, content }) _ | content.itemType == Intention =
-  button [ class_ "btn btn-sm btn-outline-primary agenda-planify", onClick (const $ onSync (SyncPlanifyFrom id content)) ]
+  -> HTML w CalendarUiAction
+renderPlanifyAction (ServerCalendarItem { id, content }) _ | content.itemType == Intention =
+  button [ class_ "btn btn-sm btn-outline-primary agenda-planify", onClick (const (CalendarUiSync (SyncPlanifyFrom id content))) ]
     [ text "Planifier" ]
-renderPlanifyAction _ _ _ = text ""
+renderPlanifyAction _ _ = text ""
 
 renderValidationAction
-  :: forall w action
-   . (ViewAction -> action)
-  -> CalendarItem
+  :: forall w
+   . CalendarItem
   -> CalendarItemContent
-  -> HTML w action
-renderValidationAction onView (ServerCalendarItem { id, content }) _ | content.status /= Fait =
-  button [ class_ "btn btn-sm btn-outline-success agenda-validate", onClick (const $ onView (ViewOpenValidation id content)) ]
+  -> HTML w CalendarUiAction
+renderValidationAction (ServerCalendarItem { id, content }) _ | content.status /= Fait =
+  button [ class_ "btn btn-sm btn-outline-success agenda-validate", onClick (const (CalendarUiView (ViewOpenValidation id content))) ]
     [ text "Valider" ]
-renderValidationAction _ _ _ = text ""
+renderValidationAction _ _ = text ""
 
 renderCategory :: forall w action. Maybe String -> HTML w action
 renderCategory category =

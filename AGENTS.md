@@ -16,6 +16,7 @@ Frontend pour gérer le quotidien avec un focus sur la gestion d’un calendrier
 - Tu proposeras de réaliser des tests dès que cela te semble nécessaire
 - Utilise la compilation comme une grande aide au développement. PureScript est un language fortement typé qui permet d'avoir beaucoup de garanties avec un système de types adapté.
 - On veillera à ne laisser aucun warning de compilation.
+- Après chaque modification et sans me demander, run les tests.
 
 ## Principes de design
 - Ergonomie maximale.

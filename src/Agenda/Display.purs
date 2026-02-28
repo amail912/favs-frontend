@@ -12,7 +12,7 @@ module Agenda.Display
   , renderToolsContent
   , handleViewAction
   , _viewModeS
-  , _viewFocusDateS
+  , _viewFocusDate
   , _viewActiveModalS
   , _viewValidationPanelS
   ) where
@@ -58,14 +58,12 @@ type ValidationPanel =
   , inputValue :: String
   }
 
-
 type ViewState =
   { viewMode :: AgendaView
   , focusDate :: String
   , activeModal :: Maybe AgendaModal
   , validationPanel :: Maybe ValidationPanel
   }
-
 
 viewInitialState :: ViewState
 viewInitialState =
@@ -75,12 +73,11 @@ viewInitialState =
   , validationPanel: Nothing
   }
 
-
 _viewModeS :: Lens' ViewState AgendaView
 _viewModeS = prop (Proxy :: _ "viewMode")
 
-_viewFocusDateS :: Lens' ViewState String
-_viewFocusDateS = prop (Proxy :: _ "focusDate")
+_viewFocusDate :: Lens' ViewState String
+_viewFocusDate = prop (Proxy :: _ "focusDate")
 
 _viewActiveModalS :: Lens' ViewState (Maybe AgendaModal)
 _viewActiveModalS = prop (Proxy :: _ "activeModal")
@@ -123,7 +120,7 @@ handleViewAction = case _ of
   ViewChangedAction raw ->
     modify_ (_viewModeS .~ parseAgendaView raw)
   ViewFocusDateChanged raw ->
-    modify_ (_viewFocusDateS .~ raw)
+    modify_ (_viewFocusDate .~ raw)
   ViewOpenModal modal ->
     modify_ (_viewActiveModalS .~ Just modal)
   ViewCloseModal ->
@@ -144,23 +141,23 @@ parseAgendaView raw =
     "month" -> ViewMonth
     _ -> ViewDay
 
-renderViewSelector :: forall w action. (ViewAction -> action) -> AgendaView -> String -> HTML w action
-renderViewSelector onAction viewMode focusDate =
+renderViewSelector :: forall w. AgendaView -> String -> HTML w ViewAction
+renderViewSelector viewMode focusDate =
   div [ class_ "agenda-view-selector" ]
     [ div [ class_ "agenda-view-buttons" ]
         [ button
             [ class_ $ "btn btn-sm " <> if viewMode == ViewDay then "btn-primary" else "btn-outline-secondary"
-            , onClick (const $ onAction (ViewChangedAction "day"))
+            , onClick (const (ViewChangedAction "day"))
             ]
             [ text "Jour" ]
         , button
             [ class_ $ "btn btn-sm " <> if viewMode == ViewWeek then "btn-primary" else "btn-outline-secondary"
-            , onClick (const $ onAction (ViewChangedAction "week"))
+            , onClick (const (ViewChangedAction "week"))
             ]
             [ text "Semaine" ]
         , button
             [ class_ $ "btn btn-sm " <> if viewMode == ViewMonth then "btn-primary" else "btn-outline-secondary"
-            , onClick (const $ onAction (ViewChangedAction "month"))
+            , onClick (const (ViewChangedAction "month"))
             ]
             [ text "Mois" ]
         ]
@@ -171,32 +168,32 @@ renderViewSelector onAction viewMode focusDate =
             , type_ InputDate
             , attr (AttrName "lang") "fr"
             , value focusDate
-            , onValueChange (onAction <<< ViewFocusDateChanged)
+            , onValueChange ViewFocusDateChanged
             ]
         ]
     ]
 
-renderMobileTools :: forall w action. (ViewAction -> action) -> AgendaView -> HTML w action
-renderMobileTools onAction viewMode =
+renderMobileTools :: forall w. AgendaView -> HTML w ViewAction
+renderMobileTools viewMode =
   if viewMode /= ViewDay then text ""
   else
     div [ class_ "agenda-mobile-tools" ]
-      [ button [ class_ "btn btn-sm btn-outline-secondary", onClick (const $ onAction (ViewOpenModal ModalFilters)) ] [ text "Filtres" ]
-      , button [ class_ "btn btn-sm btn-primary", onClick (const $ onAction (ViewOpenModal ModalTools)) ] [ text "Outils" ]
+      [ button [ class_ "btn btn-sm btn-outline-secondary", onClick (const (ViewOpenModal ModalFilters)) ] [ text "Filtres" ]
+      , button [ class_ "btn btn-sm btn-primary", onClick (const (ViewOpenModal ModalTools)) ] [ text "Outils" ]
       ]
 
-renderToolsContent :: forall w action. (ViewAction -> action) -> HTML w action
-renderToolsContent onAction =
+renderToolsContent :: forall w. HTML w ViewAction
+renderToolsContent =
   div [ class_ "agenda-modal-stack" ]
-    [ button [ class_ "btn btn-outline-secondary", onClick (const $ onAction (ViewOpenModal ModalNotifications)) ] [ text "Rappels" ]
-    , button [ class_ "btn btn-outline-secondary", onClick (const $ onAction (ViewOpenModal ModalTemplates)) ] [ text "Templates" ]
-    , button [ class_ "btn btn-outline-secondary", onClick (const $ onAction (ViewOpenModal ModalImportCsv)) ] [ text "Import CSV" ]
-    , button [ class_ "btn btn-outline-secondary", onClick (const $ onAction (ViewOpenModal ModalImportIcs)) ] [ text "Import ICS" ]
-    , button [ class_ "btn btn-outline-secondary", onClick (const $ onAction (ViewOpenModal ModalExport)) ] [ text "Export" ]
+    [ button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalNotifications)) ] [ text "Rappels" ]
+    , button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalTemplates)) ] [ text "Templates" ]
+    , button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalImportCsv)) ] [ text "Import CSV" ]
+    , button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalImportIcs)) ] [ text "Import ICS" ]
+    , button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalExport)) ] [ text "Export" ]
     ]
 
-renderValidationPanel :: forall w action. (ViewAction -> action) -> ValidationPanel -> HTML w action
-renderValidationPanel onAction panel =
+renderValidationPanel :: forall w. ValidationPanel -> HTML w ViewAction
+renderValidationPanel panel =
   div [ class_ "agenda-validation-panel" ]
     [ div [ class_ "agenda-conflict-title" ] [ text "Valider la tache" ]
     , div [ class_ "agenda-conflict-subtitle" ]
@@ -205,11 +202,11 @@ renderValidationPanel onAction panel =
     , input
         [ class_ "form-control agenda-input"
         , placeholder "Duree reelle (minutes)"
-        , onValueChange (onAction <<< ViewValidationMinutesChanged)
+        , onValueChange ViewValidationMinutesChanged
         , value panel.inputValue
         ]
     , div [ class_ "agenda-conflict-confirmation-actions" ]
-        [ button [ class_ "btn btn-sm btn-success", onClick (const (onAction ViewConfirmValidation)) ] [ text "Confirmer" ]
-        , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const (onAction ViewCancelValidation)) ] [ text "Annuler" ]
+        [ button [ class_ "btn btn-sm btn-success", onClick (const ViewConfirmValidation) ] [ text "Confirmer" ]
+        , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const ViewCancelValidation) ] [ text "Annuler" ]
         ]
     ]

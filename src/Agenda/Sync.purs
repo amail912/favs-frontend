@@ -7,10 +7,10 @@ module Agenda.Sync
   , renderSyncConflict
   , renderUpdateError
   , updateErrorMessage
-  , _syncOfflineModeS
-  , _syncPendingSyncS
-  , _syncConflictS
-  , _syncUpdateErrorS
+  , _syncOfflineMode
+  , _syncPendingSync
+  , _syncConflict
+  , _syncUpdateError
   ) where
 
 import Prelude hiding (div)
@@ -49,17 +49,17 @@ syncInitialState =
   }
 
 
-_syncOfflineModeS :: Lens' SyncState Boolean
-_syncOfflineModeS = prop (Proxy :: _ "offlineMode")
+_syncOfflineMode :: Lens' SyncState Boolean
+_syncOfflineMode = prop (Proxy :: _ "offlineMode")
 
-_syncPendingSyncS :: Lens' SyncState (Array CalendarItem)
-_syncPendingSyncS = prop (Proxy :: _ "pendingSync")
+_syncPendingSync :: Lens' SyncState (Array CalendarItem)
+_syncPendingSync = prop (Proxy :: _ "pendingSync")
 
-_syncConflictS :: Lens' SyncState (Maybe (Array CalendarItem))
-_syncConflictS = prop (Proxy :: _ "syncConflict")
+_syncConflict :: Lens' SyncState (Maybe (Array CalendarItem))
+_syncConflict = prop (Proxy :: _ "syncConflict")
 
-_syncUpdateErrorS :: Lens' SyncState (Maybe String)
-_syncUpdateErrorS = prop (Proxy :: _ "updateError")
+_syncUpdateError :: Lens' SyncState (Maybe String)
+_syncUpdateError = prop (Proxy :: _ "updateError")
 
 
 data SyncAction
@@ -81,26 +81,26 @@ handleSyncAction items = case _ of
   SyncPlanifyFrom sourceId content -> do
     syncState <- get
     let item = toScheduledBlock sourceId content
-    if syncState ^. _syncOfflineModeS then do
+    if syncState ^. _syncOfflineMode then do
       let
-        result = applyOfflineMutation true item items (syncState ^. _syncPendingSyncS)
-      modify_ (_syncPendingSyncS .~ result.pending)
+        result = applyOfflineMutation true item items (syncState ^. _syncPendingSync)
+      modify_ (_syncPendingSync .~ result.pending)
       tellCmd $ SyncCmd (SyncSetItems result.items)
     else do
       tellCmd $ SyncCmd (SyncCreateItem item)
   SyncToggleOffline -> do
     syncState <- get
-    if syncState ^. _syncOfflineModeS then do
-      modify_ (_syncOfflineModeS .~ false)
+    if syncState ^. _syncOfflineMode then do
+      modify_ (_syncOfflineMode .~ false)
       syncPending
-    else modify_ (_syncOfflineModeS .~ true)
+    else modify_ (_syncOfflineMode .~ true)
   SyncResolveKeepLocal ->
-    modify_ ((_syncConflictS .~ Nothing) <<< (_syncOfflineModeS .~ true))
+    modify_ ((_syncConflict .~ Nothing) <<< (_syncOfflineMode .~ true))
   SyncResolveDiscardLocal -> do
-    modify_ ((_syncConflictS .~ Nothing) <<< (_syncPendingSyncS .~ []))
+    modify_ ((_syncConflict .~ Nothing) <<< (_syncPendingSync .~ []))
     tellCmd $ SyncCmd SyncRefreshItems
   SyncDismissUpdateError ->
-    modify_ (_syncUpdateErrorS .~ Nothing)
+    modify_ (_syncUpdateError .~ Nothing)
 
 
 toScheduledBlock :: String -> CalendarItemContent -> CalendarItem
@@ -115,23 +115,23 @@ toScheduledBlock sourceId content =
     }
 
 
-renderOfflineToggle :: forall w action. (SyncAction -> action) -> Boolean -> HTML w action
-renderOfflineToggle onAction offlineMode =
+renderOfflineToggle :: forall w. Boolean -> HTML w SyncAction
+renderOfflineToggle offlineMode =
   div [ class_ "agenda-offline-toggle" ]
     [ button
         [ class_ $ "btn btn-sm " <> if offlineMode then "btn-outline-warning" else "btn-outline-secondary"
-        , onClick (const (onAction SyncToggleOffline))
+        , onClick (const SyncToggleOffline)
         ]
         [ text $ if offlineMode then "Mode hors ligne actif" else "Passer hors ligne" ]
     ]
 
-renderUpdateError :: forall w action. (SyncAction -> action) -> String -> HTML w action
-renderUpdateError onAction message =
+renderUpdateError :: forall w. String -> HTML w SyncAction
+renderUpdateError message =
   div [ class_ "agenda-error agenda-error--update" ]
     [ text message
     , button
         [ class_ "btn btn-sm btn-outline-secondary agenda-error-dismiss"
-        , onClick (const (onAction SyncDismissUpdateError))
+        , onClick (const SyncDismissUpdateError)
         ]
         [ text "OK" ]
     ]
@@ -140,16 +140,16 @@ updateErrorMessage :: Int -> String
 updateErrorMessage status =
   "Echec de mise a jour de l'item (HTTP " <> show status <> ")."
 
-renderSyncConflict :: forall w action. (SyncAction -> action) -> Array CalendarItem -> HTML w action
-renderSyncConflict onAction pending =
+renderSyncConflict :: forall w. Array CalendarItem -> HTML w SyncAction
+renderSyncConflict pending =
   div [ class_ "agenda-sync-conflict" ]
     [ div [ class_ "agenda-conflict-title" ] [ text "Conflit de synchronisation" ]
     , div [ class_ "agenda-conflict-subtitle" ]
         [ text "Choisissez comment resoudre la synchronisation des changements locaux." ]
     , ul [ class_ "agenda-conflict-list" ] (map (renderConflictItem pending) pendingIds)
     , div [ class_ "agenda-conflict-confirmation-actions" ]
-        [ button [ class_ "btn btn-sm btn-danger", onClick (const (onAction SyncResolveDiscardLocal)) ] [ text "Abandonner local" ]
-        , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const (onAction SyncResolveKeepLocal)) ] [ text "Conserver local" ]
+        [ button [ class_ "btn btn-sm btn-danger", onClick (const SyncResolveDiscardLocal) ] [ text "Abandonner local" ]
+        , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const SyncResolveKeepLocal) ] [ text "Conserver local" ]
         ]
     ]
   where
@@ -177,7 +177,7 @@ renderConflictItem items itemId =
 syncPending :: StateT SyncState (WriterT (Array Command) Aff) Unit
 syncPending = do
   syncState <- get
-  if null (syncState ^. _syncPendingSyncS) then
+  if null (syncState ^. _syncPendingSync) then
     tellCmd $ SyncCmd SyncRefreshItems
   else
-    tellCmd $ SyncCmd (SyncRunPending (syncState ^. _syncPendingSyncS))
+    tellCmd $ SyncCmd (SyncRunPending (syncState ^. _syncPendingSync))

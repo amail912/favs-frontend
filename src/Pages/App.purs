@@ -6,7 +6,7 @@ import Affjax.Web (Response, post)
 import Affjax.Web as AffjaxWeb
 import Affjax.RequestBody (RequestBody(..))
 import Affjax.ResponseFormat (string)
-import Pages.Agenda (component) as Agenda
+import Pages.Calendar (component) as Agenda
 import Pages.Checklists (component) as Checklists
 import Control.Monad.RWS (get, modify_)
 import Data.Array (head)

@@ -125,17 +125,16 @@ handleExportAction items = case _ of
 
 
 renderExportPanel
-  :: forall w action
-   . (ExportAction -> action)
-  -> ExportFormat
+  :: forall w
+   . ExportFormat
   -> String
   -> String
   -> String
   -> String
   -> String
   -> String
-  -> HTML w action
-renderExportPanel onAction format typeFilter statusFilter categoryFilter startDate endDate output =
+  -> HTML w ExportAction
+renderExportPanel format typeFilter statusFilter categoryFilter startDate endDate output =
   section [ class_ "agenda-export" ]
     [ renderPanelHeader
         "agenda-export"
@@ -147,7 +146,7 @@ renderExportPanel onAction format typeFilter statusFilter categoryFilter startDa
             [ div [ class_ "agenda-notifications-label" ] [ text "Format" ]
             , select
                 [ class_ "form-select agenda-sort-select"
-                , onValueChange (onAction <<< ExportFormatChangedAction)
+                , onValueChange ExportFormatChangedAction
                 , value (exportFormatValue format)
                 ]
                 [ option [ value "csv" ] [ text "CSV" ]
@@ -158,7 +157,7 @@ renderExportPanel onAction format typeFilter statusFilter categoryFilter startDa
             [ div [ class_ "agenda-notifications-label" ] [ text "Type" ]
             , select
                 [ class_ "form-select agenda-sort-select"
-                , onValueChange (onAction <<< ExportTypeFilterChangedAction)
+                , onValueChange ExportTypeFilterChangedAction
                 , value typeFilter
                 ]
                 [ option [ value "" ] [ text "Tous" ]
@@ -170,7 +169,7 @@ renderExportPanel onAction format typeFilter statusFilter categoryFilter startDa
             [ div [ class_ "agenda-notifications-label" ] [ text "Statut" ]
             , select
                 [ class_ "form-select agenda-sort-select"
-                , onValueChange (onAction <<< ExportStatusFilterChangedAction)
+                , onValueChange ExportStatusFilterChangedAction
                 , value statusFilter
                 ]
                 [ option [ value "" ] [ text "Tous" ]
@@ -186,7 +185,7 @@ renderExportPanel onAction format typeFilter statusFilter categoryFilter startDa
                 [ class_ "form-control agenda-input"
                 , placeholder "Ex: Sport"
                 , value categoryFilter
-                , onValueChange (onAction <<< ExportCategoryFilterChangedAction)
+                , onValueChange ExportCategoryFilterChangedAction
                 ]
             ]
         , div [ class_ "agenda-export-control" ]
@@ -195,7 +194,7 @@ renderExportPanel onAction format typeFilter statusFilter categoryFilter startDa
                 [ class_ "form-control agenda-input"
                 , type_ InputDate
                 , value startDate
-                , onValueChange (onAction <<< ExportStartDateChangedAction)
+                , onValueChange ExportStartDateChangedAction
                 ]
             ]
         , div [ class_ "agenda-export-control" ]
@@ -204,13 +203,13 @@ renderExportPanel onAction format typeFilter statusFilter categoryFilter startDa
                 [ class_ "form-control agenda-input"
                 , type_ InputDate
                 , value endDate
-                , onValueChange (onAction <<< ExportEndDateChangedAction)
+                , onValueChange ExportEndDateChangedAction
                 ]
             ]
         ]
     , div [ class_ "agenda-export-actions" ]
-        [ button [ class_ "btn btn-sm btn-primary", onClick (const (onAction ExportGenerate)) ] [ text "Generer" ]
-        , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const (onAction ExportClearOutput)) ] [ text "Effacer" ]
+        [ button [ class_ "btn btn-sm btn-primary", onClick (const ExportGenerate) ] [ text "Generer" ]
+        , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const ExportClearOutput) ] [ text "Effacer" ]
         ]
     , if output == "" then text ""
       else
