@@ -157,13 +157,12 @@ handleTemplateAction = case _ of
 
 
 renderTemplatesPanel
-  :: forall w action
-   . (TemplateAction -> action)
-  -> Array TaskTemplate
+  :: forall w
+   . Array TaskTemplate
   -> TemplateDraft
   -> Maybe String
-  -> HTML w action
-renderTemplatesPanel onAction templates draft editingId =
+  -> HTML w TemplateAction
+renderTemplatesPanel templates draft editingId =
   section [ class_ "agenda-templates" ]
     [ renderPanelHeader
         "agenda-templates"
@@ -175,7 +174,7 @@ renderTemplatesPanel onAction templates draft editingId =
             [ class_ "form-control agenda-input"
             , placeholder "Titre du template"
             , value draft.title
-            , onValueChange (onAction <<< TemplateTitleChangedAction)
+            , onValueChange TemplateTitleChangedAction
             ]
         , div [ class_ "agenda-templates-row" ]
             [ input
@@ -183,19 +182,19 @@ renderTemplatesPanel onAction templates draft editingId =
                 , type_ InputNumber
                 , placeholder "Duree (minutes)"
                 , value draft.durationMinutes
-                , onValueChange (onAction <<< TemplateDurationChangedAction)
+                , onValueChange TemplateDurationChangedAction
                 ]
             , input
                 [ class_ "form-control agenda-input"
                 , placeholder "Categorie (optionnelle)"
                 , value draft.category
-                , onValueChange (onAction <<< TemplateCategoryChangedAction)
+                , onValueChange TemplateCategoryChangedAction
                 ]
             ]
         , div [ class_ "agenda-templates-actions" ]
             ( [ button
                   [ class_ "btn btn-sm btn-primary"
-                  , onClick (const (onAction TemplateSubmit))
+                  , onClick (const TemplateSubmit)
                   ]
                   [ text $ if editingId == Nothing then "Ajouter" else "Mettre a jour" ]
               ] <>
@@ -203,33 +202,33 @@ renderTemplatesPanel onAction templates draft editingId =
                 else
                   [ button
                       [ class_ "btn btn-sm btn-outline-secondary"
-                      , onClick (const (onAction TemplateCancelEdit))
+                      , onClick (const TemplateCancelEdit)
                       ]
                       [ text "Annuler" ]
                   ]
             )
         ]
-    , renderTemplatesList onAction templates
+    , renderTemplatesList templates
     ]
 
-renderTemplatesList :: forall w action. (TemplateAction -> action) -> Array TaskTemplate -> HTML w action
-renderTemplatesList onAction templates =
+renderTemplatesList :: forall w. Array TaskTemplate -> HTML w TemplateAction
+renderTemplatesList templates =
   if null templates then
     div [ class_ "agenda-templates-empty" ] [ text "Aucun template pour l'instant." ]
   else
-    div [ class_ "agenda-templates-list" ] (map (renderTemplateCard onAction) templates)
+    div [ class_ "agenda-templates-list" ] (map renderTemplateCard templates)
 
-renderTemplateCard :: forall w action. (TemplateAction -> action) -> TaskTemplate -> HTML w action
-renderTemplateCard onAction template =
+renderTemplateCard :: forall w. TaskTemplate -> HTML w TemplateAction
+renderTemplateCard template =
   div [ class_ "agenda-template-card" ]
     [ div [ class_ "agenda-template-main" ]
         [ div [ class_ "agenda-template-title" ] [ text template.title ]
         , div [ class_ "agenda-template-summary" ] [ text (templateSummary template) ]
         ]
     , div [ class_ "agenda-template-actions" ]
-        [ button [ class_ "btn btn-sm btn-outline-primary", onClick (const $ onAction (TemplateUse template.id)) ] [ text "Utiliser" ]
-        , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const $ onAction (TemplateEdit template.id)) ] [ text "Editer" ]
-        , button [ class_ "btn btn-sm btn-outline-danger", onClick (const $ onAction (TemplateDelete template.id)) ] [ text "Supprimer" ]
+        [ button [ class_ "btn btn-sm btn-outline-primary", onClick (const (TemplateUse template.id)) ] [ text "Utiliser" ]
+        , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const (TemplateEdit template.id)) ] [ text "Editer" ]
+        , button [ class_ "btn btn-sm btn-outline-danger", onClick (const (TemplateDelete template.id)) ] [ text "Supprimer" ]
         ]
     ]
 

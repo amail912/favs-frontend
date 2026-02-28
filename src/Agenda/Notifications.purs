@@ -136,15 +136,14 @@ handleNotificationAction = case _ of
 
 
 renderNotificationsPanel
-  :: forall w action
-   . (NotificationAction -> action)
-  -> Boolean
+  :: forall w
+   . Boolean
   -> NotificationDefaults
   -> Array NotificationOverride
   -> Maybe NotificationEditor
   -> Array CalendarItem
-  -> HTML w action
-renderNotificationsPanel onAction isOpen defaults overrides editor intentions =
+  -> HTML w NotificationAction
+renderNotificationsPanel isOpen defaults overrides editor intentions =
   if null intentions then text ""
   else
     section [ class_ "agenda-notifications" ]
@@ -154,34 +153,33 @@ renderNotificationsPanel onAction isOpen defaults overrides editor intentions =
           "Les rappels par defaut s'appliquent aux intentions non planifiees."
           [ button
               [ class_ $ "btn btn-sm agenda-notifications-toggle" <> if isOpen then " btn-outline-primary" else " btn-outline-secondary"
-              , onClick (const (onAction NotificationTogglePanel))
+              , onClick (const NotificationTogglePanel)
               ]
               [ text $ if isOpen then "Masquer" else "Configurer" ]
           ]
-      , if isOpen then renderNotificationDefaults onAction defaults else text ""
-      , if isOpen then renderNotificationList onAction defaults overrides editor intentions else text ""
+      , if isOpen then renderNotificationDefaults defaults else text ""
+      , if isOpen then renderNotificationList defaults overrides editor intentions else text ""
       ]
 
 renderNotificationsContent
-  :: forall w action
-   . (NotificationAction -> action)
-  -> NotificationDefaults
+  :: forall w
+   . NotificationDefaults
   -> Array NotificationOverride
   -> Maybe NotificationEditor
   -> Array CalendarItem
-  -> HTML w action
-renderNotificationsContent onAction defaults overrides editor intentions =
+  -> HTML w NotificationAction
+renderNotificationsContent defaults overrides editor intentions =
   if null intentions then
     div [ class_ "agenda-modal-empty" ]
       [ text "Aucune intention non planifiee." ]
   else
     div [ class_ "agenda-notifications-modal" ]
-      [ renderNotificationDefaults onAction defaults
-      , renderNotificationList onAction defaults overrides editor intentions
+      [ renderNotificationDefaults defaults
+      , renderNotificationList defaults overrides editor intentions
       ]
 
-renderNotificationDefaults :: forall w action. (NotificationAction -> action) -> NotificationDefaults -> HTML w action
-renderNotificationDefaults onAction defaults =
+renderNotificationDefaults :: forall w. NotificationDefaults -> HTML w NotificationAction
+renderNotificationDefaults defaults =
   div [ class_ "agenda-notifications-defaults" ]
     [ div [ class_ "agenda-notifications-section-title" ] [ text "Rappels par defaut" ]
     , div [ class_ "agenda-notifications-controls" ]
@@ -191,7 +189,7 @@ renderNotificationDefaults onAction defaults =
                 [ class_ "form-control agenda-input"
                 , type_ InputTime
                 , value defaults.startDayTime
-                , onValueChange (onAction <<< NotificationDefaultStartTimeChanged)
+                , onValueChange NotificationDefaultStartTimeChanged
                 ]
             ]
         , div [ class_ "agenda-notifications-control" ]
@@ -200,33 +198,31 @@ renderNotificationDefaults onAction defaults =
                 [ class_ "form-control agenda-input"
                 , type_ InputNumber
                 , value (show defaults.beforeEndHours)
-                , onValueChange (onAction <<< NotificationDefaultBeforeEndChanged)
+                , onValueChange NotificationDefaultBeforeEndChanged
                 ]
             ]
         ]
     ]
 
 renderNotificationList
-  :: forall w action
-   . (NotificationAction -> action)
-  -> NotificationDefaults
+  :: forall w
+   . NotificationDefaults
   -> Array NotificationOverride
   -> Maybe NotificationEditor
   -> Array CalendarItem
-  -> HTML w action
-renderNotificationList onAction defaults overrides editor intentions =
+  -> HTML w NotificationAction
+renderNotificationList defaults overrides editor intentions =
   div [ class_ "agenda-notifications-list" ]
-    (map (renderNotificationItem onAction defaults overrides editor) intentions)
+    (map (renderNotificationItem defaults overrides editor) intentions)
 
 renderNotificationItem
-  :: forall w action
-   . (NotificationAction -> action)
-  -> NotificationDefaults
+  :: forall w
+   . NotificationDefaults
   -> Array NotificationOverride
   -> Maybe NotificationEditor
   -> CalendarItem
-  -> HTML w action
-renderNotificationItem onAction defaults overrides editor item =
+  -> HTML w NotificationAction
+renderNotificationItem defaults overrides editor item =
   case item of
     ServerCalendarItem { id, content } | content.itemType == Intention ->
       let
@@ -248,13 +244,13 @@ renderNotificationItem onAction defaults overrides editor item =
                       [ text $ if hasOverride then "Personnalise" else "Par defaut" ]
                   , button
                       [ class_ "btn btn-sm btn-outline-secondary"
-                      , onClick (const $ onAction (NotificationOpenEditor id))
+                      , onClick (const (NotificationOpenEditor id))
                       ]
                       [ text "Personnaliser" ]
                   ]
               ]
           , renderReminderTimes reminders
-          , maybe (text "") (renderNotificationEditor onAction id) editorForItem
+          , maybe (text "") (renderNotificationEditor id) editorForItem
           ]
     _ -> text ""
 
@@ -263,8 +259,8 @@ renderReminderTimes reminders =
   div [ class_ "agenda-notification-times" ]
     (map (\reminder -> div [ class_ "agenda-notification-time" ] [ text $ reminder.label <> ": " <> reminder.at ]) reminders)
 
-renderNotificationEditor :: forall w action. (NotificationAction -> action) -> String -> NotificationEditor -> HTML w action
-renderNotificationEditor onAction itemId editor =
+renderNotificationEditor :: forall w. String -> NotificationEditor -> HTML w NotificationAction
+renderNotificationEditor itemId editor =
   div [ class_ "agenda-notification-editor" ]
     [ div [ class_ "agenda-notifications-section-title" ] [ text "Surcharge de rappel" ]
     , div [ class_ "agenda-notifications-controls" ]
@@ -274,7 +270,7 @@ renderNotificationEditor onAction itemId editor =
                 [ class_ "form-control agenda-input"
                 , type_ InputTime
                 , value editor.startTime
-                , onValueChange (onAction <<< NotificationStartTimeChanged)
+                , onValueChange NotificationStartTimeChanged
                 ]
             ]
         , div [ class_ "agenda-notifications-control" ]
@@ -283,14 +279,14 @@ renderNotificationEditor onAction itemId editor =
                 [ class_ "form-control agenda-input"
                 , type_ InputNumber
                 , value editor.beforeEndRaw
-                , onValueChange (onAction <<< NotificationBeforeEndChanged)
+                , onValueChange NotificationBeforeEndChanged
                 ]
             ]
         ]
     , div [ class_ "agenda-notification-editor-actions" ]
-        [ button [ class_ "btn btn-sm btn-success", onClick (const (onAction NotificationSaveOverride)) ] [ text "Enregistrer" ]
-        , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const (onAction NotificationCancelOverride)) ] [ text "Annuler" ]
-        , button [ class_ "btn btn-sm btn-outline-danger", onClick (const $ onAction (NotificationResetOverride itemId)) ] [ text "Reinitialiser" ]
+        [ button [ class_ "btn btn-sm btn-success", onClick (const NotificationSaveOverride) ] [ text "Enregistrer" ]
+        , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const NotificationCancelOverride) ] [ text "Annuler" ]
+        , button [ class_ "btn btn-sm btn-outline-danger", onClick (const (NotificationResetOverride itemId)) ] [ text "Reinitialiser" ]
         ]
     ]
 

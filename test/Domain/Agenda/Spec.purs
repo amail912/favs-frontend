@@ -4,7 +4,7 @@ import Prelude
 
 import Agenda.Model (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), RecurrenceRule(..), RoutineTemplate, SortMode(..), StepDependency(..), ValidationError(..), defaultNotificationDefaults)
 import Agenda.Conflicts (detectConflictGroups, detectConflictIds)
-import Agenda.Data (toNewIntention, validateIntention)
+import Agenda.Calendar (toNewIntention, validateIntention)
 import Agenda.Exports (exportItemsToCsv, exportItemsToIcs, filterItemsForExport)
 import Agenda.Helpers (durationMinutesBetween, sortItems)
 import Agenda.Imports (parseCsvImport, parseIcsImport)

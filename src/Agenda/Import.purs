@@ -127,8 +127,8 @@ handleImportAction ctx = case _ of
     modify_ ((_icsInputS .~ "") <<< (_icsImportResultS .~ Nothing))
 
 
-renderCsvImportPanel :: forall w action. (ImportAction -> action) -> String -> Maybe CsvImportResult -> HTML w action
-renderCsvImportPanel onAction csvInput result =
+renderCsvImportPanel :: forall w. String -> Maybe CsvImportResult -> HTML w ImportAction
+renderCsvImportPanel csvInput result =
   section [ class_ "agenda-import" ]
     [ renderPanelHeader
         "agenda-import"
@@ -139,12 +139,12 @@ renderCsvImportPanel onAction csvInput result =
         [ class_ "form-control agenda-import-textarea"
         , placeholder "Collez votre CSV ici..."
         , value csvInput
-        , onValueChange (onAction <<< ImportCsvInputChanged)
+        , onValueChange ImportCsvInputChanged
         ]
     , div [ class_ "agenda-import-actions" ]
-        [ button [ class_ "btn btn-sm btn-outline-primary", onClick (const (onAction ImportParseCsvInput)) ] [ text "Analyser" ]
-        , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const (onAction ImportClearCsv)) ] [ text "Effacer" ]
-        , button [ class_ "btn btn-sm btn-success", onClick (const (onAction ImportApplyCsv)) ] [ text "Ajouter a la liste" ]
+        [ button [ class_ "btn btn-sm btn-outline-primary", onClick (const ImportParseCsvInput) ] [ text "Analyser" ]
+        , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const ImportClearCsv) ] [ text "Effacer" ]
+        , button [ class_ "btn btn-sm btn-success", onClick (const ImportApplyCsv) ] [ text "Ajouter a la liste" ]
         ]
     , maybe (text "") renderCsvImportResult result
     ]
@@ -171,8 +171,8 @@ renderCsvImportError err =
   div [ class_ "agenda-import-error" ]
     [ text $ "Ligne " <> show err.rowNumber <> ": " <> err.message ]
 
-renderIcsImportPanel :: forall w action. (ImportAction -> action) -> String -> Maybe IcsImportResult -> HTML w action
-renderIcsImportPanel onAction icsInput result =
+renderIcsImportPanel :: forall w. String -> Maybe IcsImportResult -> HTML w ImportAction
+renderIcsImportPanel icsInput result =
   section [ class_ "agenda-import" ]
     [ renderPanelHeader
         "agenda-import"
@@ -183,12 +183,12 @@ renderIcsImportPanel onAction icsInput result =
         [ class_ "form-control agenda-import-textarea"
         , placeholder "Collez votre fichier ICS ici..."
         , value icsInput
-        , onValueChange (onAction <<< ImportIcsInputChanged)
+        , onValueChange ImportIcsInputChanged
         ]
     , div [ class_ "agenda-import-actions" ]
-        [ button [ class_ "btn btn-sm btn-outline-primary", onClick (const (onAction ImportParseIcsInput)) ] [ text "Analyser" ]
-        , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const (onAction ImportClearIcs)) ] [ text "Effacer" ]
-        , button [ class_ "btn btn-sm btn-success", onClick (const (onAction ImportApplyIcs)) ] [ text "Ajouter a la liste" ]
+        [ button [ class_ "btn btn-sm btn-outline-primary", onClick (const ImportParseIcsInput) ] [ text "Analyser" ]
+        , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const ImportClearIcs) ] [ text "Effacer" ]
+        , button [ class_ "btn btn-sm btn-success", onClick (const ImportApplyIcs) ] [ text "Ajouter a la liste" ]
         ]
     , maybe (text "") renderIcsImportResult result
     ]
