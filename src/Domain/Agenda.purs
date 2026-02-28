@@ -1,4 +1,4 @@
-module Domain.Agenda (module Model, module Imports, module Exports, module Logic) where
+module Domain.Agenda (module Model, module Imports, module Exports) where
 
 import Agenda.Model
   ( AgendaView(..)
@@ -39,22 +39,3 @@ import Agenda.Exports
   , parseExportItemType
   , parseExportStatus
   ) as Exports
-import Agenda.Logic
-  ( addTemplate
-  , applyOfflineMutation
-  , applyTemplateToDraft
-  , component
-  , detectConflictGroups
-  , detectConflictIds
-  , durationMinutesBetween
-  , generateOccurrencesForMonth
-  , instantiateRoutine
-  , reminderTimesForIntention
-  , removeTemplate
-  , sortItems
-  , templateSummary
-  , toNewIntention
-  , toScheduledBlock
-  , updateTemplate
-  , validateIntention
-  ) as Logic

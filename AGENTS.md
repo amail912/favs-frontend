@@ -12,7 +12,10 @@ Frontend pour gérer le quotidien avec un focus sur la gestion d’un calendrier
 
 ## Principes de code
 - TDD par défaut.
-- Tests unitaires et d’intégration doivent passer avant chaque commit.
+- Pour chaque fonctionalité, des tests  unitaires et des tests d'intégration doivent être faits.
+- Tu proposeras de réaliser des tests dès que cela te semble nécessaire
+- Utilise la compilation comme une grande aide au développement. PureScript est un language fortement typé qui permet d'avoir beaucoup de garanties avec un système de types adapté.
+- On veillera à ne laisser aucun warning de compilation.
 
 ## Principes de design
 - Ergonomie maximale.
@@ -95,6 +98,8 @@ Références de specs produit et user stories: `docs/specs/agenda-v1/`.
 - `playwright.config.js` lance `npm run start-dev` comme webServer et réutilise le serveur si déjà lancé.
 
 ## Consignes
-- Au démarrage d'une session Codex, tu me demanderas le PATH pour accéder aux outils de développement. Tu me demanderas également d'ajuster tes permissions si nécessaire.
+- Au démarrage d'une session Codex, tu me demanderas le PATH pour accéder aux outils de développement.
+- Tu utiliseras ce PATH pour exécuter les commandes lors du développement sans me demander.
 - Ne jamais toucher au répo foucl2, si jamais son démarrage est nécessaire, me demander.
-- Ce fichier doit être mis à jour régulièrement afin de garantir une récupération de contexte peu coûteuse lors de prochaines sessions.
+- Ne jamais faire d'actions git en écriture sur le répo distant (push en particulier)
+- Ce fichier doit être mis à jour à chaque commit, qu'il soit fait par toi ou bien lorsque je t'avertit que j'en ai fait un.
