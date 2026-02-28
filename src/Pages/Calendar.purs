@@ -508,13 +508,13 @@ render { calendar, sync, drag, notifications, templates, imports, exports, view 
       else items
     sortedItems = sortItems sortMode conflictIds itemsToShow
   in
-  div [ class_ "entity-page agenda-page" ]
-      [ section [ class_ "agenda-header" ]
-          [ h2 [ class_ "agenda-title" ] [ text (viewTitle viewMode) ]
-          , div [ class_ "agenda-subtitle" ] [ text "Capture rapide des intentions a planifier." ]
-          , div [ class_ "agenda-controls" ]
+  div [ class_ "entity-page calendar-page" ]
+      [ section [ class_ "calendar-header" ]
+          [ h2 [ class_ "calendar-title" ] [ text (viewTitle viewMode) ]
+          , div [ class_ "calendar-subtitle" ] [ text "Capture rapide des intentions a planifier." ]
+          , div [ class_ "calendar-controls" ]
               [ button
-                  [ class_ $ "btn btn-sm agenda-filter" <> if showConflictsOnly then " btn-outline-primary" else " btn-outline-secondary"
+                  [ class_ $ "btn btn-sm calendar-filter" <> if showConflictsOnly then " btn-outline-primary" else " btn-outline-secondary"
                   , onClick (const (CalendarAction CalendarToggleConflictFilter))
                   ]
                   [ text "Filtrer: en conflit" ]
@@ -525,24 +525,24 @@ render { calendar, sync, drag, notifications, templates, imports, exports, view 
           , renderViewSelector viewMode focusDate
           , renderMobileTools viewMode
           ]
-      , div [ class_ $ "agenda-layout" <> if viewMode == ViewDay then " agenda-layout--calendar" else "" ]
-          [ div [ class_ "agenda-main" ]
+      , div [ class_ $ "calendar-layout" <> if viewMode == ViewDay then " calendar-layout--calendar" else "" ]
+          [ div [ class_ "calendar-main" ]
               [ maybe (text "") renderUpdateError updateError
               , maybe (text "") renderValidationPanel validationPanel
-              , section [ class_ $ "agenda-list-panel" <> if viewMode == ViewDay then " agenda-list-panel--calendar" else "" ]
-                  [ if viewMode == ViewDay then div [ class_ "agenda-calendar-form-header" ] [ renderForm draft validationError ]
+              , section [ class_ $ "calendar-list-panel" <> if viewMode == ViewDay then " calendar-list-panel--calendar" else "" ]
+                  [ if viewMode == ViewDay then div [ class_ "calendar-calendar-form-header" ] [ renderForm draft validationError ]
                     else text ""
                   , renderAgendaView viewMode focusDate conflictIds sortedItems draggingId dragHoverIndex
                   ]
               , maybe (text "") (renderConflictResolution items) conflictResolution
               , maybe (text "") renderSyncConflict syncConflict
               ]
-          , div [ class_ "agenda-side" ]
+          , div [ class_ "calendar-side" ]
               [ renderNotificationsPanel notificationPanelOpen notificationDefaults notificationOverrides notificationEditor unplannedIntentions
-              , renderAccordion "Templates de taches" "agenda-accordion templates" $ renderTemplatesPanel templateItems templateDraft editingTemplateId
-              , renderAccordion "Import CSV" "agenda-accordion import-csv" $ renderCsvImportPanel csvInput csvImportResult
-              , renderAccordion "Import ICS" "agenda-accordion import-ics" $ renderIcsImportPanel icsInput icsImportResult
-              , renderAccordion "Export" "agenda-accordion export" $ renderExportPanel exportFormat exportTypeFilter exportStatusFilter exportCategoryFilter exportStartDate exportEndDate exportOutput
+              , renderAccordion "Templates de taches" "calendar-accordion templates" $ renderTemplatesPanel templateItems templateDraft editingTemplateId
+              , renderAccordion "Import CSV" "calendar-accordion import-csv" $ renderCsvImportPanel csvInput csvImportResult
+              , renderAccordion "Import ICS" "calendar-accordion import-ics" $ renderIcsImportPanel icsInput icsImportResult
+              , renderAccordion "Export" "calendar-accordion export" $ renderExportPanel exportFormat exportTypeFilter exportStatusFilter exportCategoryFilter exportStartDate exportEndDate exportOutput
               ]
           ]
       , renderAgendaModals agendaModalsInput
@@ -551,9 +551,9 @@ render { calendar, sync, drag, notifications, templates, imports, exports, view 
 
 renderFiltersContent :: forall w. Boolean -> Array (Array String) -> Boolean -> SortMode -> HTML w Action
 renderFiltersContent showConflictsOnly conflictGroups offlineMode sortMode =
-  div [ class_ "agenda-modal-stack" ]
+  div [ class_ "calendar-modal-stack" ]
     [ button
-        [ class_ $ "btn btn-sm agenda-filter" <> if showConflictsOnly then " btn-outline-primary" else "btn-outline-secondary"
+        [ class_ $ "btn btn-sm calendar-filter" <> if showConflictsOnly then " btn-outline-primary" else "btn-outline-secondary"
         , onClick (const (CalendarAction CalendarToggleConflictFilter))
         ]
         [ text "Filtrer: en conflit" ]
@@ -680,9 +680,9 @@ buildAgendaModalsInput { calendar, sync, notifications, templates, imports, expo
 
 renderAccordion :: forall w i. String -> String -> HTML w i -> HTML w i
 renderAccordion title extraClass content =
-  div [ class_ ("agenda-accordion-wrap " <> extraClass) ]
-    [ details [ class_ "agenda-accordion-details" ]
-        [ summary [ class_ "agenda-accordion-summary" ] [ text title ]
-        , div [ class_ "agenda-accordion-content" ] [ content ]
+  div [ class_ ("calendar-accordion-wrap " <> extraClass) ]
+    [ details [ class_ "calendar-accordion-details" ]
+        [ summary [ class_ "calendar-accordion-summary" ] [ text title ]
+        , div [ class_ "calendar-accordion-content" ] [ content ]
         ]
     ]

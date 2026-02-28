@@ -129,19 +129,19 @@ handleImportAction ctx = case _ of
 
 renderCsvImportPanel :: forall w. String -> Maybe CsvImportResult -> HTML w ImportAction
 renderCsvImportPanel csvInput result =
-  section [ class_ "agenda-import" ]
+  section [ class_ "calendar-import" ]
     [ renderPanelHeader
-        "agenda-import"
+        "calendar-import"
         "Import CSV"
         "Colonnes minimales: type, titre, fenetre_debut, fenetre_fin."
         []
     , textarea
-        [ class_ "form-control agenda-import-textarea"
+        [ class_ "form-control calendar-import-textarea"
         , placeholder "Collez votre CSV ici..."
         , value csvInput
         , onValueChange ImportCsvInputChanged
         ]
-    , div [ class_ "agenda-import-actions" ]
+    , div [ class_ "calendar-import-actions" ]
         [ button [ class_ "btn btn-sm btn-outline-primary", onClick (const ImportParseCsvInput) ] [ text "Analyser" ]
         , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const ImportClearCsv) ] [ text "Effacer" ]
         , button [ class_ "btn btn-sm btn-success", onClick (const ImportApplyCsv) ] [ text "Ajouter a la liste" ]
@@ -155,37 +155,37 @@ renderCsvImportResult result =
     okCount = length result.items
     errorCount = length result.errors
   in
-    div [ class_ "agenda-import-result" ]
-      [ div [ class_ "agenda-import-summary" ]
+    div [ class_ "calendar-import-result" ]
+      [ div [ class_ "calendar-import-summary" ]
           [ text $ "Valides: " <> show okCount <> " • Erreurs: " <> show errorCount ]
       , if null result.errors then text "" else renderCsvImportErrors result.errors
       ]
 
 renderCsvImportErrors :: forall w action. Array CsvImportError -> HTML w action
 renderCsvImportErrors errors =
-  div [ class_ "agenda-import-errors" ]
+  div [ class_ "calendar-import-errors" ]
     (map renderCsvImportError errors)
 
 renderCsvImportError :: forall w action. CsvImportError -> HTML w action
 renderCsvImportError err =
-  div [ class_ "agenda-import-error" ]
+  div [ class_ "calendar-import-error" ]
     [ text $ "Ligne " <> show err.rowNumber <> ": " <> err.message ]
 
 renderIcsImportPanel :: forall w. String -> Maybe IcsImportResult -> HTML w ImportAction
 renderIcsImportPanel icsInput result =
-  section [ class_ "agenda-import" ]
+  section [ class_ "calendar-import" ]
     [ renderPanelHeader
-        "agenda-import"
+        "calendar-import"
         "Import ICS"
         "Support basique: SUMMARY, DTSTART, DTEND."
         []
     , textarea
-        [ class_ "form-control agenda-import-textarea"
+        [ class_ "form-control calendar-import-textarea"
         , placeholder "Collez votre fichier ICS ici..."
         , value icsInput
         , onValueChange ImportIcsInputChanged
         ]
-    , div [ class_ "agenda-import-actions" ]
+    , div [ class_ "calendar-import-actions" ]
         [ button [ class_ "btn btn-sm btn-outline-primary", onClick (const ImportParseIcsInput) ] [ text "Analyser" ]
         , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const ImportClearIcs) ] [ text "Effacer" ]
         , button [ class_ "btn btn-sm btn-success", onClick (const ImportApplyIcs) ] [ text "Ajouter a la liste" ]
@@ -199,18 +199,18 @@ renderIcsImportResult result =
     okCount = length result.items
     errorCount = length result.errors
   in
-    div [ class_ "agenda-import-result" ]
-      [ div [ class_ "agenda-import-summary" ]
+    div [ class_ "calendar-import-result" ]
+      [ div [ class_ "calendar-import-summary" ]
           [ text $ "Valides: " <> show okCount <> " • Erreurs: " <> show errorCount ]
       , if null result.errors then text "" else renderIcsImportErrors result.errors
       ]
 
 renderIcsImportErrors :: forall w action. Array IcsImportError -> HTML w action
 renderIcsImportErrors errors =
-  div [ class_ "agenda-import-errors" ]
+  div [ class_ "calendar-import-errors" ]
     (map renderIcsImportError errors)
 
 renderIcsImportError :: forall w action. IcsImportError -> HTML w action
 renderIcsImportError err =
-  div [ class_ "agenda-import-error" ]
+  div [ class_ "calendar-import-error" ]
     [ text $ "Evenement " <> show err.eventIndex <> ": " <> err.message ]

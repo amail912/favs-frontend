@@ -117,7 +117,7 @@ toScheduledBlock sourceId content =
 
 renderOfflineToggle :: forall w. Boolean -> HTML w SyncAction
 renderOfflineToggle offlineMode =
-  div [ class_ "agenda-offline-toggle" ]
+  div [ class_ "calendar-offline-toggle" ]
     [ button
         [ class_ $ "btn btn-sm " <> if offlineMode then "btn-outline-warning" else "btn-outline-secondary"
         , onClick (const SyncToggleOffline)
@@ -127,10 +127,10 @@ renderOfflineToggle offlineMode =
 
 renderUpdateError :: forall w. String -> HTML w SyncAction
 renderUpdateError message =
-  div [ class_ "agenda-error agenda-error--update" ]
+  div [ class_ "calendar-error calendar-error--update" ]
     [ text message
     , button
-        [ class_ "btn btn-sm btn-outline-secondary agenda-error-dismiss"
+        [ class_ "btn btn-sm btn-outline-secondary calendar-error-dismiss"
         , onClick (const SyncDismissUpdateError)
         ]
         [ text "OK" ]
@@ -142,12 +142,12 @@ updateErrorMessage status =
 
 renderSyncConflict :: forall w. Array CalendarItem -> HTML w SyncAction
 renderSyncConflict pending =
-  div [ class_ "agenda-sync-conflict" ]
-    [ div [ class_ "agenda-conflict-title" ] [ text "Conflit de synchronisation" ]
-    , div [ class_ "agenda-conflict-subtitle" ]
+  div [ class_ "calendar-sync-conflict" ]
+    [ div [ class_ "calendar-conflict-title" ] [ text "Conflit de synchronisation" ]
+    , div [ class_ "calendar-conflict-subtitle" ]
         [ text "Choisissez comment resoudre la synchronisation des changements locaux." ]
-    , ul [ class_ "agenda-conflict-list" ] (map (renderConflictItem pending) pendingIds)
-    , div [ class_ "agenda-conflict-confirmation-actions" ]
+    , ul [ class_ "calendar-conflict-list" ] (map (renderConflictItem pending) pendingIds)
+    , div [ class_ "calendar-conflict-confirmation-actions" ]
         [ button [ class_ "btn btn-sm btn-danger", onClick (const SyncResolveDiscardLocal) ] [ text "Abandonner local" ]
         , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const SyncResolveKeepLocal) ] [ text "Conserver local" ]
         ]
@@ -164,9 +164,9 @@ renderConflictItem items itemId =
       let
         content = calendarItemContent item
       in
-        li [ class_ "agenda-conflict-item" ]
-          [ div [ class_ "agenda-conflict-item-title" ] [ text content.title ]
-          , div [ class_ "agenda-conflict-item-window" ]
+        li [ class_ "calendar-conflict-item" ]
+          [ div [ class_ "calendar-conflict-item-title" ] [ text content.title ]
+          , div [ class_ "calendar-conflict-item-window" ]
               [ text $ content.windowStart <> " → " <> content.windowEnd ]
           ]
     Nothing -> text ""

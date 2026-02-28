@@ -143,8 +143,8 @@ parseAgendaView raw =
 
 renderViewSelector :: forall w. AgendaView -> String -> HTML w ViewAction
 renderViewSelector viewMode focusDate =
-  div [ class_ "agenda-view-selector" ]
-    [ div [ class_ "agenda-view-buttons" ]
+  div [ class_ "calendar-view-selector" ]
+    [ div [ class_ "calendar-view-buttons" ]
         [ button
             [ class_ $ "btn btn-sm " <> if viewMode == ViewDay then "btn-primary" else "btn-outline-secondary"
             , onClick (const (ViewChangedAction "day"))
@@ -161,10 +161,10 @@ renderViewSelector viewMode focusDate =
             ]
             [ text "Mois" ]
         ]
-    , div [ class_ "agenda-view-date-field" ]
-        [ div [ class_ "agenda-notifications-label" ] [ text "Date de reference" ]
+    , div [ class_ "calendar-view-date-field" ]
+        [ div [ class_ "calendar-notifications-label" ] [ text "Date de reference" ]
         , input
-            [ class_ "form-control agenda-input agenda-view-date"
+            [ class_ "form-control calendar-input calendar-view-date"
             , type_ InputDate
             , attr (AttrName "lang") "fr"
             , value focusDate
@@ -177,14 +177,14 @@ renderMobileTools :: forall w. AgendaView -> HTML w ViewAction
 renderMobileTools viewMode =
   if viewMode /= ViewDay then text ""
   else
-    div [ class_ "agenda-mobile-tools" ]
+    div [ class_ "calendar-mobile-tools" ]
       [ button [ class_ "btn btn-sm btn-outline-secondary", onClick (const (ViewOpenModal ModalFilters)) ] [ text "Filtres" ]
       , button [ class_ "btn btn-sm btn-primary", onClick (const (ViewOpenModal ModalTools)) ] [ text "Outils" ]
       ]
 
 renderToolsContent :: forall w. HTML w ViewAction
 renderToolsContent =
-  div [ class_ "agenda-modal-stack" ]
+  div [ class_ "calendar-modal-stack" ]
     [ button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalNotifications)) ] [ text "Rappels" ]
     , button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalTemplates)) ] [ text "Templates" ]
     , button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalImportCsv)) ] [ text "Import CSV" ]
@@ -194,18 +194,18 @@ renderToolsContent =
 
 renderValidationPanel :: forall w. ValidationPanel -> HTML w ViewAction
 renderValidationPanel panel =
-  div [ class_ "agenda-validation-panel" ]
-    [ div [ class_ "agenda-conflict-title" ] [ text "Valider la tache" ]
-    , div [ class_ "agenda-conflict-subtitle" ]
+  div [ class_ "calendar-validation-panel" ]
+    [ div [ class_ "calendar-conflict-title" ] [ text "Valider la tache" ]
+    , div [ class_ "calendar-conflict-subtitle" ]
         [ text "Saisissez la duree reelle (minutes) ou acceptez la proposition." ]
-    , maybe (text "") (\minutes -> div [ class_ "agenda-validation-proposal" ] [ text $ "Proposition: " <> show minutes <> " min" ]) panel.proposedMinutes
+    , maybe (text "") (\minutes -> div [ class_ "calendar-validation-proposal" ] [ text $ "Proposition: " <> show minutes <> " min" ]) panel.proposedMinutes
     , input
-        [ class_ "form-control agenda-input"
+        [ class_ "form-control calendar-input"
         , placeholder "Duree reelle (minutes)"
         , onValueChange ViewValidationMinutesChanged
         , value panel.inputValue
         ]
-    , div [ class_ "agenda-conflict-confirmation-actions" ]
+    , div [ class_ "calendar-conflict-confirmation-actions" ]
         [ button [ class_ "btn btn-sm btn-success", onClick (const ViewConfirmValidation) ] [ text "Confirmer" ]
         , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const ViewCancelValidation) ] [ text "Annuler" ]
         ]

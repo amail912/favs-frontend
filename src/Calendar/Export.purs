@@ -135,17 +135,17 @@ renderExportPanel
   -> String
   -> HTML w ExportAction
 renderExportPanel format typeFilter statusFilter categoryFilter startDate endDate output =
-  section [ class_ "agenda-export" ]
+  section [ class_ "calendar-export" ]
     [ renderPanelHeader
-        "agenda-export"
+        "calendar-export"
         "Export"
         "Filtres: type, categorie, statut, periode."
         []
-    , div [ class_ "agenda-export-controls" ]
-        [ div [ class_ "agenda-export-control" ]
-            [ div [ class_ "agenda-notifications-label" ] [ text "Format" ]
+    , div [ class_ "calendar-export-controls" ]
+        [ div [ class_ "calendar-export-control" ]
+            [ div [ class_ "calendar-notifications-label" ] [ text "Format" ]
             , select
-                [ class_ "form-select agenda-sort-select"
+                [ class_ "form-select calendar-sort-select"
                 , onValueChange ExportFormatChangedAction
                 , value (exportFormatValue format)
                 ]
@@ -153,10 +153,10 @@ renderExportPanel format typeFilter statusFilter categoryFilter startDate endDat
                 , option [ value "ics" ] [ text "ICS" ]
                 ]
             ]
-        , div [ class_ "agenda-export-control" ]
-            [ div [ class_ "agenda-notifications-label" ] [ text "Type" ]
+        , div [ class_ "calendar-export-control" ]
+            [ div [ class_ "calendar-notifications-label" ] [ text "Type" ]
             , select
-                [ class_ "form-select agenda-sort-select"
+                [ class_ "form-select calendar-sort-select"
                 , onValueChange ExportTypeFilterChangedAction
                 , value typeFilter
                 ]
@@ -165,10 +165,10 @@ renderExportPanel format typeFilter statusFilter categoryFilter startDate endDat
                 , option [ value "BLOC_PLANIFIE" ] [ text "Bloc planifie" ]
                 ]
             ]
-        , div [ class_ "agenda-export-control" ]
-            [ div [ class_ "agenda-notifications-label" ] [ text "Statut" ]
+        , div [ class_ "calendar-export-control" ]
+            [ div [ class_ "calendar-notifications-label" ] [ text "Statut" ]
             , select
-                [ class_ "form-select agenda-sort-select"
+                [ class_ "form-select calendar-sort-select"
                 , onValueChange ExportStatusFilterChangedAction
                 , value statusFilter
                 ]
@@ -179,42 +179,42 @@ renderExportPanel format typeFilter statusFilter categoryFilter startDate endDat
                 , option [ value "ANNULE" ] [ text "ANNULE" ]
                 ]
             ]
-        , div [ class_ "agenda-export-control" ]
-            [ div [ class_ "agenda-notifications-label" ] [ text "Categorie" ]
+        , div [ class_ "calendar-export-control" ]
+            [ div [ class_ "calendar-notifications-label" ] [ text "Categorie" ]
             , input
-                [ class_ "form-control agenda-input"
+                [ class_ "form-control calendar-input"
                 , placeholder "Ex: Sport"
                 , value categoryFilter
                 , onValueChange ExportCategoryFilterChangedAction
                 ]
             ]
-        , div [ class_ "agenda-export-control" ]
-            [ div [ class_ "agenda-notifications-label" ] [ text "Debut" ]
+        , div [ class_ "calendar-export-control" ]
+            [ div [ class_ "calendar-notifications-label" ] [ text "Debut" ]
             , input
-                [ class_ "form-control agenda-input"
+                [ class_ "form-control calendar-input"
                 , type_ InputDate
                 , value startDate
                 , onValueChange ExportStartDateChangedAction
                 ]
             ]
-        , div [ class_ "agenda-export-control" ]
-            [ div [ class_ "agenda-notifications-label" ] [ text "Fin" ]
+        , div [ class_ "calendar-export-control" ]
+            [ div [ class_ "calendar-notifications-label" ] [ text "Fin" ]
             , input
-                [ class_ "form-control agenda-input"
+                [ class_ "form-control calendar-input"
                 , type_ InputDate
                 , value endDate
                 , onValueChange ExportEndDateChangedAction
                 ]
             ]
         ]
-    , div [ class_ "agenda-export-actions" ]
+    , div [ class_ "calendar-export-actions" ]
         [ button [ class_ "btn btn-sm btn-primary", onClick (const ExportGenerate) ] [ text "Generer" ]
         , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const ExportClearOutput) ] [ text "Effacer" ]
         ]
     , if output == "" then text ""
       else
         textarea
-          [ class_ "form-control agenda-export-textarea"
+          [ class_ "form-control calendar-export-textarea"
           , value output
           ]
     ]
