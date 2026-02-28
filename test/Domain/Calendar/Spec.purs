@@ -1,4 +1,4 @@
-module Test.Domain.Agenda.Spec (spec) where
+module Test.Domain.Calendar.Spec (spec) where
 
 import Prelude
 
@@ -25,7 +25,7 @@ import Test.Support.Builders (agendaContent, serverAgendaItem)
 
 spec :: Spec Unit
 spec =
-  describe "Agenda intentions" do
+  describe "Calendar intentions" do
     it "round-trips a new intention" do
       let
         draft :: IntentionDraft
