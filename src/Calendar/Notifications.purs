@@ -1,4 +1,4 @@
-module Agenda.Notifications
+module Calendar.Notifications
   ( NotificationState
   , NotificationAction(..)
   , NotificationEditor
@@ -11,9 +11,9 @@ module Agenda.Notifications
 
 import Prelude hiding (div)
 
-import Agenda.Commands (Command)
-import Agenda.Helpers (combineDateWithTime, isTimeLocal, parsePositiveInt, shiftMinutes)
-import Agenda.Model
+import Calendar.Commands (Command)
+import Calendar.Helpers (combineDateWithTime, isTimeLocal, parsePositiveInt, shiftMinutes)
+import Calendar.Model
   ( CalendarItem(..)
   , CalendarItemContent
   , ItemType(..)

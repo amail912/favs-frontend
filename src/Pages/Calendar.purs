@@ -5,7 +5,7 @@ module Pages.Calendar
 import Prelude hiding (div)
 
 import Affjax.Web (Response)
-import Agenda.Commands
+import Calendar.Commands
   ( Command(..)
   , DragCommand(..)
   , ImportCommand(..)
@@ -13,8 +13,8 @@ import Agenda.Commands
   , TemplateCommand(..)
   , ViewCommand(..)
   )
-import Agenda.Conflicts (detectConflictGroups, detectConflictIds)
-import Agenda.Calendar
+import Calendar.Conflicts (detectConflictGroups, detectConflictIds)
+import Calendar.Calendar
   ( CalendarAction(..)
   , CalendarState
   , CalendarUiAction(..)
@@ -24,8 +24,8 @@ import Agenda.Calendar
   , validateIntention
   , toNewIntention
   )
-import Agenda.Calendar as Cal
-import Agenda.Display
+import Calendar.Calendar as Cal
+import Calendar.Display
   ( AgendaModal(..)
   , ValidationPanel
   , ViewAction
@@ -34,58 +34,58 @@ import Agenda.Display
   , viewInitialState
   , viewTitle
   )
-import Agenda.Display as Disp
-import Agenda.Drag
+import Calendar.Display as Disp
+import Calendar.Drag
   ( DragAction
   , DragState
   , dragInitialState
   , handleDragAction
   )
-import Agenda.Export
+import Calendar.Export
   ( ExportAction
   , ExportState
   , exportInitialState
   , handleExportAction
   )
-import Agenda.Export as Exp
-import Agenda.Helpers
+import Calendar.Export as Exp
+import Calendar.Helpers
   ( formatDate
   , isConflict
   , isUnplannedIntention
   , sortItems
   )
-import Agenda.Import
+import Calendar.Import
   ( ImportAction
   , ImportState
   , handleImportAction
   , importInitialState
   )
-import Agenda.Import as Imp
-import Agenda.Notifications
+import Calendar.Import as Imp
+import Calendar.Notifications
   ( NotificationAction
   , NotificationEditor
   , NotificationState
   , handleNotificationAction
   , notificationInitialState
   )
-import Agenda.Notifications as Notif
-import Agenda.Offline (applyOfflineMutation, upsertPendingItem)
-import Agenda.Sync
+import Calendar.Notifications as Notif
+import Calendar.Offline (applyOfflineMutation, upsertPendingItem)
+import Calendar.Sync
   ( SyncAction
   , SyncState
   , handleSyncAction
   , syncInitialState
   , updateErrorMessage
   )
-import Agenda.Sync as Sync
-import Agenda.Templates
+import Calendar.Sync as Sync
+import Calendar.Templates
   ( TemplateAction
   , TemplateState
   , handleTemplateAction
   , templateInitialState
   )
-import Agenda.Templates as Tmpl
-import Agenda.Model
+import Calendar.Templates as Tmpl
+import Calendar.Model
   ( AgendaView(..)
   , CalendarItem
   , CsvImportResult
@@ -99,7 +99,7 @@ import Agenda.Model
   , TemplateDraft
   , ValidationError
   )
-import Api.Agenda (createItemResponse, getItemsResponse, updateItemResponse, validateItemResponse)
+import Api.Calendar (createItemResponse, getItemsResponse, updateItemResponse, validateItemResponse)
 import Control.Monad.Except (ExceptT(..), withExceptT)
 import Control.Monad.RWS (get, modify_)
 import Control.Monad.State.Trans (StateT, runStateT)

@@ -1,4 +1,4 @@
-module Agenda.Export
+module Calendar.Export
   ( ExportState
   , ExportAction(..)
   , exportInitialState
@@ -8,7 +8,7 @@ module Agenda.Export
 
 import Prelude hiding (div)
 
-import Agenda.Exports
+import Calendar.Exports
   ( exportFormatValue
   , exportItemsToCsv
   , exportItemsToIcs
@@ -17,9 +17,9 @@ import Agenda.Exports
   , parseExportItemType
   , parseExportStatus
   )
-import Agenda.Helpers (toOptionalString)
-import Agenda.Model (CalendarItem, ExportFormat(..))
-import Agenda.Commands (Command)
+import Calendar.Helpers (toOptionalString)
+import Calendar.Model (CalendarItem, ExportFormat(..))
+import Calendar.Commands (Command)
 import Control.Monad.State.Trans (StateT, get, modify_)
 import Control.Monad.Writer.Trans (WriterT)
 import Data.Lens (Lens', (.~), (^.))

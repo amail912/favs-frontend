@@ -1,4 +1,4 @@
-module Agenda.Calendar
+module Calendar.Calendar
   ( CalendarState
   , CalendarAction(..)
   , CalendarUiAction(..)
@@ -24,8 +24,8 @@ module Agenda.Calendar
 
 import Prelude hiding (div)
 
-import Agenda.Drag (DragAction(..), dragCalendarHandlers, dragHandlers, renderDropIndicator)
-import Agenda.Helpers
+import Calendar.Drag (DragAction(..), dragCalendarHandlers, dragHandlers, renderDropIndicator)
+import Calendar.Helpers
   ( calendarItemContent
   , generateDateRange
   , generateMonthDates
@@ -40,7 +40,7 @@ import Agenda.Helpers
   , timeLabel
   , toOptionalString
   )
-import Agenda.Model
+import Calendar.Model
   ( AgendaView(..)
   , CalendarItem(..)
   , CalendarItemContent
@@ -50,9 +50,9 @@ import Agenda.Model
   , SortMode(..)
   , ValidationError(..)
   )
-import Agenda.Sync (SyncAction(..))
-import Agenda.Display (ViewAction(..), AgendaModal(..))
-import Agenda.Commands (Command)
+import Calendar.Sync (SyncAction(..))
+import Calendar.Display (ViewAction(..), AgendaModal(..))
+import Calendar.Commands (Command)
 import Control.Monad.State.Trans (StateT, modify_)
 import Control.Monad.Writer.Trans (WriterT)
 import Data.Array (filter, find, findIndex, foldl, index, length, mapMaybe, mapWithIndex, null, sortBy, uncons, updateAt)

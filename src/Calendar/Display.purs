@@ -1,4 +1,4 @@
-module Agenda.Display
+module Calendar.Display
   ( ViewState
   , ViewAction(..)
   , AgendaModal(..)
@@ -19,9 +19,9 @@ module Agenda.Display
 
 import Prelude hiding (div)
 
-import Agenda.Commands (ViewCommand(..), Command(..), tellCmd)
-import Agenda.Helpers (parsePositiveInt, suggestDurationMinutes)
-import Agenda.Model (AgendaView(..), CalendarItemContent)
+import Calendar.Commands (ViewCommand(..), Command(..), tellCmd)
+import Calendar.Helpers (parsePositiveInt, suggestDurationMinutes)
+import Calendar.Model (AgendaView(..), CalendarItemContent)
 import Control.Alt ((<|>))
 import Control.Monad.State.Trans (StateT, get, modify_)
 import Control.Monad.Writer.Trans (WriterT)

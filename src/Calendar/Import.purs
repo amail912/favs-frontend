@@ -1,4 +1,4 @@
-module Agenda.Import
+module Calendar.Import
   ( ImportState
   , ImportAction(..)
   , ImportCtx
@@ -10,10 +10,10 @@ module Agenda.Import
 
 import Prelude hiding (div)
 
-import Agenda.Commands (ImportCommand(..), Command(..), tellCmd)
-import Agenda.Imports (parseCsvImport, parseIcsImport)
-import Agenda.Model (CalendarItem, CsvImportError, CsvImportResult, IcsImportError, IcsImportResult)
-import Agenda.Offline (applyOfflineMutation)
+import Calendar.Commands (ImportCommand(..), Command(..), tellCmd)
+import Calendar.Imports (parseCsvImport, parseIcsImport)
+import Calendar.Model (CalendarItem, CsvImportError, CsvImportResult, IcsImportError, IcsImportResult)
+import Calendar.Offline (applyOfflineMutation)
 import Control.Monad.State.Trans (StateT, get, modify_)
 import Control.Monad.Writer.Trans (WriterT)
 import Data.Array (foldl, length, null)

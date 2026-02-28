@@ -1,6 +1,6 @@
-# Agenda V1 - Specification executable
+# Calendar V1 - Specification executable
 
-Note: dans le code et l'UI, le module "Agenda" est desormais nomme "Calendar".
+Note: dans le code et l'UI, le module "Calendar" remplace l'ancien "Agenda".
 
 ## 1. Modele de donnees (contract-first)
 

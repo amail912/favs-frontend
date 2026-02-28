@@ -1,4 +1,4 @@
-module Agenda.Drag
+module Calendar.Drag
   ( DragState
   , DragAction(..)
   , DragCtx
@@ -14,9 +14,9 @@ module Agenda.Drag
 
 import Prelude hiding (div)
 
-import Agenda.Commands (DragCommand(..), Command(..), tellCmd)
-import Agenda.Helpers (calendarItemContent, combineDateWithTime, durationMinutesBetween, pad2, shiftMinutes)
-import Agenda.Model (CalendarItem(..), ItemType(..))
+import Calendar.Commands (DragCommand(..), Command(..), tellCmd)
+import Calendar.Helpers (calendarItemContent, combineDateWithTime, durationMinutesBetween, pad2, shiftMinutes)
+import Calendar.Model (CalendarItem(..), ItemType(..))
 import Control.Alt ((<|>))
 import Control.Monad.State.Trans (StateT, get, modify_)
 import Control.Monad.Writer.Trans (WriterT)

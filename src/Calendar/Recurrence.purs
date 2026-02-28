@@ -1,12 +1,12 @@
-module Agenda.Recurrence
+module Calendar.Recurrence
   ( generateOccurrencesForMonth
   , nextOccurrence
   ) where
 
 import Prelude
 
-import Agenda.Helpers (addDays, addMonths, formatDate, parseDateTimeLocal)
-import Agenda.Model (RecurrenceRule(..))
+import Calendar.Helpers (addDays, addMonths, formatDate, parseDateTimeLocal)
+import Calendar.Model (RecurrenceRule(..))
 import Data.Array (elem, filter)
 import Data.Date (month, year)
 import Data.DateTime (DateTime, date)

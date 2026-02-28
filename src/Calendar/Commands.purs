@@ -1,4 +1,4 @@
-module Agenda.Commands
+module Calendar.Commands
   ( Command(..)
   , SyncCommand(..)
   , DragCommand(..)
@@ -10,7 +10,7 @@ module Agenda.Commands
 
 import Prelude
 
-import Agenda.Model (CalendarItem, IntentionDraft)
+import Calendar.Model (CalendarItem, IntentionDraft)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Writer.Class (tell)
 import Control.Monad.Writer.Trans (WriterT)

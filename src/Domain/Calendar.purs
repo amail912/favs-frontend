@@ -1,6 +1,6 @@
-module Domain.Agenda (module Model, module Imports, module Exports) where
+module Domain.Calendar (module Model, module Imports, module Exports) where
 
-import Agenda.Model
+import Calendar.Model
   ( AgendaView(..)
   , CalendarItem(..)
   , CalendarItemContent
@@ -29,8 +29,8 @@ import Agenda.Model
   , defaultNotificationDefaults
   , emptyTemplateDraft
   ) as Model
-import Agenda.Imports (parseCsvImport, parseIcsImport) as Imports
-import Agenda.Exports
+import Calendar.Imports (parseCsvImport, parseIcsImport) as Imports
+import Calendar.Exports
   ( exportFormatValue
   , exportItemsToCsv
   , exportItemsToIcs

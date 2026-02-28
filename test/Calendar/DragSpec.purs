@@ -2,7 +2,7 @@ module Test.Calendar.DragSpec (spec) where
 
 import Prelude
 
-import Agenda.Drag (computeDropMinuteIndex, indexToTimeLabel)
+import Calendar.Drag (computeDropMinuteIndex, indexToTimeLabel)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
 

@@ -1,4 +1,4 @@
-module Agenda.Helpers
+module Calendar.Helpers
   ( isDateTimeLocal
   , parseDateTimeLocal
   , parseDateLocal
@@ -36,7 +36,7 @@ module Agenda.Helpers
 
 import Prelude
 
-import Agenda.Model (CalendarItem(..), CalendarItemContent, ItemStatus(..), ItemType(..), SortMode(..))
+import Calendar.Model (CalendarItem(..), CalendarItemContent, ItemStatus(..), ItemType(..), SortMode(..))
 import Data.Array (elem, mapMaybe, sortBy)
 import Data.Date (Date, canonicalDate, day, exactDate, month, year)
 import Data.DateTime (DateTime(..), adjust, date, diff, time)

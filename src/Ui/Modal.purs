@@ -4,7 +4,7 @@ module Ui.Modal
 
 import Prelude hiding (div)
 
-import Agenda.Display (ViewAction(..))
+import Calendar.Display (ViewAction(..))
 import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
 import Halogen.HTML (HTML, button, div, text)
