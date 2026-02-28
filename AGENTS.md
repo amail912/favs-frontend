@@ -17,6 +17,13 @@ Frontend pour gérer le quotidien avec un focus sur la gestion d’un calendrier
 - Utilise la compilation comme une grande aide au développement. PureScript est un language fortement typé qui permet d'avoir beaucoup de garanties avec un système de types adapté.
 - On veillera à ne laisser aucun warning de compilation.
 - Après chaque modification et sans me demander, run les tests.
+- La logique et les vues de chaque domaine restent dans leur module de domaine, sans fichier centralisateur.
+- Les helpers partagés sont uniquement techniques, pas métier.
+- Les fonctions `render*` des domaines émettent leurs propres actions de domaine ; la conversion vers l’action page se fait au niveau de l’appelant.
+- Les fonctions `render*` appelées dans la page passent par un helper local portant le même nom, qui encapsule le `map`.
+- Les imports des rendus de domaine sont faits en qualifié avec un alias court mais signifiant.
+- Préférer la destructuration de premier niveau dans la signature des fonctions, et éviter les alias inutiles.
+- Éviter les suffixes inutiles dans les noms de lenses.
 
 ## Principes de design
 - Ergonomie maximale.
@@ -36,7 +43,7 @@ Frontend pour gérer le quotidien avec un focus sur la gestion d’un calendrier
 - Pages principales:
   - `src/Pages/Notes.purs`
   - `src/Pages/Checklists.purs`
-  - `src/Pages/Agenda.purs` (agenda riche, logique métier + UI).
+  - `src/Pages/Calendar.purs` (agenda riche, logique métier + UI).
 - Domaine/Modèles:
   - `src/Domain/*` (Notes, Checklists, Agenda)
   - `src/Agenda/Model.purs` (types métier agenda, templates, récurrence, notifications, exports).
