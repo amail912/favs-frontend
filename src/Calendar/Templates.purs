@@ -163,35 +163,35 @@ renderTemplatesPanel
   -> Maybe String
   -> HTML w TemplateAction
 renderTemplatesPanel templates draft editingId =
-  section [ class_ "agenda-templates" ]
+  section [ class_ "calendar-templates" ]
     [ renderPanelHeader
-        "agenda-templates"
+        "calendar-templates"
         "Templates de taches"
         "Creez des templates reutilisables pour accelerer la saisie."
         []
-    , div [ class_ "agenda-templates-form" ]
+    , div [ class_ "calendar-templates-form" ]
         [ input
-            [ class_ "form-control agenda-input"
+            [ class_ "form-control calendar-input"
             , placeholder "Titre du template"
             , value draft.title
             , onValueChange TemplateTitleChangedAction
             ]
-        , div [ class_ "agenda-templates-row" ]
+        , div [ class_ "calendar-templates-row" ]
             [ input
-                [ class_ "form-control agenda-input"
+                [ class_ "form-control calendar-input"
                 , type_ InputNumber
                 , placeholder "Duree (minutes)"
                 , value draft.durationMinutes
                 , onValueChange TemplateDurationChangedAction
                 ]
             , input
-                [ class_ "form-control agenda-input"
+                [ class_ "form-control calendar-input"
                 , placeholder "Categorie (optionnelle)"
                 , value draft.category
                 , onValueChange TemplateCategoryChangedAction
                 ]
             ]
-        , div [ class_ "agenda-templates-actions" ]
+        , div [ class_ "calendar-templates-actions" ]
             ( [ button
                   [ class_ "btn btn-sm btn-primary"
                   , onClick (const TemplateSubmit)
@@ -214,18 +214,18 @@ renderTemplatesPanel templates draft editingId =
 renderTemplatesList :: forall w. Array TaskTemplate -> HTML w TemplateAction
 renderTemplatesList templates =
   if null templates then
-    div [ class_ "agenda-templates-empty" ] [ text "Aucun template pour l'instant." ]
+    div [ class_ "calendar-templates-empty" ] [ text "Aucun template pour l'instant." ]
   else
-    div [ class_ "agenda-templates-list" ] (map renderTemplateCard templates)
+    div [ class_ "calendar-templates-list" ] (map renderTemplateCard templates)
 
 renderTemplateCard :: forall w. TaskTemplate -> HTML w TemplateAction
 renderTemplateCard template =
-  div [ class_ "agenda-template-card" ]
-    [ div [ class_ "agenda-template-main" ]
-        [ div [ class_ "agenda-template-title" ] [ text template.title ]
-        , div [ class_ "agenda-template-summary" ] [ text (templateSummary template) ]
+  div [ class_ "calendar-template-card" ]
+    [ div [ class_ "calendar-template-main" ]
+        [ div [ class_ "calendar-template-title" ] [ text template.title ]
+        , div [ class_ "calendar-template-summary" ] [ text (templateSummary template) ]
         ]
-    , div [ class_ "agenda-template-actions" ]
+    , div [ class_ "calendar-template-actions" ]
         [ button [ class_ "btn btn-sm btn-outline-primary", onClick (const (TemplateUse template.id)) ] [ text "Utiliser" ]
         , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const (TemplateEdit template.id)) ] [ text "Editer" ]
         , button [ class_ "btn btn-sm btn-outline-danger", onClick (const (TemplateDelete template.id)) ] [ text "Supprimer" ]

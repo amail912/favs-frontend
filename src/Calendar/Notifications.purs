@@ -146,13 +146,13 @@ renderNotificationsPanel
 renderNotificationsPanel isOpen defaults overrides editor intentions =
   if null intentions then text ""
   else
-    section [ class_ "agenda-notifications" ]
+    section [ class_ "calendar-notifications" ]
       [ renderPanelHeader
-          "agenda-notifications"
+          "calendar-notifications"
           "Rappels des intentions non planifiees"
           "Les rappels par defaut s'appliquent aux intentions non planifiees."
           [ button
-              [ class_ $ "btn btn-sm agenda-notifications-toggle" <> if isOpen then " btn-outline-primary" else " btn-outline-secondary"
+              [ class_ $ "btn btn-sm calendar-notifications-toggle" <> if isOpen then " btn-outline-primary" else " btn-outline-secondary"
               , onClick (const NotificationTogglePanel)
               ]
               [ text $ if isOpen then "Masquer" else "Configurer" ]
@@ -170,32 +170,32 @@ renderNotificationsContent
   -> HTML w NotificationAction
 renderNotificationsContent defaults overrides editor intentions =
   if null intentions then
-    div [ class_ "agenda-modal-empty" ]
+    div [ class_ "calendar-modal-empty" ]
       [ text "Aucune intention non planifiee." ]
   else
-    div [ class_ "agenda-notifications-modal" ]
+    div [ class_ "calendar-notifications-modal" ]
       [ renderNotificationDefaults defaults
       , renderNotificationList defaults overrides editor intentions
       ]
 
 renderNotificationDefaults :: forall w. NotificationDefaults -> HTML w NotificationAction
 renderNotificationDefaults defaults =
-  div [ class_ "agenda-notifications-defaults" ]
-    [ div [ class_ "agenda-notifications-section-title" ] [ text "Rappels par defaut" ]
-    , div [ class_ "agenda-notifications-controls" ]
-        [ div [ class_ "agenda-notifications-control" ]
-            [ div [ class_ "agenda-notifications-label" ] [ text "Jour de debut" ]
+  div [ class_ "calendar-notifications-defaults" ]
+    [ div [ class_ "calendar-notifications-section-title" ] [ text "Rappels par defaut" ]
+    , div [ class_ "calendar-notifications-controls" ]
+        [ div [ class_ "calendar-notifications-control" ]
+            [ div [ class_ "calendar-notifications-label" ] [ text "Jour de debut" ]
             , input
-                [ class_ "form-control agenda-input"
+                [ class_ "form-control calendar-input"
                 , type_ InputTime
                 , value defaults.startDayTime
                 , onValueChange NotificationDefaultStartTimeChanged
                 ]
             ]
-        , div [ class_ "agenda-notifications-control" ]
-            [ div [ class_ "agenda-notifications-label" ] [ text "Avant fin (heures)" ]
+        , div [ class_ "calendar-notifications-control" ]
+            [ div [ class_ "calendar-notifications-label" ] [ text "Avant fin (heures)" ]
             , input
-                [ class_ "form-control agenda-input"
+                [ class_ "form-control calendar-input"
                 , type_ InputNumber
                 , value (show defaults.beforeEndHours)
                 , onValueChange NotificationDefaultBeforeEndChanged
@@ -212,7 +212,7 @@ renderNotificationList
   -> Array CalendarItem
   -> HTML w NotificationAction
 renderNotificationList defaults overrides editor intentions =
-  div [ class_ "agenda-notifications-list" ]
+  div [ class_ "calendar-notifications-list" ]
     (map (renderNotificationItem defaults overrides editor) intentions)
 
 renderNotificationItem
@@ -233,14 +233,14 @@ renderNotificationItem defaults overrides editor item =
           Nothing -> false
           Just _ -> true
       in
-        div [ class_ "agenda-notification-item" ]
-          [ div [ class_ "agenda-notification-header" ]
+        div [ class_ "calendar-notification-item" ]
+          [ div [ class_ "calendar-notification-header" ]
               [ div []
-                  [ div [ class_ "agenda-notification-title" ] [ text content.title ]
-                  , div [ class_ "agenda-notification-window" ] [ text $ content.windowStart <> " → " <> content.windowEnd ]
+                  [ div [ class_ "calendar-notification-title" ] [ text content.title ]
+                  , div [ class_ "calendar-notification-window" ] [ text $ content.windowStart <> " → " <> content.windowEnd ]
                   ]
-              , div [ class_ "agenda-notification-actions" ]
-                  [ div [ class_ $ "agenda-notification-badge" <> if hasOverride then " agenda-notification-badge--custom" else "" ]
+              , div [ class_ "calendar-notification-actions" ]
+                  [ div [ class_ $ "calendar-notification-badge" <> if hasOverride then " calendar-notification-badge--custom" else "" ]
                       [ text $ if hasOverride then "Personnalise" else "Par defaut" ]
                   , button
                       [ class_ "btn btn-sm btn-outline-secondary"
@@ -256,34 +256,34 @@ renderNotificationItem defaults overrides editor item =
 
 renderReminderTimes :: forall w action. Array ReminderTime -> HTML w action
 renderReminderTimes reminders =
-  div [ class_ "agenda-notification-times" ]
-    (map (\reminder -> div [ class_ "agenda-notification-time" ] [ text $ reminder.label <> ": " <> reminder.at ]) reminders)
+  div [ class_ "calendar-notification-times" ]
+    (map (\reminder -> div [ class_ "calendar-notification-time" ] [ text $ reminder.label <> ": " <> reminder.at ]) reminders)
 
 renderNotificationEditor :: forall w. String -> NotificationEditor -> HTML w NotificationAction
 renderNotificationEditor itemId editor =
-  div [ class_ "agenda-notification-editor" ]
-    [ div [ class_ "agenda-notifications-section-title" ] [ text "Surcharge de rappel" ]
-    , div [ class_ "agenda-notifications-controls" ]
-        [ div [ class_ "agenda-notifications-control" ]
-            [ div [ class_ "agenda-notifications-label" ] [ text "Jour de debut" ]
+  div [ class_ "calendar-notification-editor" ]
+    [ div [ class_ "calendar-notifications-section-title" ] [ text "Surcharge de rappel" ]
+    , div [ class_ "calendar-notifications-controls" ]
+        [ div [ class_ "calendar-notifications-control" ]
+            [ div [ class_ "calendar-notifications-label" ] [ text "Jour de debut" ]
             , input
-                [ class_ "form-control agenda-input"
+                [ class_ "form-control calendar-input"
                 , type_ InputTime
                 , value editor.startTime
                 , onValueChange NotificationStartTimeChanged
                 ]
             ]
-        , div [ class_ "agenda-notifications-control" ]
-            [ div [ class_ "agenda-notifications-label" ] [ text "Avant fin (heures)" ]
+        , div [ class_ "calendar-notifications-control" ]
+            [ div [ class_ "calendar-notifications-label" ] [ text "Avant fin (heures)" ]
             , input
-                [ class_ "form-control agenda-input"
+                [ class_ "form-control calendar-input"
                 , type_ InputNumber
                 , value editor.beforeEndRaw
                 , onValueChange NotificationBeforeEndChanged
                 ]
             ]
         ]
-    , div [ class_ "agenda-notification-editor-actions" ]
+    , div [ class_ "calendar-notification-editor-actions" ]
         [ button [ class_ "btn btn-sm btn-success", onClick (const NotificationSaveOverride) ] [ text "Enregistrer" ]
         , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const NotificationCancelOverride) ] [ text "Annuler" ]
         , button [ class_ "btn btn-sm btn-outline-danger", onClick (const (NotificationResetOverride itemId)) ] [ text "Reinitialiser" ]

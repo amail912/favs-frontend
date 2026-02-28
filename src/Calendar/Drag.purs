@@ -220,13 +220,13 @@ renderDropIndicator idx =
   let
     totalMinutes = indexToMinutes idx
     label = indexToTimeLabel idx
-    inlineStyle = "top: calc(" <> show totalMinutes <> " * var(--agenda-minute-height));"
+    inlineStyle = "top: calc(" <> show totalMinutes <> " * var(--calendar-minute-height));"
   in
     div
-      [ class_ "agenda-calendar-drop-indicator"
+      [ class_ "calendar-calendar-drop-indicator"
       , style inlineStyle
       ]
-      [ div [ class_ "agenda-calendar-drop-label" ] [ text label ] ]
+      [ div [ class_ "calendar-calendar-drop-label" ] [ text label ] ]
 
 
 computeDropMinuteIndex :: Int -> Int -> Int

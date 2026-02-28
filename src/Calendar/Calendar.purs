@@ -237,17 +237,17 @@ renderForm
   -> Maybe ValidationError
   -> HTML w CalendarUiAction
 renderForm draft validationError =
-  section [ class_ "agenda-form" ]
+  section [ class_ "calendar-form" ]
     [ input
-        [ class_ "form-control agenda-input"
+        [ class_ "form-control calendar-input"
         , placeholder "Titre de l'intention"
         , onValueChange (CalendarUiCalendar <<< CalendarDraftTitleChanged)
         , onKeyDown (\ev -> CalendarUiSync (SyncDraftTitleKeyDown (KE.key ev)))
         , value draft.title
         ]
-    , div [ class_ "agenda-time-row" ]
+    , div [ class_ "calendar-time-row" ]
         [ input
-            [ class_ "form-control agenda-input"
+            [ class_ "form-control calendar-input"
             , type_ InputDatetimeLocal
             , attr (AttrName "lang") "fr"
             , placeholder "Debut"
@@ -255,7 +255,7 @@ renderForm draft validationError =
             , value draft.windowStart
             ]
         , input
-            [ class_ "form-control agenda-input"
+            [ class_ "form-control calendar-input"
             , type_ InputDatetimeLocal
             , attr (AttrName "lang") "fr"
             , placeholder "Fin"
@@ -264,31 +264,31 @@ renderForm draft validationError =
             ]
         ]
     , input
-        [ class_ "form-control agenda-input"
+        [ class_ "form-control calendar-input"
         , placeholder "Categorie (optionnelle)"
         , onValueChange (CalendarUiCalendar <<< CalendarDraftCategoryChanged)
         , value draft.category
         ]
-    , div [ class_ "agenda-datetime-row" ]
+    , div [ class_ "calendar-datetime-row" ]
         [ button
-            [ class_ "btn btn-outline-secondary agenda-datetime-button"
+            [ class_ "btn btn-outline-secondary calendar-datetime-button"
             , onClick (const (CalendarUiView (ViewOpenModal ModalDateTime)))
             ]
             [ text "Dates & heures" ]
-        , div [ class_ "agenda-datetime-summary" ]
+        , div [ class_ "calendar-datetime-summary" ]
             [ text $ summarizeDateRange draft.windowStart draft.windowEnd ]
         ]
     , maybe (text "") renderValidationError validationError
-    , button [ class_ "btn btn-primary agenda-submit", onClick (const (CalendarUiSync SyncSubmitIntention)) ] [ text "Creer l'intention" ]
+    , button [ class_ "btn btn-primary calendar-submit", onClick (const (CalendarUiSync SyncSubmitIntention)) ] [ text "Creer l'intention" ]
     ]
 
 renderDateTimeContent :: forall w. IntentionDraft -> HTML w CalendarUiAction
 renderDateTimeContent draft =
-  div [ class_ "agenda-modal-stack" ]
-    [ div [ class_ "agenda-modal-field" ]
-        [ div [ class_ "agenda-notifications-label" ] [ text "Debut" ]
+  div [ class_ "calendar-modal-stack" ]
+    [ div [ class_ "calendar-modal-field" ]
+        [ div [ class_ "calendar-notifications-label" ] [ text "Debut" ]
         , input
-            [ class_ "form-control agenda-input"
+            [ class_ "form-control calendar-input"
             , type_ InputDatetimeLocal
             , attr (AttrName "lang") "fr"
             , placeholder "Debut"
@@ -296,10 +296,10 @@ renderDateTimeContent draft =
             , value draft.windowStart
             ]
         ]
-    , div [ class_ "agenda-modal-field" ]
-        [ div [ class_ "agenda-notifications-label" ] [ text "Fin" ]
+    , div [ class_ "calendar-modal-field" ]
+        [ div [ class_ "calendar-notifications-label" ] [ text "Fin" ]
         , input
-            [ class_ "form-control agenda-input"
+            [ class_ "form-control calendar-input"
             , type_ InputDatetimeLocal
             , attr (AttrName "lang") "fr"
             , placeholder "Fin"
@@ -337,7 +337,7 @@ formatDateFr rawDate =
 
 renderValidationError :: forall w action. ValidationError -> HTML w action
 renderValidationError err =
-  div [ class_ "agenda-error" ]
+  div [ class_ "calendar-error" ]
     [ text $ case err of
         TitleEmpty -> "Le titre est obligatoire."
         WindowStartInvalid -> "La date de debut est invalide."
@@ -347,10 +347,10 @@ renderValidationError err =
 
 renderSortPicker :: forall w. SortMode -> HTML w CalendarUiAction
 renderSortPicker sortMode =
-  div [ class_ "agenda-sort" ]
+  div [ class_ "calendar-sort" ]
     [ text "Trier:"
     , select
-        [ class_ "form-select agenda-sort-select"
+        [ class_ "form-select calendar-sort-select"
         , onValueChange (CalendarUiCalendar <<< CalendarSortChanged)
         , value (sortModeValue sortMode)
         ]
@@ -365,9 +365,9 @@ renderConflictActions :: forall w. Array (Array String) -> HTML w CalendarUiActi
 renderConflictActions conflictGroups =
   if null conflictGroups then text ""
   else
-    div [ class_ "agenda-conflict-actions" ]
+    div [ class_ "calendar-conflict-actions" ]
       [ button
-          [ class_ "btn btn-sm btn-outline-danger agenda-conflict-button"
+          [ class_ "btn btn-sm btn-outline-danger calendar-conflict-button"
           , onClick (const (CalendarUiCalendar (CalendarOpenConflictResolution (headOrEmpty conflictGroups))))
           ]
           [ text "Resoudre un conflit" ]
@@ -380,11 +380,11 @@ renderConflictActions conflictGroups =
 
 renderConflictResolution :: forall w. Array CalendarItem -> ConflictResolution -> HTML w CalendarUiAction
 renderConflictResolution items resolution =
-  div [ class_ "agenda-conflict-panel" ]
-    [ div [ class_ "agenda-conflict-title" ] [ text "Resolution de conflit" ]
-    , div [ class_ "agenda-conflict-subtitle" ] [ text "Choisissez une strategie puis confirmez." ]
-    , ul [ class_ "agenda-conflict-list" ] (map (renderConflictItem items) resolution.groupIds)
-    , div [ class_ "agenda-conflict-strategies" ]
+  div [ class_ "calendar-conflict-panel" ]
+    [ div [ class_ "calendar-conflict-title" ] [ text "Resolution de conflit" ]
+    , div [ class_ "calendar-conflict-subtitle" ] [ text "Choisissez une strategie puis confirmez." ]
+    , ul [ class_ "calendar-conflict-list" ] (map (renderConflictItem items) resolution.groupIds)
+    , div [ class_ "calendar-conflict-strategies" ]
         [ button
             [ class_ "btn btn-sm btn-outline-primary"
             , onClick (const (CalendarUiCalendar (CalendarChooseResolutionStrategy StrategyShift30)))
@@ -407,9 +407,9 @@ renderConflictItem items itemId =
       let
         content = calendarItemContent item
       in
-        li [ class_ "agenda-conflict-item" ]
-          [ div [ class_ "agenda-conflict-item-title" ] [ text content.title ]
-          , div [ class_ "agenda-conflict-item-window" ]
+        li [ class_ "calendar-conflict-item" ]
+          [ div [ class_ "calendar-conflict-item-title" ] [ text content.title ]
+          , div [ class_ "calendar-conflict-item-window" ]
               [ text $ content.windowStart <> " → " <> content.windowEnd ]
           ]
     Nothing -> text ""
@@ -422,10 +422,10 @@ renderConfirmation pending =
   case pending of
     Nothing -> text ""
     Just strategy ->
-      div [ class_ "agenda-conflict-confirmation" ]
-        [ div [ class_ "agenda-conflict-confirmation-text" ]
+      div [ class_ "calendar-conflict-confirmation" ]
+        [ div [ class_ "calendar-conflict-confirmation-text" ]
             [ text $ "Confirmer la strategie: " <> show strategy <> " ?" ]
-        , div [ class_ "agenda-conflict-confirmation-actions" ]
+        , div [ class_ "calendar-conflict-confirmation-actions" ]
             [ button [ class_ "btn btn-sm btn-danger", onClick (const (CalendarUiCalendar CalendarConfirmResolution)) ] [ text "Confirmer" ]
             , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const (CalendarUiCalendar CalendarCancelResolution)) ] [ text "Annuler" ]
             ]
@@ -480,24 +480,24 @@ renderDayCalendar focusDate conflictIds items draggingId dragHoverIndex =
   in
     if null itemsForDate then emptyAgenda
     else
-      div [ class_ "agenda-calendar" ]
-        [ div [ class_ "agenda-calendar-header" ]
-            [ div [ class_ "agenda-calendar-title" ] [ text focusDate ]
-            , div [ class_ "agenda-calendar-count" ] [ text $ show (length itemsForDate) <> " items" ]
+      div [ class_ "calendar-calendar" ]
+        [ div [ class_ "calendar-calendar-header" ]
+            [ div [ class_ "calendar-calendar-title" ] [ text focusDate ]
+            , div [ class_ "calendar-calendar-count" ] [ text $ show (length itemsForDate) <> " items" ]
             ]
-        , div [ class_ "agenda-calendar-body" ]
-            [ div [ class_ "agenda-calendar-hours" ]
+        , div [ class_ "calendar-calendar-body" ]
+            [ div [ class_ "calendar-calendar-hours" ]
                 (map renderHourLabel (enumFromTo 0 23) <> [ renderHourLabelEnd ])
             , div
-                [ class_ "agenda-calendar-grid"
+                [ class_ "calendar-calendar-grid"
                 , onDragOver (\ev -> CalendarUiDrag (DragOverCalendar ev))
                 , onDrop (\ev -> CalendarUiDrag (DropOnCalendar ev))
                 ]
-                [ div [ class_ "agenda-calendar-lines" ]
+                [ div [ class_ "calendar-calendar-lines" ]
                     (map renderHourLine (enumFromTo 0 23))
                 , maybe (text "") renderDropIndicator dragHoverIndex
                 , div
-                    [ class_ $ "agenda-calendar-items" <> if draggingId == Nothing then "" else " agenda-calendar-items--dragging" ]
+                    [ class_ $ "calendar-calendar-items" <> if draggingId == Nothing then "" else " calendar-calendar-items--dragging" ]
                     (map (renderTimelineItem conflictIds) layout)
                 ]
             ]
@@ -505,16 +505,16 @@ renderDayCalendar focusDate conflictIds items draggingId dragHoverIndex =
 
 renderHourLabel :: forall w action. Int -> HTML w action
 renderHourLabel h =
-  div [ class_ "agenda-calendar-hour" ] [ text $ pad2 h <> ":00" ]
+  div [ class_ "calendar-calendar-hour" ] [ text $ pad2 h <> ":00" ]
 
 renderHourLabelEnd :: forall w action. HTML w action
 renderHourLabelEnd =
-  div [ class_ "agenda-calendar-hour agenda-calendar-hour--end" ] [ text "24:00" ]
+  div [ class_ "calendar-calendar-hour calendar-calendar-hour--end" ] [ text "24:00" ]
 
 renderHourLine :: forall w action. Int -> HTML w action
 renderHourLine _ =
   div
-    [ class_ "agenda-calendar-line" ]
+    [ class_ "calendar-calendar-line" ]
     []
 
 renderTimelineItem
@@ -527,9 +527,9 @@ renderTimelineItem conflictIds layout =
     content = calendarItemContent layout.item
     typeClass =
       case content.itemType of
-        ScheduledBlock -> " agenda-calendar-item--scheduled"
-        Intention -> " agenda-calendar-item--intention"
-    conflictClass = if isConflict conflictIds layout.item then " agenda-calendar-item--conflict" else ""
+        ScheduledBlock -> " calendar-calendar-item--scheduled"
+        Intention -> " calendar-calendar-item--intention"
+    conflictClass = if isConflict conflictIds layout.item then " calendar-calendar-item--conflict" else ""
     inlineStyle =
       " --start:" <> show layout.startMin <> ";"
         <> " --duration:"
@@ -544,17 +544,17 @@ renderTimelineItem conflictIds layout =
     dragProps = dragCalendarHandlers CalendarUiDrag layout.item
   in
     div
-      ( [ class_ $ "agenda-calendar-item" <> typeClass <> conflictClass
+      ( [ class_ $ "calendar-calendar-item" <> typeClass <> conflictClass
         , style inlineStyle
         ] <> dragProps
       )
-      [ div [ class_ "agenda-calendar-meta" ]
-          [ div [ class_ "agenda-calendar-item-time" ]
+      [ div [ class_ "calendar-calendar-meta" ]
+          [ div [ class_ "calendar-calendar-item-time" ]
               [ text $ timeLabel content.windowStart <> " → " <> timeLabel content.windowEnd ]
-          , div [ class_ "agenda-calendar-item-title" ] [ text content.title ]
-          , div [ class_ "agenda-calendar-footer" ]
+          , div [ class_ "calendar-calendar-item-title" ] [ text content.title ]
+          , div [ class_ "calendar-calendar-footer" ]
               [ renderCategory content.category
-              , div [ class_ "agenda-calendar-actions" ]
+              , div [ class_ "calendar-calendar-actions" ]
                   [ renderValidationAction layout.item content
                   , renderPlanifyAction layout.item content
                   ]
@@ -641,7 +641,7 @@ renderRangeView
 renderRangeView label dates conflictIds items =
   if null dates then emptyAgendaRange label
   else
-    div [ class_ "agenda-range" ]
+    div [ class_ "calendar-range" ]
       (map (renderDateSection label conflictIds items) dates)
 
 renderDateSection
@@ -656,15 +656,15 @@ renderDateSection _ conflictIds items dateStr =
     itemsForDate = filter (isItemOnDate dateStr) items
     sorted = sortItems SortByTime conflictIds itemsForDate
   in
-    section [ class_ "agenda-date-section" ]
-      [ div [ class_ "agenda-date-title" ] [ text dateStr ]
-      , if null sorted then div [ class_ "agenda-date-empty" ] [ text "Aucun item" ]
+    section [ class_ "calendar-date-section" ]
+      [ div [ class_ "calendar-date-title" ] [ text dateStr ]
+      , if null sorted then div [ class_ "calendar-date-empty" ] [ text "Aucun item" ]
         else agendaList conflictIds sorted
       ]
 
 emptyAgendaRange :: forall w action. String -> HTML w action
 emptyAgendaRange label =
-  div [ class_ "row entity-empty agenda-empty" ]
+  div [ class_ "row entity-empty calendar-empty" ]
     [ div [ class_ "entity-empty-title" ] [ text $ "Aucun item sur la " <> label ]
     , div [ class_ "entity-empty-subtitle" ] [ text "Ajoutez une intention pour demarrer." ]
     ]
@@ -675,7 +675,7 @@ agendaList
   -> Array CalendarItem
   -> HTML w CalendarUiAction
 agendaList conflictIds items =
-  ul [ class_ "list-group entity-list agenda-list" ] (mapWithIndex (renderItem conflictIds) items)
+  ul [ class_ "list-group entity-list calendar-list" ] (mapWithIndex (renderItem conflictIds) items)
 
 renderItem
   :: forall w
@@ -686,14 +686,14 @@ renderItem
 renderItem conflictIds _ item =
   let
     content = calendarItemContent item
-    conflictClass = if isConflict conflictIds item then " agenda-card--conflict" else ""
+    conflictClass = if isConflict conflictIds item then " calendar-card--conflict" else ""
     dragProps = dragHandlers CalendarUiDrag item
   in
-    li ([ class_ $ "row list-group-item entity-card agenda-card" <> conflictClass ] <> dragProps)
+    li ([ class_ $ "row list-group-item entity-card calendar-card" <> conflictClass ] <> dragProps)
       [ div [ class_ "col entity-card-body" ]
-          [ div [ class_ "agenda-card-time" ] [ text (timeLabel content.windowStart) ]
-          , div [ class_ "agenda-card-title" ] [ text content.title ]
-          , div [ class_ "agenda-card-window" ]
+          [ div [ class_ "calendar-card-time" ] [ text (timeLabel content.windowStart) ]
+          , div [ class_ "calendar-card-title" ] [ text content.title ]
+          , div [ class_ "calendar-card-window" ]
               [ text $ content.windowStart <> " → " <> content.windowEnd ]
           , renderCategory content.category
           , renderValidationAction item content
@@ -707,7 +707,7 @@ renderPlanifyAction
   -> CalendarItemContent
   -> HTML w CalendarUiAction
 renderPlanifyAction (ServerCalendarItem { id, content }) _ | content.itemType == Intention =
-  button [ class_ "btn btn-sm btn-outline-primary agenda-planify", onClick (const (CalendarUiSync (SyncPlanifyFrom id content))) ]
+  button [ class_ "btn btn-sm btn-outline-primary calendar-planify", onClick (const (CalendarUiSync (SyncPlanifyFrom id content))) ]
     [ text "Planifier" ]
 renderPlanifyAction _ _ = text ""
 
@@ -717,7 +717,7 @@ renderValidationAction
   -> CalendarItemContent
   -> HTML w CalendarUiAction
 renderValidationAction (ServerCalendarItem { id, content }) _ | content.status /= Fait =
-  button [ class_ "btn btn-sm btn-outline-success agenda-validate", onClick (const (CalendarUiView (ViewOpenValidation id content))) ]
+  button [ class_ "btn btn-sm btn-outline-success calendar-validate", onClick (const (CalendarUiView (ViewOpenValidation id content))) ]
     [ text "Valider" ]
 renderValidationAction _ _ = text ""
 
@@ -725,14 +725,14 @@ renderCategory :: forall w action. Maybe String -> HTML w action
 renderCategory category =
   case category of
     Nothing -> text ""
-    Just value -> div [ class_ "agenda-card-category" ] [ text value ]
+    Just value -> div [ class_ "calendar-card-category" ] [ text value ]
 
 emptyAgenda :: forall w action. HTML w action
 emptyAgenda =
-  div [ class_ "row entity-empty agenda-empty" ]
+  div [ class_ "row entity-empty calendar-empty" ]
     [ div [ class_ "entity-empty-title" ] [ text "Aucune intention aujourd'hui" ]
     , div [ class_ "entity-empty-subtitle" ] [ text "Ajoutez une intention pour demarrer votre journee." ]
-    , div [ class_ "agenda-empty-cta" ]
+    , div [ class_ "calendar-empty-cta" ]
         [ span [ class_ "badge rounded-pill text-bg-primary" ] [ text "Astuce" ]
         , span [ class_ "text-muted" ] [ text "Commencez par un titre et appuyez sur Entrée." ]
         ]

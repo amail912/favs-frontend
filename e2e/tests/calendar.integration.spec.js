@@ -43,8 +43,8 @@ test("calendar integration: create intention then validate", async ({ authentica
   const titles = Array.isArray(listBody) ? listBody.map(item => item.titre || "") : [];
   expect(titles).toContain(title);
 
-  const row = page.locator(".agenda-calendar-item", {
-    has: page.locator(".agenda-calendar-item-title", { hasText: title })
+  const row = page.locator(".calendar-calendar-item", {
+    has: page.locator(".calendar-calendar-item-title", { hasText: title })
   }).first();
 
   await expect(row).toBeVisible();
@@ -52,7 +52,7 @@ test("calendar integration: create intention then validate", async ({ authentica
   await expect(row.getByRole("button", { name: "Planifier" })).toBeVisible();
 
   await row.getByRole("button", { name: "Valider" }).click();
-  const validationPanel = page.locator(".agenda-validation-panel");
+  const validationPanel = page.locator(".calendar-validation-panel");
   await expect(validationPanel).toBeVisible();
 
   await validationPanel.getByPlaceholder("Duree reelle (minutes)").fill("30");
