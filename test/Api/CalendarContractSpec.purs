@@ -2,7 +2,7 @@ module Test.Api.CalendarContractSpec (spec) where
 
 import Prelude
 
-import Api.AgendaContract (Method(..), updateMethod, updatePath)
+import Api.CalendarContract (Method(..), updateMethod, updatePath)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
 

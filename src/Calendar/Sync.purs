@@ -1,4 +1,4 @@
-module Agenda.Sync
+module Calendar.Sync
   ( SyncState
   , SyncAction(..)
   , syncInitialState
@@ -15,10 +15,10 @@ module Agenda.Sync
 
 import Prelude hiding (div)
 
-import Agenda.Commands (SyncCommand(..), Command(..), tellCmd)
-import Agenda.Helpers (calendarItemContent)
-import Agenda.Model (CalendarItem(..), CalendarItemContent, ItemStatus(..), ItemType(..))
-import Agenda.Offline (applyOfflineMutation)
+import Calendar.Commands (SyncCommand(..), Command(..), tellCmd)
+import Calendar.Helpers (calendarItemContent)
+import Calendar.Model (CalendarItem(..), CalendarItemContent, ItemStatus(..), ItemType(..))
+import Calendar.Offline (applyOfflineMutation)
 import Control.Monad.State.Trans (StateT, get, modify_)
 import Control.Monad.Writer.Trans (WriterT)
 import Data.Array (find, mapMaybe, null)

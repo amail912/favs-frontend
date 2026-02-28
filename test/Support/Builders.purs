@@ -1,13 +1,13 @@
 module Test.Support.Builders
-  ( agendaContent
-  , serverAgendaItem
+  ( calendarContent
+  , serverCalendarItem
   ) where
 
-import Agenda.Model (CalendarItem(..), CalendarItemContent, ItemStatus(..), ItemType)
+import Calendar.Model (CalendarItem(..), CalendarItemContent, ItemStatus(..), ItemType)
 import Data.Maybe (Maybe(..))
 
-agendaContent :: ItemType -> String -> String -> String -> CalendarItemContent
-agendaContent itemType title windowStart windowEnd =
+calendarContent :: ItemType -> String -> String -> String -> CalendarItemContent
+calendarContent itemType title windowStart windowEnd =
   { itemType
   , title
   , windowStart
@@ -20,6 +20,6 @@ agendaContent itemType title windowStart windowEnd =
   , recurrenceExceptionDates: []
   }
 
-serverAgendaItem :: String -> CalendarItemContent -> CalendarItem
-serverAgendaItem id content =
+serverCalendarItem :: String -> CalendarItemContent -> CalendarItem
+serverCalendarItem id content =
   ServerCalendarItem { id, content }

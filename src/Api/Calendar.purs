@@ -1,4 +1,4 @@
-module Api.Agenda
+module Api.Calendar
   ( getItemsResponse
   , createItemResponse
   , updateItemResponse
@@ -11,11 +11,11 @@ import Affjax.ResponseFormat (json)
 import Affjax.Web (post)
 import Affjax.Web (get) as Affjax
 import Api.Common (JsonResponse, jsonBody, jsonBodyFromJson)
-import Api.AgendaContract (createPath, listPath, updatePath, validatePath)
+import Api.CalendarContract (createPath, listPath, updatePath, validatePath)
 import Data.Argonaut.Core (jsonEmptyObject)
 import Data.Argonaut.Encode ((:=), (~>))
 import Effect.Aff (Aff)
-import Agenda.Model (CalendarItem)
+import Calendar.Model (CalendarItem)
 
 getItemsResponse :: Aff JsonResponse
 getItemsResponse = Affjax.get json listPath

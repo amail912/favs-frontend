@@ -46,8 +46,8 @@ Frontend pour gérer le quotidien avec un focus sur la gestion d’un calendrier
   - `src/Pages/Checklists.purs`
   - `src/Pages/Calendar.purs` (agenda riche, logique métier + UI).
 - Domaine/Modèles:
-  - `src/Domain/*` (Notes, Checklists, Agenda)
-  - `src/Agenda/Model.purs` (types métier agenda, templates, récurrence, notifications, exports).
+  - `src/Domain/*` (Notes, Checklists, Calendar)
+  - `src/Calendar/Model.purs` (types métier calendar, templates, récurrence, notifications, exports).
 - API:
   - `src/Api/*` + `src/Api/*Contract.purs`.
   - Notes: `/api/note`
@@ -74,31 +74,31 @@ Flux data Notes/Checklists:
 2. Création/mise à jour via `POST` ou `PUT` sur `/api/note` ou `/api/checklist` selon type.
 3. Suppression via `DELETE /api/note/:id` ou `/api/checklist/:id`.
 
-Flux data Agenda:
+Flux data Calendar:
 1. Chargement via `GET /api/v1/calendar-items`.
 2. Création via `POST /api/v1/calendar-items`.
 3. Mise à jour via `POST /api/v1/calendar-items` (contrat actuel: update POST même endpoint).
 4. Validation via `POST /api/v1/calendar-items/:id/validate` avec `duree_reelle_minutes`.
 
-Flux sync offline (agenda):
+Flux sync offline (calendar):
 1. App passe en mode offline (local) → mutations stockées localement (queue `pendingSync`).
 2. UI reflète immédiatement les mutations (optimistic UI).
 3. A la reconnexion, tentative d’envoi séquentielle vers l’API agenda.
 4. Si conflit serveur détecté → `syncConflict` est renseigné et l’UI demande un choix utilisateur.
 5. Après résolution manuelle, la version finale est envoyée puis `pendingSync` est purgée.
 
-## Agenda (contexte fonctionnel)
-Le module Agenda couvre:
+## Calendar (contexte fonctionnel)
+Le module Calendar couvre:
 - Intentions vs blocs planifiés, conflits visibles.
 - Drag-and-drop + timeline minute.
 - Récurrence + exceptions.
 - Templates de routines + instanciation.
 - Import/export CSV/ICS.
 - Mode offline + sync + résolution manuelle de conflits.
-Références de specs produit et user stories: `docs/specs/agenda-v1/`.
+Références de specs produit et user stories: `docs/specs/calendar-v1/`.
 
 ## Tests
-- Suite principale: `test/SpecSuite.purs` (Notes, Checklists, Agenda, UI helpers).
+- Suite principale: `test/SpecSuite.purs` (Notes, Checklists, Calendar, UI helpers).
 - E2E: `e2e/tests/*.spec.js` (navigation, lifecycle notes/checklists, agenda integration, signup feedback).
 - Support E2E: `e2e/support/auth-session.js` (signup/signin via `/api/signup` + `/api/signin`).
 

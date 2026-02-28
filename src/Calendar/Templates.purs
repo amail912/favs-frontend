@@ -1,4 +1,4 @@
-module Agenda.Templates
+module Calendar.Templates
   ( TemplateState
   , TemplateAction(..)
   , templateInitialState
@@ -14,9 +14,9 @@ module Agenda.Templates
 
 import Prelude hiding (div)
 
-import Agenda.Commands (TemplateCommand(..), Command(..), tellCmd)
-import Agenda.Helpers (durationMinutesBetween, formatDateTimeLocal, parsePositiveInt, shiftMinutes)
-import Agenda.Model
+import Calendar.Commands (TemplateCommand(..), Command(..), tellCmd)
+import Calendar.Helpers (durationMinutesBetween, formatDateTimeLocal, parsePositiveInt, shiftMinutes)
+import Calendar.Model
   ( IntentionDraft
   , RoutineInstance
   , RoutineInstanceStep

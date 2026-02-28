@@ -1,4 +1,4 @@
-module Agenda.Exports
+module Calendar.Exports
   ( exportFormatValue
   , parseExportFormat
   , parseExportItemType
@@ -10,7 +10,7 @@ module Agenda.Exports
 
 import Prelude
 
-import Agenda.Model (CalendarItem(..), CalendarItemContent, ExportFilter, ExportFormat(..), ItemStatus(..), ItemType(..))
+import Calendar.Model (CalendarItem(..), CalendarItemContent, ExportFilter, ExportFormat(..), ItemStatus(..), ItemType(..))
 import Data.Array (filter)
 import Data.Foldable (foldl)
 import Data.Maybe (Maybe(..), fromMaybe, maybe)

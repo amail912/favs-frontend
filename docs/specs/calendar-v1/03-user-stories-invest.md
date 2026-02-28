@@ -1,6 +1,6 @@
-# Agenda V1 - User stories INVEST priorisees
+# Calendar V1 - User stories INVEST priorisees
 
-Note: dans le code et l'UI, le module "Agenda" est desormais nomme "Calendar".
+Note: dans le code et l'UI, le module "Calendar" remplace l'ancien "Agenda".
 
 Priorisation par valeur metier: P0 (essentiel), P1 (forte valeur), P2 (valeur complementaire).
 

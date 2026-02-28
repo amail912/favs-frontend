@@ -1,4 +1,4 @@
-module Agenda.Offline
+module Calendar.Offline
   ( OfflineMutationResult
   , applyOfflineMutation
   , upsertPendingItem
@@ -6,7 +6,7 @@ module Agenda.Offline
 
 import Prelude
 
-import Agenda.Model (CalendarItem(..))
+import Calendar.Model (CalendarItem(..))
 import Data.Array (any)
 
 

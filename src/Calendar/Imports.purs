@@ -1,11 +1,11 @@
-module Agenda.Imports
+module Calendar.Imports
   ( parseCsvImport
   , parseIcsImport
   ) where
 
 import Prelude
 
-import Agenda.Model (CalendarItem(..), CsvImportResult, IcsImportError, IcsImportResult, ItemStatus(..), ItemType(..))
+import Calendar.Model (CalendarItem(..), CsvImportResult, IcsImportError, IcsImportResult, ItemStatus(..), ItemType(..))
 import Data.Array (elem, filter, findIndex, foldl, index, last, mapWithIndex, uncons)
 import Data.Either (Either(..))
 import Data.Foldable (all)

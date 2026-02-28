@@ -1,4 +1,4 @@
-module Agenda.Model
+module Calendar.Model
   ( CalendarItem(..)
   , CalendarItemContent
   , IntentionDraft

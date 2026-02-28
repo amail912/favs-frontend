@@ -1,4 +1,4 @@
-module Api.AgendaContract
+module Api.CalendarContract
   ( Method(..)
   , listPath
   , createPath

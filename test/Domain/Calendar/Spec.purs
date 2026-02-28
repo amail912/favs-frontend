@@ -2,16 +2,16 @@ module Test.Domain.Calendar.Spec (spec) where
 
 import Prelude
 
-import Agenda.Model (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), RecurrenceRule(..), RoutineTemplate, SortMode(..), StepDependency(..), ValidationError(..), defaultNotificationDefaults)
-import Agenda.Conflicts (detectConflictGroups, detectConflictIds)
-import Agenda.Calendar (toNewIntention, validateIntention)
-import Agenda.Exports (exportItemsToCsv, exportItemsToIcs, filterItemsForExport)
-import Agenda.Helpers (durationMinutesBetween, sortItems)
-import Agenda.Imports (parseCsvImport, parseIcsImport)
-import Agenda.Notifications (reminderTimesForIntention)
-import Agenda.Offline (applyOfflineMutation)
-import Agenda.Recurrence (generateOccurrencesForMonth)
-import Agenda.Templates (applyTemplateToDraft, instantiateRoutine, templateSummary, addTemplate, removeTemplate, updateTemplate)
+import Calendar.Model (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), RecurrenceRule(..), RoutineTemplate, SortMode(..), StepDependency(..), ValidationError(..), defaultNotificationDefaults)
+import Calendar.Conflicts (detectConflictGroups, detectConflictIds)
+import Calendar.Calendar (toNewIntention, validateIntention)
+import Calendar.Exports (exportItemsToCsv, exportItemsToIcs, filterItemsForExport)
+import Calendar.Helpers (durationMinutesBetween, sortItems)
+import Calendar.Imports (parseCsvImport, parseIcsImport)
+import Calendar.Notifications (reminderTimesForIntention)
+import Calendar.Offline (applyOfflineMutation)
+import Calendar.Recurrence (generateOccurrencesForMonth)
+import Calendar.Templates (applyTemplateToDraft, instantiateRoutine, templateSummary, addTemplate, removeTemplate, updateTemplate)
 import Data.Argonaut.Decode (decodeJson)
 import Data.Argonaut.Encode (encodeJson)
 import Data.Array (head, length)
@@ -21,7 +21,7 @@ import Data.String.Common as StringCommon
 import Data.String.Pattern (Pattern(..))
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (fail, shouldEqual)
-import Test.Support.Builders (agendaContent, serverAgendaItem)
+import Test.Support.Builders (calendarContent, serverCalendarItem)
 
 spec :: Spec Unit
 spec =
@@ -96,20 +96,20 @@ spec =
 
     it "flags conflicts between scheduled blocks" do
       let
-        itemA = serverAgendaItem "a" (agendaContent ScheduledBlock "A" "2026-02-19T09:00" "2026-02-19T10:00")
-        itemB = serverAgendaItem "b" (agendaContent ScheduledBlock "B" "2026-02-19T09:30" "2026-02-19T10:30")
+        itemA = serverCalendarItem "a" (calendarContent ScheduledBlock "A" "2026-02-19T09:00" "2026-02-19T10:00")
+        itemB = serverCalendarItem "b" (calendarContent ScheduledBlock "B" "2026-02-19T09:30" "2026-02-19T10:30")
       detectConflictIds [ itemA, itemB ] `shouldEqual` [ "a", "b" ]
 
     it "groups chained conflicts into a single group" do
       let
-        itemA = serverAgendaItem "a" (agendaContent ScheduledBlock "A" "2026-02-19T09:00" "2026-02-19T10:00")
-        itemB = serverAgendaItem "b" (agendaContent ScheduledBlock "B" "2026-02-19T09:30" "2026-02-19T10:30")
-        itemC = serverAgendaItem "c" (agendaContent ScheduledBlock "C" "2026-02-19T10:15" "2026-02-19T11:00")
+        itemA = serverCalendarItem "a" (calendarContent ScheduledBlock "A" "2026-02-19T09:00" "2026-02-19T10:00")
+        itemB = serverCalendarItem "b" (calendarContent ScheduledBlock "B" "2026-02-19T09:30" "2026-02-19T10:30")
+        itemC = serverCalendarItem "c" (calendarContent ScheduledBlock "C" "2026-02-19T10:15" "2026-02-19T11:00")
       detectConflictGroups [ itemA, itemB, itemC ] `shouldEqual` [ [ "a", "b", "c" ] ]
 
     it "queues items locally when offline" do
       let
-        item = NewCalendarItem { content: agendaContent Intention "Offline" "2026-02-19T09:00" "2026-02-19T10:00" }
+        item = NewCalendarItem { content: calendarContent Intention "Offline" "2026-02-19T09:00" "2026-02-19T10:00" }
         result = applyOfflineMutation true item [] []
       result.items `shouldEqual` [ item ]
       result.pending `shouldEqual` [ item ]
@@ -119,7 +119,7 @@ spec =
 
     it "computes default reminders for an intention" do
       let
-        content = agendaContent Intention "Notif" "2026-02-19T09:00" "2026-02-20T12:00"
+        content = calendarContent Intention "Notif" "2026-02-19T09:00" "2026-02-20T12:00"
         reminders = reminderTimesForIntention defaultNotificationDefaults Nothing content
       reminders `shouldEqual`
         [ { label: "Jour de debut", at: "2026-02-19T06:00" }
@@ -128,7 +128,7 @@ spec =
 
     it "computes overridden reminders for an intention" do
       let
-        content = agendaContent Intention "Notif" "2026-02-19T09:00" "2026-02-20T12:00"
+        content = calendarContent Intention "Notif" "2026-02-19T09:00" "2026-02-20T12:00"
         override =
           Just
             { itemId: "x"
@@ -233,8 +233,8 @@ spec =
 
     it "filters items for export" do
       let
-        itemA = serverAgendaItem "a" (agendaContent Intention "A" "2026-02-19T09:00" "2026-02-19T10:00")
-        itemB = serverAgendaItem "b" (agendaContent ScheduledBlock "B" "2026-02-20T11:00" "2026-02-20T12:00")
+        itemA = serverCalendarItem "a" (calendarContent Intention "A" "2026-02-19T09:00" "2026-02-19T10:00")
+        itemB = serverCalendarItem "b" (calendarContent ScheduledBlock "B" "2026-02-20T11:00" "2026-02-20T12:00")
         filter =
           { itemType: Just Intention
           , status: Just Todo
@@ -246,7 +246,7 @@ spec =
 
     it "exports items to CSV and ICS" do
       let
-        item = serverAgendaItem "a" (agendaContent Intention "A" "2026-02-19T09:00" "2026-02-19T10:00")
+        item = serverCalendarItem "a" (calendarContent Intention "A" "2026-02-19T09:00" "2026-02-19T10:00")
         csv = exportItemsToCsv [ item ]
         ics = exportItemsToIcs [ item ]
       (length (StringCommon.split (Pattern "type,titre") csv) > 1) `shouldEqual` true
@@ -254,12 +254,12 @@ spec =
 
     it "sorts items by status" do
       let
-        itemTodo = serverAgendaItem "todo" (agendaContent ScheduledBlock "Todo" "2026-02-19T09:00" "2026-02-19T10:00")
+        itemTodo = serverCalendarItem "todo" (calendarContent ScheduledBlock "Todo" "2026-02-19T09:00" "2026-02-19T10:00")
         itemDone =
           ServerCalendarItem
             { id: "done"
             , content:
-                (agendaContent ScheduledBlock "Done" "2026-02-19T11:00" "2026-02-19T12:00")
+                (calendarContent ScheduledBlock "Done" "2026-02-19T11:00" "2026-02-19T12:00")
                   { status = Fait }
             }
       sortItems SortByStatus [] [ itemDone, itemTodo ] `shouldEqual` [ itemTodo, itemDone ]

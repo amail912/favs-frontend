@@ -1,11 +1,11 @@
-module Agenda.Conflicts
+module Calendar.Conflicts
   ( detectConflictIds
   , detectConflictGroups
   ) where
 
 import Prelude
 
-import Agenda.Model (CalendarItem(..), ItemType(..))
+import Calendar.Model (CalendarItem(..), ItemType(..))
 import Data.Array (elem, filter, find, length, mapMaybe, nub, uncons)
 import Data.Foldable (foldl)
 import Data.Maybe (Maybe(..))
