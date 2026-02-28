@@ -3,9 +3,15 @@ module Test.Domain.Agenda.Spec (spec) where
 import Prelude
 
 import Agenda.Model (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), RecurrenceRule(..), RoutineTemplate, SortMode(..), StepDependency(..), ValidationError(..), defaultNotificationDefaults)
+import Agenda.Conflicts (detectConflictGroups, detectConflictIds)
+import Agenda.Data (toNewIntention, validateIntention)
 import Agenda.Exports (exportItemsToCsv, exportItemsToIcs, filterItemsForExport)
+import Agenda.Helpers (durationMinutesBetween, sortItems)
 import Agenda.Imports (parseCsvImport, parseIcsImport)
-import Agenda.Logic (applyOfflineMutation, applyTemplateToDraft, detectConflictGroups, detectConflictIds, durationMinutesBetween, generateOccurrencesForMonth, instantiateRoutine, reminderTimesForIntention, sortItems, templateSummary, toNewIntention, validateIntention, addTemplate, removeTemplate, updateTemplate)
+import Agenda.Notifications (reminderTimesForIntention)
+import Agenda.Offline (applyOfflineMutation)
+import Agenda.Recurrence (generateOccurrencesForMonth)
+import Agenda.Templates (applyTemplateToDraft, instantiateRoutine, templateSummary, addTemplate, removeTemplate, updateTemplate)
 import Data.Argonaut.Decode (decodeJson)
 import Data.Argonaut.Encode (encodeJson)
 import Data.Array (head, length)
