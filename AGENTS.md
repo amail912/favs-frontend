@@ -22,6 +22,7 @@ Frontend pour gérer le quotidien avec un focus sur la gestion d’un calendrier
 - Les fonctions `render*` des domaines émettent leurs propres actions de domaine ; la conversion vers l’action page se fait au niveau de l’appelant.
 - Les fonctions `render*` appelées dans la page passent par un helper local portant le même nom, qui encapsule le `map`.
 - Les imports des rendus de domaine sont faits en qualifié avec un alias court mais signifiant.
+- Quand un module doit émettre des actions multi-domaines, exposer un type `*Action` et faire la conversion vers l’action page au niveau de l’appelant.
 - Préférer la destructuration de premier niveau dans la signature des fonctions, et éviter les alias inutiles.
 - Éviter les suffixes inutiles dans les noms de lenses.
 
