@@ -1,5 +1,7 @@
 # Agenda V1 - Specification executable
 
+Note: dans le code et l'UI, le module "Agenda" est desormais nomme "Calendar".
+
 ## 1. Modele de donnees (contract-first)
 
 ### 1.1 Entite `ItemCalendrier`

@@ -1,5 +1,7 @@
 # Agenda V1 - Cadrage produit
 
+Note: dans le code et l'UI, le module "Agenda" est desormais nomme "Calendar".
+
 ## Objectif produit
 Permettre a un utilisateur connecte de planifier et suivre son quotidien, avec un focus mobile, une vue jour ergonomique, des conflits explicites et une utilisabilite hors ligne.
 

@@ -6,7 +6,7 @@ function checklistsTab(page) {
   return page.locator("a.nav-link", { hasText: "Checklists" });
 }
 
-function agendaTab(page) {
+function calendarTab(page) {
   return page.locator("a.nav-link", { hasText: "Calendar" });
 }
 
@@ -43,7 +43,7 @@ function appTitle(page) {
 }
 
 module.exports = {
-  agendaTab,
+  calendarTab,
   appTitle,
   checklistsTab,
   createAccountButton,

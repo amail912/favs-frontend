@@ -1,5 +1,5 @@
 const { test, expect } = require("../fixtures/authenticated");
-const { agendaTab, appTitle } = require("../support/ui");
+const { calendarTab, appTitle } = require("../support/ui");
 
 function toLocalDatetimeInput(date) {
   const pad = value => `${value}`.padStart(2, "0");
@@ -10,13 +10,13 @@ function toLocalDatetimeInput(date) {
   ].join("-") + "T" + [pad(date.getHours()), pad(date.getMinutes())].join(":");
 }
 
-test("agenda integration: create intention then validate", async ({ authenticatedPage: page }) => {
+test("calendar integration: create intention then validate", async ({ authenticatedPage: page }) => {
   const now = new Date();
   const start = new Date(now.getTime() + 60 * 60 * 1000);
   const end = new Date(now.getTime() + 2 * 60 * 60 * 1000);
   const title = `Intention ${Date.now()}`;
 
-  await agendaTab(page).click();
+  await calendarTab(page).click();
   await expect(page).toHaveURL(/\/calendar$/);
 
   await page.getByPlaceholder("Titre de l'intention").fill(title);

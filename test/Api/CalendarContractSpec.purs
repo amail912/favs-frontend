@@ -1,4 +1,4 @@
-module Test.Api.AgendaContractSpec (spec) where
+module Test.Api.CalendarContractSpec (spec) where
 
 import Prelude
 
@@ -8,7 +8,7 @@ import Test.Spec.Assertions (shouldEqual)
 
 spec :: Spec Unit
 spec =
-  describe "Agenda API contract" do
+  describe "Calendar API contract" do
     it "uses POST for updating calendar items" do
       updateMethod `shouldEqual` POST
 

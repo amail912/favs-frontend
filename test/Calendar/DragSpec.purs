@@ -1,4 +1,4 @@
-module Test.Agenda.DragSpec (spec) where
+module Test.Calendar.DragSpec (spec) where
 
 import Prelude
 
@@ -8,7 +8,7 @@ import Test.Spec.Assertions (shouldEqual)
 
 spec :: Spec Unit
 spec =
-  describe "Agenda drag & drop" do
+  describe "Calendar drag & drop" do
     it "aligns drop index with offset" do
       computeDropMinuteIndex 120 20 `shouldEqual` 116
 
