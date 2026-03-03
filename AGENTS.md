@@ -121,3 +121,5 @@ Références de specs produit et user stories: `docs/specs/calendar-v1/`.
 ## Journal des commits
 - 2026-03-03 : Retrait des specs API du `test/SpecSuite.purs` suite à la suppression des fichiers `test/Api/*`.
 - 2026-03-03 : Renommage des tests Calendar et réorganisation des `describe` dans `test/Domain/Calendar/Spec.purs`.
+- 2026-03-03 : Refactor de `renderCreateContent` pour améliorer la lisibilité dans `src/Calendar/Calendar.purs`.
+- 2026-03-03 : Inline des sections dans `renderCreateContent` pour supprimer les helpers inutilisés.

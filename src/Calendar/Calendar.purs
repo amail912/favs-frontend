@@ -278,88 +278,91 @@ renderCreateContent
   -> HTML w CalendarUiAction
 renderCreateContent draft validationError =
   div [ class_ "calendar-modal-stack" ]
-    [ div [ class_ "calendar-modal-field" ]
-        [ div [ class_ "calendar-notifications-label" ] [ text "Type" ]
-        , div [ class_ "btn-group w-100", attr (AttrName "role") "group" ]
-            [ button
-                [ class_ $ "btn btn-sm " <> if draft.itemType == Intention then "btn-primary" else "btn-outline-secondary"
-                , onClick (const (CalendarUiCalendar (CalendarDraftTypeChanged Intention)))
-                ]
-                [ text "Intention" ]
-            , button
-                [ class_ $ "btn btn-sm " <> if draft.itemType == ScheduledBlock then "btn-primary" else "btn-outline-secondary"
-                , onClick (const (CalendarUiCalendar (CalendarDraftTypeChanged ScheduledBlock)))
-                ]
-                [ text "Bloc planifié" ]
-            ]
-        ]
-    , div [ class_ "calendar-modal-field" ]
-        [ div [ class_ "calendar-notifications-label" ] [ text "Titre" ]
-        , input
-            [ class_ "form-control calendar-input"
-            , placeholder "Titre"
-            , onValueChange (CalendarUiCalendar <<< CalendarDraftTitleChanged)
-            , onKeyDown (\ev -> CalendarUiSync (SyncDraftTitleKeyDown (KE.key ev)))
-            , value draft.title
-            ]
-        ]
-    , div [ class_ "calendar-modal-field" ]
-        [ div [ class_ "calendar-notifications-label" ] [ text "Début" ]
-        , input
-            [ class_ "form-control calendar-input"
-            , type_ InputDatetimeLocal
-            , attr (AttrName "lang") "fr"
-            , placeholder "Début"
-            , onValueChange (CalendarUiCalendar <<< CalendarDraftStartChanged)
-            , value draft.windowStart
-            ]
-        ]
-    , div [ class_ "calendar-modal-field" ]
-        [ div [ class_ "calendar-notifications-label" ] [ text "Fin" ]
-        , input
-            [ class_ "form-control calendar-input"
-            , type_ InputDatetimeLocal
-            , attr (AttrName "lang") "fr"
-            , placeholder "Fin"
-            , onValueChange (CalendarUiCalendar <<< CalendarDraftEndChanged)
-            , value draft.windowEnd
-            ]
-        ]
-    , div [ class_ "calendar-modal-field" ]
-        [ div [ class_ "calendar-notifications-label" ] [ text "Catégorie" ]
-        , input
-            [ class_ "form-control calendar-input"
-            , placeholder "Catégorie"
-            , onValueChange (CalendarUiCalendar <<< CalendarDraftCategoryChanged)
-            , value draft.category
-            ]
-        ]
-    , div [ class_ "calendar-modal-field" ]
-        [ div [ class_ "calendar-notifications-label" ] [ text "Statut" ]
-        , select
-            [ class_ "form-select calendar-input"
-            , onValueChange (CalendarUiCalendar <<< CalendarDraftStatusChanged)
-            , value (statusValue draft.status)
-            ]
-            [ option [ value "todo" ] [ text "À faire" ]
-            , option [ value "progress" ] [ text "En cours" ]
-            , option [ value "done" ] [ text "Fait" ]
-            , option [ value "canceled" ] [ text "Annulé" ]
-            ]
-        ]
-    , div [ class_ "calendar-modal-field" ]
-        [ div [ class_ "calendar-notifications-label" ] [ text "Durée réelle (minutes)" ]
-        , input
-            [ class_ "form-control calendar-input"
-            , type_ InputNumber
-            , placeholder "Ex: 30"
-            , onValueChange (CalendarUiCalendar <<< CalendarDraftDurationChanged)
-            , value draft.actualDurationMinutes
-            ]
-        ]
-    , map (CalendarUiCalendar <<< CalendarDraftRecurrenceChanged) (renderRecurrenceEditor draft.recurrence)
-    , maybe (text "") (\msg -> div [ class_ "calendar-error" ] [ text msg ]) validationError
+    [ field "Type" typeInput
+    , field "Titre" titleInput
+    , dateTimeField "Début" (CalendarUiCalendar <<< CalendarDraftStartChanged) draft.windowStart
+    , dateTimeField "Fin" (CalendarUiCalendar <<< CalendarDraftEndChanged) draft.windowEnd
+    , field "Catégorie" categoryInput
+    , field "Statut" statusInput
+    , field "Durée réelle (minutes)" durationInput
+    , recurrenceInput
+    , errorInput
     ]
+  where
+  field label content =
+    div [ class_ "calendar-modal-field" ]
+      [ div [ class_ "calendar-notifications-label" ] [ text label ]
+      , content
+      ]
+
+  dateTimeField label onChange currentValue =
+    field label $
+      input
+        [ class_ "form-control calendar-input"
+        , type_ InputDatetimeLocal
+        , attr (AttrName "lang") "fr"
+        , placeholder label
+        , onValueChange onChange
+        , value currentValue
+        ]
+
+  typeInput =
+    div [ class_ "btn-group w-100", attr (AttrName "role") "group" ]
+      [ toggleButton Intention "Intention"
+      , toggleButton ScheduledBlock "Bloc planifié"
+      ]
+
+  titleInput =
+    input
+      [ class_ "form-control calendar-input"
+      , placeholder "Titre"
+      , onValueChange (CalendarUiCalendar <<< CalendarDraftTitleChanged)
+      , onKeyDown (\ev -> CalendarUiSync (SyncDraftTitleKeyDown (KE.key ev)))
+      , value draft.title
+      ]
+
+  categoryInput =
+    input
+      [ class_ "form-control calendar-input"
+      , placeholder "Catégorie"
+      , onValueChange (CalendarUiCalendar <<< CalendarDraftCategoryChanged)
+      , value draft.category
+      ]
+
+  statusInput =
+    select
+      [ class_ "form-select calendar-input"
+      , onValueChange (CalendarUiCalendar <<< CalendarDraftStatusChanged)
+      , value (statusValue draft.status)
+      ]
+      [ option [ value "todo" ] [ text "À faire" ]
+      , option [ value "progress" ] [ text "En cours" ]
+      , option [ value "done" ] [ text "Fait" ]
+      , option [ value "canceled" ] [ text "Annulé" ]
+      ]
+
+  durationInput =
+    input
+      [ class_ "form-control calendar-input"
+      , type_ InputNumber
+      , placeholder "Ex: 30"
+      , onValueChange (CalendarUiCalendar <<< CalendarDraftDurationChanged)
+      , value draft.actualDurationMinutes
+      ]
+
+  recurrenceInput =
+    map (CalendarUiCalendar <<< CalendarDraftRecurrenceChanged) (renderRecurrenceEditor draft.recurrence)
+
+  errorInput =
+    maybe (text "") (\msg -> div [ class_ "calendar-error" ] [ text msg ]) validationError
+
+  toggleButton :: ItemType -> String -> HTML w CalendarUiAction
+  toggleButton itemType label =
+    button
+      [ class_ $ "btn btn-sm " <> if draft.itemType == itemType then "btn-primary" else "btn-outline-secondary"
+      , onClick (const (CalendarUiCalendar (CalendarDraftTypeChanged itemType)))
+      ]
+      [ text label ]
 
 renderSortPicker :: forall w. SortMode -> HTML w CalendarUiAction
 renderSortPicker sortMode =
