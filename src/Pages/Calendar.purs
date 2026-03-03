@@ -1,5 +1,6 @@
 module Pages.Calendar
   ( component
+  , decodeCalendarItemsResponse
   ) where
 
 import Prelude hiding (div)
@@ -511,8 +512,15 @@ initAction = do
 refreshItems :: ErrorAgendaAppM Unit
 refreshItems = do
   jsonResponse <- withExceptT toFatalError $ ExceptT $ liftAff getItemsResponse
-  items <- (_.body >>> decodeJson >>> lmap toFatalError >>> pure >>> ExceptT) jsonResponse
+  items <- decodeCalendarItemsResponse jsonResponse # pure >>> ExceptT
   modify_ (_calendarItems .~ items)
+
+decodeCalendarItemsResponse :: Response Json -> Either FatalError (Array CalendarItem)
+decodeCalendarItemsResponse jsonResponse =
+  if unwrap jsonResponse.status == 401 then
+    Right []
+  else
+    jsonResponse.body # decodeJson # lmap toFatalError
 
 createItem :: CalendarItem -> ErrorAgendaAppM (Response Json)
 createItem item = withExceptT toFatalError $ ExceptT $ liftAff $ createItemResponse item
@@ -764,6 +772,7 @@ validationErrorMessage err =
     WindowStartInvalid -> "La date de debut est invalide."
     WindowEndInvalid -> "La date de fin est invalide."
     WindowOrderInvalid -> "La fin doit etre apres le debut."
+    WindowTooShort -> "La fin doit etre au minimum 5 minutes apres le debut."
 
 buildAgendaModalsInput :: State -> AgendaModalsInput
 buildAgendaModalsInput { calendar, sync, notifications, templates, imports, exports, view } =

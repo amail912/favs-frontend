@@ -210,6 +210,7 @@ validateIntention draft =
     _ | not (isDateTimeLocal draft.windowStart) -> Left WindowStartInvalid
     _ | not (isDateTimeLocal draft.windowEnd) -> Left WindowEndInvalid
     _ | draft.windowEnd <= draft.windowStart -> Left WindowOrderInvalid
+    _ | maybe true (_ <= 5) (durationMinutesBetween draft.windowStart draft.windowEnd) -> Left WindowTooShort
     _ -> Right draft
 
 calendarItemContent :: CalendarItem -> CalendarItemContent

@@ -95,6 +95,20 @@ spec =
           }
       validateIntention draft `shouldEqual` Left WindowOrderInvalid
 
+    it "fails validation when duration is too short" do
+      let
+        draft :: IntentionDraft
+        draft =
+          { title: "Court"
+          , windowStart: "2026-02-19T10:00"
+          , windowEnd: "2026-02-19T10:04"
+          , category: ""
+          , status: Todo
+          , actualDurationMinutes: ""
+          , recurrence: defaultRecurrenceDraft
+          }
+      validateIntention draft `shouldEqual` Left WindowTooShort
+
     it "accepts a valid intention" do
       let
         draft :: IntentionDraft

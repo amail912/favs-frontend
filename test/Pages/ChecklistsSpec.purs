@@ -2,7 +2,10 @@ module Test.Pages.ChecklistsSpec (spec) where
 
 import Prelude
 
-import Pages.Checklists (Checklist(..), ChecklistItem(..), removeChecklistItem)
+import Affjax.StatusCode (StatusCode(..))
+import Affjax.Web (Response)
+import Data.Argonaut.Core (Json, jsonEmptyObject)
+import Pages.Checklists (Checklist(..), ChecklistItem(..), decodeChecklistsResponse, removeChecklistItem)
 import Data.Argonaut.Decode (decodeJson)
 import Data.Argonaut.Encode (encodeJson)
 import Data.Array (head, length)
@@ -48,3 +51,18 @@ spec =
             Just (ChecklistItem { label }) -> label `shouldEqual` "B"
             Nothing -> fail "Expected one checklist item after deletion"
         _ -> fail "Checklist item removal returned unexpected result"
+
+    it "returns empty checklists when status is 401" do
+      let
+        response = mkResponse 401 jsonEmptyObject
+      case decodeChecklistsResponse response of
+        Right checklists -> checklists `shouldEqual` []
+        Left err -> fail $ "Expected empty checklists for 401 response, got: " <> show err
+
+mkResponse :: Int -> Json -> Response Json
+mkResponse code body =
+  { status: StatusCode code
+  , statusText: ""
+  , headers: []
+  , body: body
+  }

@@ -1,4 +1,4 @@
-module Pages.Notes (component, module Domain.Notes) where
+module Pages.Notes (component, decodeNotesResponse, module Domain.Notes) where
 
 import Prelude hiding (div)
 
@@ -12,6 +12,7 @@ import Data.Argonaut.Core (Json)
 import Data.Argonaut.Decode (decodeJson)
 import Data.Array (length, mapWithIndex, null, snoc)
 import Data.Bifunctor (lmap)
+import Data.Either (Either(..))
 import Data.Lens (Lens', lens, lens', (.~), (^.))
 import Data.Maybe (maybe)
 import Data.Newtype (unwrap, wrap)
@@ -194,7 +195,14 @@ refreshNotes = do
 getNotes :: ErrorNoteAppM (Array Note)
 getNotes = do
   jsonResponse <- withExceptT toFatalError $ ExceptT $ liftAff getNotesResponse
-  (_.body >>> decodeJson >>> lmap toFatalError >>> pure >>> ExceptT) jsonResponse
+  decodeNotesResponse jsonResponse # pure >>> ExceptT
+
+decodeNotesResponse :: Response Json -> Either FatalError (Array Note)
+decodeNotesResponse jsonResponse =
+  if unwrap jsonResponse.status == 401 then
+    Right []
+  else
+    jsonResponse.body # decodeJson # lmap toFatalError
 
 deleteNote :: StorageId -> ErrorNoteAppM Unit
 deleteNote storageId@{ id } = do

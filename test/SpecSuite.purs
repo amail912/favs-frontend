@@ -8,6 +8,7 @@ import Test.Api.ChecklistsContractSpec as ChecklistsContractSpec
 import Test.Api.NotesContractSpec as NotesContractSpec
 import Test.Calendar.DragSpec as DragSpec
 import Test.Domain.Calendar.Spec as CalendarSpec
+import Test.Pages.CalendarSpec as CalendarPageSpec
 import Test.Pages.ChecklistsSpec as ChecklistsSpec
 import Test.Pages.NotesSpec as NotesSpec
 import Test.Ui.ErrorsSpec as ErrorsSpec
@@ -22,6 +23,7 @@ runSpecSuite = runSpec [ consoleReporter ] do
   DragSpec.spec
   NotesSpec.spec
   ChecklistsSpec.spec
+  CalendarPageSpec.spec
   CalendarContractSpec.spec
   CalendarSpec.spec
   ErrorsSpec.spec

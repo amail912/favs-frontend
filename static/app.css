@@ -497,6 +497,7 @@ a.nav-link:hover {
   gap: 0.25rem;
   align-content: start;
   overflow: hidden;
+  position: relative;
 }
 
 .calendar-calendar-meta {
@@ -564,6 +565,8 @@ a.nav-link:hover {
   gap: 6px;
   justify-content: flex-end;
   flex: 0 0 auto;
+  position: relative;
+  z-index: 4;
 }
 
 .calendar-fab {

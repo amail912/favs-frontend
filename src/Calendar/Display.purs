@@ -45,6 +45,8 @@ import Halogen.HTML (HTML, button, div, input, option, select, text)
 import Halogen.HTML.Core (AttrName(..))
 import Halogen.HTML.Events (onClick, onValueChange)
 import Halogen.HTML.Properties (attr, placeholder, type_, value)
+import Web.HTML (window)
+import Web.HTML.Window as Window
 import Ui.Utils (class_)
 import Type.Proxy (Proxy(..))
 import DOM.HTML.Indexed.InputType (InputType(..))
@@ -186,8 +188,8 @@ handleViewAction = case _ of
               <<< (_viewLastTapAtS .~ Nothing)
           )
   ViewOpenEditFromDoubleClick item -> do
-    viewState <- get
-    if viewState ^. _viewIsMobileS then
+    viewport <- liftEffect $ window >>= Window.innerWidth
+    if viewport <= 768 then
       handleViewAction (ViewOpenEdit item)
     else
       pure unit
@@ -424,3 +426,4 @@ validationErrorMessage err =
     WindowStartInvalid -> "La date de debut est invalide."
     WindowEndInvalid -> "La date de fin est invalide."
     WindowOrderInvalid -> "La fin doit etre apres le debut."
+    WindowTooShort -> "La fin doit etre au minimum 5 minutes apres le debut."

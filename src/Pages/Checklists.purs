@@ -1,4 +1,4 @@
-module Pages.Checklists (component, removeChecklistItem, module Domain.Checklists) where
+module Pages.Checklists (component, decodeChecklistsResponse, removeChecklistItem, module Domain.Checklists) where
 
 import Prelude hiding (div)
 
@@ -12,6 +12,7 @@ import Data.Argonaut.Core (Json)
 import Data.Argonaut.Decode (decodeJson)
 import Data.Array (deleteAt, length, mapWithIndex, null, snoc)
 import Data.Bifunctor (lmap)
+import Data.Either (Either(..))
 import Data.Lens (Lens', Traversal', lens, lens', (.~), (^.), (^?))
 import Data.Lens.Index (ix)
 import Data.Maybe (Maybe, maybe)
@@ -231,7 +232,14 @@ refreshChecklists = do
 getChecklists :: ErrorChecklistAppM (Array Checklist)
 getChecklists = do
   jsonResponse <- withExceptT toFatalError $ ExceptT $ liftAff getChecklistsResponse
-  (_.body >>> decodeJson >>> lmap toFatalError >>> pure >>> ExceptT) jsonResponse
+  decodeChecklistsResponse jsonResponse # pure >>> ExceptT
+
+decodeChecklistsResponse :: Response Json -> Either FatalError (Array Checklist)
+decodeChecklistsResponse jsonResponse =
+  if unwrap jsonResponse.status == 401 then
+    Right []
+  else
+    jsonResponse.body # decodeJson # lmap toFatalError
 
 deleteChecklist :: StorageId -> ErrorChecklistAppM Unit
 deleteChecklist storageId@{ id } = do

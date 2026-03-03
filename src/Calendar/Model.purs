@@ -232,6 +232,7 @@ data ValidationError
   | WindowStartInvalid
   | WindowEndInvalid
   | WindowOrderInvalid
+  | WindowTooShort
 
 derive instance validationErrorGeneric :: Generic ValidationError _
 derive instance validationErrorEq :: Eq ValidationError
