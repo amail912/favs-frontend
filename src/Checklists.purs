@@ -399,7 +399,7 @@ getRef refStr = do
 
 focusName :: Element -> ErrorChecklistAppM Element
 focusName checklistElem = do
-  name <- (getElementByClassName "name-input" checklistElem) <|> (getElementByClassName "content-input" checklistElem)
+  name <- (getElementByClassName "label-input" checklistElem) <|> (getElementByClassName "name-input" checklistElem)
   focusElement name
   pure name
 
