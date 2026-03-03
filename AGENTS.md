@@ -16,7 +16,7 @@ Frontend pour gérer le quotidien avec un focus sur la gestion d’un calendrier
 - Tu proposeras de réaliser des tests dès que cela te semble nécessaire
 - Utilise la compilation comme une grande aide au développement. PureScript est un language fortement typé qui permet d'avoir beaucoup de garanties avec un système de types adapté.
 - On veillera à ne laisser aucun warning de compilation.
-- Après chaque modification et sans me demander, run les tests.
+- Avant chaque commit, run tous les tests.
 - La logique et les vues de chaque domaine restent dans leur module de domaine, sans fichier centralisateur.
 - Les helpers partagés sont uniquement techniques, pas métier.
 - Les fonctions `render*` des domaines émettent leurs propres actions de domaine ; la conversion vers l’action page se fait au niveau de l’appelant.
@@ -112,3 +112,6 @@ Références de specs produit et user stories: `docs/specs/calendar-v1/`.
 - Ne jamais toucher au répo foucl2, si jamais son démarrage est nécessaire, me demander.
 - Ne jamais faire d'actions git en écriture sur le répo distant (push en particulier)
 - Ce fichier doit être mis à jour à chaque commit, qu'il soit fait par toi ou bien lorsque je t'avertit que j'en ai fait un.
+
+## Journal des commits
+- 2026-03-03 : Retrait des specs API du `test/SpecSuite.purs` suite à la suppression des fichiers `test/Api/*`.

@@ -6,6 +6,7 @@ module Api.Calendar
   , createItemResponse
   , updateItemResponse
   , validateItemResponse
+  , ValidateItemPayload(..)
   ) where
 
 import Prelude
@@ -13,10 +14,10 @@ import Prelude
 import Affjax.ResponseFormat (json)
 import Affjax.Web (get) as Affjax
 import Affjax.Web (post)
-import Api.Common (JsonResponse, jsonBody, jsonBodyFromJson)
+import Api.Common (JsonResponse, jsonBody)
 import Calendar.Model (CalendarItem)
 import Data.Argonaut.Core (jsonEmptyObject)
-import Data.Argonaut.Encode ((:=), (~>))
+import Data.Argonaut.Encode (class EncodeJson, (:=), (~>))
 import Effect.Aff (Aff)
 
 data Method = GET | POST | PATCH | DELETE
@@ -55,7 +56,14 @@ updateItemResponse itemId item =
   post json (updatePath itemId)
     (jsonBody item)
 
-validateItemResponse :: String -> Int -> Aff JsonResponse
-validateItemResponse itemId minutes =
+validateItemResponse :: String -> ValidateItemPayload -> Aff JsonResponse
+validateItemResponse itemId payload =
   post json (validatePath itemId)
-    (jsonBodyFromJson $ "duree_reelle_minutes" := minutes ~> jsonEmptyObject)
+    (jsonBody payload)
+
+newtype ValidateItemPayload = ValidateItemPayload
+  { duree_reelle_minutes :: Int }
+
+instance encodeValidateItemPayload :: EncodeJson ValidateItemPayload where
+  encodeJson (ValidateItemPayload payload) =
+    "duree_reelle_minutes" := payload.duree_reelle_minutes ~> jsonEmptyObject

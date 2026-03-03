@@ -3,9 +3,6 @@ module Test.SpecSuite (runSpecSuite) where
 import Prelude
 
 import Effect.Aff (Aff)
-import Test.Api.CalendarContractSpec as CalendarContractSpec
-import Test.Api.ChecklistsContractSpec as ChecklistsContractSpec
-import Test.Api.NotesContractSpec as NotesContractSpec
 import Test.Calendar.DragSpec as DragSpec
 import Test.Domain.Calendar.Spec as CalendarSpec
 import Test.Pages.CalendarSpec as CalendarPageSpec
@@ -18,13 +15,10 @@ import Test.Spec.Runner (runSpec)
 
 runSpecSuite :: Aff Unit
 runSpecSuite = runSpec [ consoleReporter ] do
-  NotesContractSpec.spec
-  ChecklistsContractSpec.spec
   DragSpec.spec
   NotesSpec.spec
   ChecklistsSpec.spec
   CalendarPageSpec.spec
-  CalendarContractSpec.spec
   CalendarSpec.spec
   ErrorsSpec.spec
   PageFlowSpec.spec

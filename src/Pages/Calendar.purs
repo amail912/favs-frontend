@@ -104,7 +104,7 @@ import Calendar.Model
   , TemplateDraft
   , ValidationError(..)
   )
-import Api.Calendar (createItemResponse, getItemsResponse, updateItemResponse, validateItemResponse)
+import Api.Calendar (ValidateItemPayload(..), createItemResponse, getItemsResponse, updateItemResponse, validateItemResponse)
 import Control.Monad.Except (ExceptT(..), withExceptT)
 import Control.Monad.RWS (get, modify_)
 import Control.Monad.State.Trans (StateT, runStateT)
@@ -581,7 +581,9 @@ updateItem :: String -> CalendarItem -> ErrorAgendaAppM (Response Json)
 updateItem itemId item = withExceptT toFatalError $ ExceptT $ liftAff $ updateItemResponse itemId item
 
 validateItem :: String -> Int -> ErrorAgendaAppM (Response Json)
-validateItem itemId minutes = withExceptT toFatalError $ ExceptT $ liftAff $ validateItemResponse itemId minutes
+validateItem itemId minutes =
+  withExceptT toFatalError $ ExceptT $ liftAff $
+    validateItemResponse itemId $ ValidateItemPayload { duree_reelle_minutes: minutes }
 
 statusOk :: forall a. Response a -> Boolean
 statusOk r = unwrap r.status >= 200 && unwrap r.status < 300
