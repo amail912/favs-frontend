@@ -22,7 +22,8 @@ Offrir une navigation simple entre Notes, Checklists et Auth, tout en conservant
 - Navigation par clic: action `NavigateTo` puis `pushState`.
 - Redirection `/`: action `RouteChanged Root` puis `replaceState` vers Notes.
 
-## États UI
-- Onglets Notes et Checklists quand l'utilisateur n'est pas sur un écran d'auth.
-- Bouton auth dans le header: Signup si non connecté, Sign out si connecté.
-- Page 404 avec actions de retour.
+## Spécifications
+- [Routes supportées et 404](specs/routes-supportees-et-404.md) — Garantit que seules les pages prévues sont accessibles, les autres affichent une 404.
+- [Redirection de `/` vers `/notes`](specs/redirection-root-vers-notes.md) — Garantit que la racine amène directement aux notes sans gêner le retour arrière.
+- [Navigation et historique](specs/navigation-historique-push-replace.md) — Garantit une navigation cohérente pour l'utilisateur, sans ajouter d'étape inutile lors de la redirection automatique.
+- [Visibilité des onglets](specs/visibilite-onglets-auth.md) — Garantit que les onglets ne s'affichent pas sur Signup/Signin.

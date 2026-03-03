@@ -31,3 +31,5 @@ Permettre à un utilisateur de créer un compte, se connecter, puis quitter la s
 - Formulaires signup et signin avec validation inline.
 - État de soumission: bouton désactivé et libellé "Submitting..." ou "Signing in...".
 - En cas de succès: navigation automatique vers la vue suivante.
+- Onglets Notes et Checklists quand l'utilisateur n'est pas sur un écran d'auth.
+- Bouton auth dans le header: Signup si non connecté, Sign out si connecté.
