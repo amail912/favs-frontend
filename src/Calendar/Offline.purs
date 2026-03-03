@@ -9,7 +9,6 @@ import Prelude
 import Calendar.Model (CalendarItem(..))
 import Data.Array (any)
 
-
 type OfflineMutationResult =
   { items :: Array CalendarItem
   , pending :: Array CalendarItem

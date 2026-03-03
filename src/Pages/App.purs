@@ -16,9 +16,10 @@ import Data.Argonaut.Core (Json, jsonEmptyObject)
 import Data.Argonaut.Encode (class EncodeJson, encodeJson, (:=), (~>))
 import Data.Char (toCharCode)
 import Data.Either (Either(..), either)
-import Data.Foldable (all)
+import Data.Foldable (all, foldMap)
 import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
+import Data.Monoid (guard)
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits as String
 import Data.String.Common as StringCommon
@@ -92,9 +93,10 @@ subscribeToRouting nav = do
   { emitter, listener } <- liftEffect Sub.create
   void $ subscribe emitter
   void $ liftEffect $ matchesWith parseRouteString
-    ( \old new -> do
-        when (old /= Just new) $ do
-          Sub.notify listener $ RouteChanged new
+    ( \old new ->
+        when (old /= Just new)
+          $ Sub.notify listener
+          $ RouteChanged new
     )
     nav
   pure unit
@@ -237,7 +239,7 @@ tab :: forall w. DefinedRoute -> DefinedRoute -> HTML w Action
 tab tabRoute activeRoute =
   div [ class_ "col text-center nav-item px-0" ]
     [ a
-        [ class_ $ "nav-link" <> (if tabRoute == activeRoute then " active" else "")
+        [ class_ $ "nav-link" <> guard (tabRoute == activeRoute) " active"
         , onClick (const $ NavigateTo tabRoute)
         ]
         [ text (tabLabel tabRoute) ]
@@ -479,7 +481,7 @@ renderAuth cfg state =
                             , onValueChange AuthUsernameChanged
                             ]
                         ]
-                          <> maybe [] (\err -> [ div [ class_ "invalid-feedback d-block mb-2" ] [ text err ] ]) state.usernameError
+                          <> foldMap (\err -> [ div [ class_ "invalid-feedback d-block mb-2" ] [ text err ] ]) state.usernameError
                           <>
                             [ label [ class_ "form-label fw-semibold mt-2", for (cfg.idPrefix <> "-password") ] [ text "Password" ]
                             , input
@@ -492,8 +494,8 @@ renderAuth cfg state =
                                 , onValueChange AuthPasswordChanged
                                 ]
                             ]
-                          <> maybe [] (\err -> [ div [ class_ "invalid-feedback d-block mb-2" ] [ text err ] ]) state.passwordError
-                          <> maybe [] (\msg -> [ div [ class_ "alert alert-secondary mt-3 mb-0" ] [ text msg ] ]) state.feedbackMessage
+                          <> foldMap (\err -> [ div [ class_ "invalid-feedback d-block mb-2" ] [ text err ] ]) state.passwordError
+                          <> foldMap (\msg -> [ div [ class_ "alert alert-secondary mt-3 mb-0" ] [ text msg ] ]) state.feedbackMessage
                           <>
                             [ button
                                 [ type_ ButtonSubmit

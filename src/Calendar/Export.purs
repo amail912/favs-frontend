@@ -33,7 +33,6 @@ import DOM.HTML.Indexed.InputType (InputType(..))
 import Ui.AgendaRender (renderPanelHeader)
 import Ui.Utils (class_)
 
-
 type ExportState =
   { exportFormat :: ExportFormat
   , exportTypeFilter :: String
@@ -43,7 +42,6 @@ type ExportState =
   , exportEndDate :: String
   , exportOutput :: String
   }
-
 
 exportInitialState :: ExportState
 exportInitialState =
@@ -55,7 +53,6 @@ exportInitialState =
   , exportEndDate: ""
   , exportOutput: ""
   }
-
 
 _exportFormatS :: Lens' ExportState ExportFormat
 _exportFormatS = prop (Proxy :: _ "exportFormat")
@@ -78,7 +75,6 @@ _exportEndDateS = prop (Proxy :: _ "exportEndDate")
 _exportOutputS :: Lens' ExportState String
 _exportOutputS = prop (Proxy :: _ "exportOutput")
 
-
 data ExportAction
   = ExportFormatChangedAction String
   | ExportTypeFilterChangedAction String
@@ -88,7 +84,6 @@ data ExportAction
   | ExportEndDateChangedAction String
   | ExportGenerate
   | ExportClearOutput
-
 
 handleExportAction :: Array CalendarItem -> ExportAction -> StateT ExportState (WriterT (Array Command) Aff) Unit
 handleExportAction items = case _ of
@@ -122,7 +117,6 @@ handleExportAction items = case _ of
     modify_ (_exportOutputS .~ output)
   ExportClearOutput ->
     modify_ (_exportOutputS .~ "")
-
 
 renderExportPanel
   :: forall w

@@ -55,7 +55,7 @@ instance checklistDecodeJsonInstance :: DecodeJson Checklist where
       content <- dec .: "content"
       name <- content .: "name"
       items <- content .: "items"
-      either (const $ pure $ NewChecklist { content: { name: name, items: items } })
+      either (const $ pure $ NewChecklist { content: { name, items } })
         (decodeServerChecklist name items)
         (dec .: "storageId")
 
@@ -64,15 +64,15 @@ instance checklistDecodeJsonInstance :: DecodeJson Checklist where
       dec <- decodeJson flatJson
       name <- dec .: "name"
       items <- dec .: "items"
-      pure $ NewChecklist { content: { name: name, items: items } }
+      pure $ NewChecklist { content: { name, items } }
 
     decodeServerChecklist :: String -> Array ChecklistItem -> Object Json -> Either JsonDecodeError Checklist
     decodeServerChecklist name items storageIdObj = do
       version <- storageIdObj .: "version"
       id <- storageIdObj .: "id"
       pure $ ServerChecklist
-        { content: { name: name, items: items }
-        , storageId: { version: version, id: id }
+        { content: { name, items }
+        , storageId: { version, id }
         }
 
 instance checklistItemEncodeJson :: EncodeJson ChecklistItem where
@@ -88,7 +88,7 @@ instance checklistItemDecodeJson :: DecodeJson ChecklistItem where
     dec <- decodeJson json
     label <- dec .: "label"
     checked <- dec .: "checked"
-    pure $ ChecklistItem { label: label, checked: checked }
+    pure $ ChecklistItem { label, checked }
 
 instance checklistEncodeJson :: EncodeJson Checklist where
   encodeJson :: Checklist -> Json

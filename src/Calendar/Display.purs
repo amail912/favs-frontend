@@ -51,7 +51,6 @@ import Ui.Utils (class_)
 import Type.Proxy (Proxy(..))
 import DOM.HTML.Indexed.InputType (InputType(..))
 
-
 data AgendaModal
   = ModalNotifications
   | ModalTemplates
@@ -64,7 +63,6 @@ data AgendaModal
   | ModalEditItem
 
 derive instance eqAgendaModal :: Eq AgendaModal
-
 
 type ValidationPanel =
   { itemId :: String
@@ -145,14 +143,13 @@ data ViewAction
   | ViewEditCancel
   | ViewSetIsMobile Boolean
 
-
 handleViewAction :: ViewAction -> StateT ViewState (WriterT (Array Command) Aff) Unit
 handleViewAction = case _ of
   ViewOpenValidation itemId content -> do
     suggested <- liftEffect $ suggestDurationMinutes content.windowStart
     modify_ (_viewValidationPanelS .~ Just { itemId, proposedMinutes: suggested, inputValue: "" })
   ViewValidationMinutesChanged raw ->
-    modify_ (_viewValidationPanelS %~ map (\panel -> panel { inputValue = raw }))
+    modify_ (_viewValidationPanelS %~ map (_ { inputValue = raw }))
   ViewConfirmValidation -> do
     viewState <- get
     case viewState ^. _viewValidationPanelS of
@@ -178,7 +175,7 @@ handleViewAction = case _ of
     modify_ (_viewActiveModalS .~ Just ModalCreateItem)
   ViewCloseCreate ->
     modify_ (_viewActiveModalS .~ Nothing)
-  ViewOpenEdit item -> do
+  ViewOpenEdit item ->
     case buildEditDraft item of
       Nothing -> pure unit
       Just draft ->
@@ -201,7 +198,8 @@ handleViewAction = case _ of
         Nothing ->
           modify_ (_viewLastTapAtS .~ Just now)
         Just previous ->
-          let elapsedMs = case diff now previous of Milliseconds ms -> ms
+          let
+            elapsedMs = case diff now previous of Milliseconds ms -> ms
           in
             if elapsedMs <= 350.0 then
               modify_ (_viewLastTapAtS .~ Nothing) *> handleViewAction (ViewOpenEdit item)
@@ -238,7 +236,6 @@ handleViewAction = case _ of
     modify_ ((_viewEditPanelS .~ Nothing) <<< (_viewActiveModalS .~ Nothing))
   ViewSetIsMobile isMobile ->
     modify_ (_viewIsMobileS .~ isMobile)
-
 
 viewTitle :: AgendaView -> String
 viewTitle viewMode =

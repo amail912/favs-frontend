@@ -12,7 +12,6 @@ import Data.Date (month, year)
 import Data.DateTime (DateTime, date)
 import Data.Maybe (Maybe(..))
 
-
 generateOccurrencesForMonth :: RecurrenceRule -> Array String -> String -> Array String
 generateOccurrencesForMonth rule exceptions start =
   case parseDateTimeLocal start of

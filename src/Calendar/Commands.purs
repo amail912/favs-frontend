@@ -27,14 +27,12 @@ data Command
   | TemplateCmd TemplateCommand
   | ImportCmd ImportCommand
 
-
 data SyncCommand
   = SyncSetItems (Array CalendarItem)
   | SyncCreateItem CalendarItem
   | SyncRefreshItems
   | SyncSubmitIntentionCmd
   | SyncRunPending (Array CalendarItem)
-
 
 data DragCommand
   = DragSetItems (Array CalendarItem)
@@ -43,20 +41,15 @@ data DragCommand
   | DragUpdateItem String CalendarItem
   | DragRefreshItems
 
-
 data ViewCommand
   = ViewValidateItem String Int
   | ViewUpdateItem String CalendarItem
 
-
-data TemplateCommand
-  = TemplateSetDraft IntentionDraft
-
+data TemplateCommand = TemplateSetDraft IntentionDraft
 
 data ImportCommand
   = ImportSetItems (Array CalendarItem)
   | ImportSetPending (Array CalendarItem)
-
 
 tellCmd :: forall s. Command -> StateT s (WriterT (Array Command) Aff) Unit
 

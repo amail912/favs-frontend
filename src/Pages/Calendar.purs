@@ -119,6 +119,7 @@ import Data.Foldable (traverse_)
 import Data.Lens (Lens', (.~), (%~), (^.))
 import Data.Lens.Record (prop)
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
+import Data.Monoid (guard)
 import Data.Newtype (unwrap, wrap)
 import Data.String.CodeUnits as String
 import Data.Tuple (Tuple(..))
@@ -132,7 +133,6 @@ import Web.HTML (window)
 import Web.HTML.Window as Window
 import Web.UIEvent.KeyboardEvent as KE
 import Web.UIEvent.KeyboardEvent.EventTypes as KeyboardEventTypes
-import Unsafe.Coerce (unsafeCoerce)
 import Halogen (Component, ComponentHTML, HalogenM, defaultEval, getRef, mkComponent, mkEval) as H
 import Halogen (subscribe)
 import Halogen.HTML (HTML, button, details, div, h2, i, section, summary, text)
@@ -352,7 +352,6 @@ initialState = const
   , view: viewInitialState
   }
 
-
 _calendar :: Lens' State CalendarState
 _calendar = prop (Proxy :: _ "calendar")
 
@@ -415,9 +414,9 @@ withSubState lens action = do
 
 runSyncCommand :: SyncCommand -> ErrorAgendaAppM Unit
 runSyncCommand = case _ of
-  SyncSetItems items     -> modify_ (_calendarItems .~ items)
-  SyncCreateItem item    -> createItem item >>= (const refreshItems)
-  SyncRefreshItems       -> refreshItems
+  SyncSetItems items -> modify_ (_calendarItems .~ items)
+  SyncCreateItem item -> createItem item >>= (const refreshItems)
+  SyncRefreshItems -> refreshItems
   SyncSubmitIntentionCmd -> submitIntention
   SyncRunPending pending ->
     if null pending then
@@ -430,23 +429,21 @@ runSyncCommand = case _ of
         )
         true
         pending
-      if ok
-        then do
-          modify_ ((_syncPendingSync .~ []) <<< (_syncConflict .~ Nothing))
-          refreshItems
-        else modify_ (_syncConflict .~ Just pending)
+      if ok then do
+        modify_ ((_syncPendingSync .~ []) <<< (_syncConflict .~ Nothing))
+        refreshItems
+      else modify_ (_syncConflict .~ Just pending)
 
 runDragCommand :: DragCommand -> ErrorAgendaAppM Unit
 runDragCommand = case _ of
-  DragSetItems items     -> modify_ (_calendarItems .~ items)
+  DragSetItems items -> modify_ (_calendarItems .~ items)
   DragUpsertPending item -> modify_ (_syncPendingSync %~ upsertPendingItem item)
   DragSetUpdateError err -> modify_ (_syncUpdateError .~ err)
-  DragRefreshItems       -> refreshItems
+  DragRefreshItems -> refreshItems
   DragUpdateItem itemId updatedItem -> do
     resp <- updateItem itemId updatedItem
-    if statusOk resp
-      then modify_ (_syncUpdateError .~ Nothing)
-      else modify_ (_syncUpdateError .~ Just (updateErrorMessage (unwrap resp.status)))
+    if statusOk resp then modify_ (_syncUpdateError .~ Nothing)
+    else modify_ (_syncUpdateError .~ Just (updateErrorMessage (unwrap resp.status)))
     refreshItems
 
 runViewCommand :: ViewCommand -> ErrorAgendaAppM Unit
@@ -455,30 +452,28 @@ runViewCommand = case _ of
     validateItem itemId minutes >>= (const refreshItems)
   ViewUpdateItem itemId updatedItem -> do
     st <- get
-    if st ^. _syncOfflineMode then do
+    if st ^. _syncOfflineMode then
       modify_ ((_calendarItems %~ replaceItemById itemId updatedItem) <<< (_syncPendingSync %~ upsertPendingItem updatedItem) <<< (_syncUpdateError .~ Nothing))
     else do
       resp <- updateItem itemId updatedItem
-      if statusOk resp
-        then modify_ (_syncUpdateError .~ Nothing)
-        else modify_ (_syncUpdateError .~ Just (updateErrorMessage (unwrap resp.status)))
+      if statusOk resp then modify_ (_syncUpdateError .~ Nothing)
+      else modify_ (_syncUpdateError .~ Just (updateErrorMessage (unwrap resp.status)))
       refreshItems
 
 runTemplateCommand :: TemplateCommand -> ErrorAgendaAppM Unit
 runTemplateCommand (TemplateSetDraft draft) = modify_ (_calendarDraft .~ draft)
 
 runImportCommand :: ImportCommand -> ErrorAgendaAppM Unit
-runImportCommand (ImportSetItems items)     = modify_ (_calendarItems .~ items)
+runImportCommand (ImportSetItems items) = modify_ (_calendarItems .~ items)
 runImportCommand (ImportSetPending pending) = modify_ (_syncPendingSync .~ pending)
 
 runCommand :: Command -> ErrorAgendaAppM Unit
 runCommand = case _ of
-  SyncCmd     cmd -> runSyncCommand cmd
-  DragCmd     cmd -> runDragCommand cmd
-  ViewCmd     cmd -> runViewCommand cmd
+  SyncCmd cmd -> runSyncCommand cmd
+  DragCmd cmd -> runDragCommand cmd
+  ViewCmd cmd -> runViewCommand cmd
   TemplateCmd cmd -> runTemplateCommand cmd
-  ImportCmd   cmd -> runImportCommand cmd
-
+  ImportCmd cmd -> runImportCommand cmd
 
 handleAction :: Action -> AgendaAppM Unit
 handleAction action = handleError $
@@ -524,7 +519,7 @@ handleAction action = handleError $
             lastType = st ^. _calendarLastCreateType
           modify_ ((_calendarDraft .~ (emptyDraft { itemType = lastType })) <<< (_calendarValidationError .~ Nothing))
         _ -> pure unit
-    GlobalKeyDown key -> do
+    GlobalKeyDown key ->
       if key == "Escape" then do
         st <- get
         case st ^. (_view <<< _viewActiveModalS) of
@@ -604,30 +599,29 @@ submitIntention = do
   st <- get
   case validateIntention (st ^. _calendarDraft) of
     Left err -> modify_ (_calendarValidationError .~ Just (validationErrorMessage err))
-    Right validDraft -> do
+    Right validDraft ->
       case toNewIntention validDraft of
         Left err ->
           modify_ (_calendarValidationError .~ Just err)
         Right item ->
-          if st ^. _syncOfflineMode
-            then do
-              let
-                result = applyOfflineMutation true item (st ^. _calendarItems) (st ^. _syncPendingSync)
-              modify_
-                ( (_calendarItems .~ result.items)
-                    <<< (_calendarDraft .~ emptyDraft)
-                    <<< (_calendarValidationError .~ Nothing)
-                    <<< (_syncPendingSync .~ result.pending)
-                    <<< ((_view <<< _viewActiveModalS) .~ Nothing)
-                )
-            else do
-              _ <- createItem item
-              modify_
-                ( (_calendarDraft .~ emptyDraft)
-                    <<< (_calendarValidationError .~ Nothing)
-                    <<< ((_view <<< _viewActiveModalS) .~ Nothing)
-                )
-              refreshItems
+          if st ^. _syncOfflineMode then do
+            let
+              result = applyOfflineMutation true item (st ^. _calendarItems) (st ^. _syncPendingSync)
+            modify_
+              ( (_calendarItems .~ result.items)
+                  <<< (_calendarDraft .~ emptyDraft)
+                  <<< (_calendarValidationError .~ Nothing)
+                  <<< (_syncPendingSync .~ result.pending)
+                  <<< ((_view <<< _viewActiveModalS) .~ Nothing)
+              )
+          else do
+            _ <- createItem item
+            modify_
+              ( (_calendarDraft .~ emptyDraft)
+                  <<< (_calendarValidationError .~ Nothing)
+                  <<< ((_view <<< _viewActiveModalS) .~ Nothing)
+              )
+            refreshItems
 
 focusModal :: ErrorAgendaAppM Unit
 focusModal = do
@@ -640,9 +634,11 @@ subscribeToGlobalKeyDown :: ErrorAgendaAppM Unit
 subscribeToGlobalKeyDown = do
   win <- liftEffect window
   let target = Window.toEventTarget win
-  let emitter = HQE.eventListener KeyboardEventTypes.keydown target \ev ->
-        let keyEvent = unsafeCoerce ev :: KE.KeyboardEvent
-        in Just (GlobalKeyDown (KE.key keyEvent))
+  let
+    emitter = HQE.eventListener KeyboardEventTypes.keydown target \ev ->
+      case KE.fromEvent ev of
+        Nothing -> Nothing
+        Just keyEvent -> Just (GlobalKeyDown (KE.key keyEvent))
   _ <- lift $ subscribe emitter
   pure unit
 
@@ -650,11 +646,11 @@ subscribeToGlobalResize :: ErrorAgendaAppM Unit
 subscribeToGlobalResize = do
   win <- liftEffect window
   let target = Window.toEventTarget win
-  let emitter = HQE.eventListener (EventType "resize") target \_ ->
-        Just GlobalResize
+  let
+    emitter = HQE.eventListener (EventType "resize") target \_ ->
+      Just GlobalResize
   _ <- lift $ subscribe emitter
   pure unit
-
 
 render
   :: forall m
@@ -679,13 +675,15 @@ render { calendar, sync, drag, notifications, templates, imports, exports, view 
       else items
     sortedItems = sortItems sortMode conflictIds itemsToShow
   in
-  div [ class_ "entity-page calendar-page" ]
+    div [ class_ "entity-page calendar-page" ]
       [ section [ class_ "calendar-header" ]
           [ h2 [ class_ "calendar-title" ] [ text (viewTitle viewMode) ]
           , div [ class_ "calendar-subtitle" ] [ text "Capture rapide des intentions à planifier." ]
           , div [ class_ "calendar-controls" ]
               [ button
-                  [ class_ $ "btn btn-sm calendar-filter" <> if showConflictsOnly then " btn-outline-primary" else " btn-outline-secondary"
+                  [ class_ $ "btn btn-sm calendar-filter"
+                      <> guard showConflictsOnly " btn-outline-primary"
+                      <> guard (not showConflictsOnly) " btn-outline-secondary"
                   , onClick (const (CalendarAction CalendarToggleConflictFilter))
                   ]
                   [ text "Filtrer: en conflit" ]
@@ -696,11 +694,11 @@ render { calendar, sync, drag, notifications, templates, imports, exports, view 
           , renderViewSelector viewMode focusDate
           , renderMobileTools viewMode
           ]
-      , div [ class_ $ "calendar-layout" <> if viewMode == ViewDay then " calendar-layout--calendar" else "" ]
+      , div [ class_ $ "calendar-layout" <> guard (viewMode == ViewDay) " calendar-layout--calendar" ]
           [ div [ class_ "calendar-main" ]
               [ maybe (text "") renderUpdateError updateError
               , maybe (text "") renderValidationPanel validationPanel
-              , section [ class_ $ "calendar-list-panel" <> if viewMode == ViewDay then " calendar-list-panel--calendar" else "" ]
+              , section [ class_ $ "calendar-list-panel" <> guard (viewMode == ViewDay) " calendar-list-panel--calendar" ]
                   [ renderAgendaView viewMode focusDate conflictIds sortedItems isMobile draggingId dragHoverIndex
                   ]
               , maybe (text "") (renderConflictResolution items) conflictResolution
@@ -718,7 +716,6 @@ render { calendar, sync, drag, notifications, templates, imports, exports, view 
       , renderCreateFab
       ]
 
-
 renderFiltersContent :: forall w. Boolean -> Array (Array String) -> Boolean -> SortMode -> HTML w Action
 renderFiltersContent showConflictsOnly conflictGroups offlineMode sortMode =
   div [ class_ "calendar-modal-stack" ]
@@ -731,7 +728,6 @@ renderFiltersContent showConflictsOnly conflictGroups offlineMode sortMode =
     , renderSortPicker sortMode
     , renderConflictActions conflictGroups
     ]
-
 
 type AgendaModalsInput =
   { activeModal :: Maybe AgendaModal
@@ -780,47 +776,47 @@ renderAgendaModals { activeModal, filters, notifications, templates, csvImport, 
     renderModal modal title content onCancel onValidate =
       Modal.renderModal activeModal modal title content onCancel onValidate
   in
-  div []
-    [ renderModal ModalFilters "Filtres"
-        [ renderFiltersContent filters.showConflictsOnly filters.conflictGroups filters.offlineMode filters.sortMode ]
-        (ViewAction ViewCloseModal)
-        (ViewAction ViewCloseModal)
-    , renderModal ModalTools "Outils"
-        [ renderToolsContent ]
-        (ViewAction ViewCloseModal)
-        (ViewAction ViewCloseModal)
-    , renderModal ModalCreateItem "Créer un item"
-        [ renderCreateContent draft validationError ]
-        (ViewAction ViewCloseCreate)
-        (SyncAction SyncSubmitIntention)
-    , renderModal ModalNotifications "Rappels"
-        [ renderNotificationsContent notifications.defaults notifications.overrides notifications.editor notifications.intentions ]
-        (ViewAction ViewCloseModal)
-        (ViewAction ViewCloseModal)
-    , renderModal ModalTemplates "Templates de tâches"
-        [ renderTemplatesPanel templates.items templates.draft templates.editingId ]
-        (ViewAction ViewCloseModal)
-        (ViewAction ViewCloseModal)
-    , renderModal ModalImportCsv "Import CSV"
-        [ renderCsvImportPanel csvImport.input csvImport.result ]
-        (ViewAction ViewCloseModal)
-        (ViewAction ViewCloseModal)
-    , renderModal ModalImportIcs "Import ICS"
-        [ renderIcsImportPanel icsImport.input icsImport.result ]
-        (ViewAction ViewCloseModal)
-        (ViewAction ViewCloseModal)
-    , renderModal ModalExport "Export"
-        [ renderExportPanel export.format export.typeFilter export.statusFilter export.categoryFilter export.startDate export.endDate export.output ]
-        (ViewAction ViewCloseModal)
-        (ViewAction ViewCloseModal)
-    , case editPanel of
-        Nothing -> text ""
-        Just panel ->
-          renderModal ModalEditItem "Modifier l'item"
-            [ renderEditContent panel ]
-            (ViewAction ViewEditCancel)
-            (ViewAction ViewEditSave)
-    ]
+    div []
+      [ renderModal ModalFilters "Filtres"
+          [ renderFiltersContent filters.showConflictsOnly filters.conflictGroups filters.offlineMode filters.sortMode ]
+          (ViewAction ViewCloseModal)
+          (ViewAction ViewCloseModal)
+      , renderModal ModalTools "Outils"
+          [ renderToolsContent ]
+          (ViewAction ViewCloseModal)
+          (ViewAction ViewCloseModal)
+      , renderModal ModalCreateItem "Créer un item"
+          [ renderCreateContent draft validationError ]
+          (ViewAction ViewCloseCreate)
+          (SyncAction SyncSubmitIntention)
+      , renderModal ModalNotifications "Rappels"
+          [ renderNotificationsContent notifications.defaults notifications.overrides notifications.editor notifications.intentions ]
+          (ViewAction ViewCloseModal)
+          (ViewAction ViewCloseModal)
+      , renderModal ModalTemplates "Templates de tâches"
+          [ renderTemplatesPanel templates.items templates.draft templates.editingId ]
+          (ViewAction ViewCloseModal)
+          (ViewAction ViewCloseModal)
+      , renderModal ModalImportCsv "Import CSV"
+          [ renderCsvImportPanel csvImport.input csvImport.result ]
+          (ViewAction ViewCloseModal)
+          (ViewAction ViewCloseModal)
+      , renderModal ModalImportIcs "Import ICS"
+          [ renderIcsImportPanel icsImport.input icsImport.result ]
+          (ViewAction ViewCloseModal)
+          (ViewAction ViewCloseModal)
+      , renderModal ModalExport "Export"
+          [ renderExportPanel export.format export.typeFilter export.statusFilter export.categoryFilter export.startDate export.endDate export.output ]
+          (ViewAction ViewCloseModal)
+          (ViewAction ViewCloseModal)
+      , case editPanel of
+          Nothing -> text ""
+          Just panel ->
+            renderModal ModalEditItem "Modifier l'item"
+              [ renderEditContent panel ]
+              (ViewAction ViewEditCancel)
+              (ViewAction ViewEditSave)
+      ]
 
 validationErrorMessage :: ValidationError -> String
 validationErrorMessage err =
@@ -843,46 +839,45 @@ buildAgendaModalsInput { calendar, sync, notifications, templates, imports, expo
     { activeModal, editPanel } = view
     conflictGroups = detectConflictGroups items
   in
-  { activeModal
-  , filters:
-      { showConflictsOnly
-      , conflictGroups
-      , offlineMode
-      , sortMode
-      }
-  , notifications:
-      { defaults: notificationDefaults
-      , overrides: notificationOverrides
-      , editor: notificationEditor
-      , intentions: filter (isUnplannedIntention items) items
-      }
-  , templates:
-      { items: templateItems
-      , draft: templateDraft
-      , editingId: editingTemplateId
-      }
-  , csvImport:
-      { input: csvInput
-      , result: csvImportResult
-      }
-  , icsImport:
-      { input: icsInput
-      , result: icsImportResult
-      }
-  , export:
-      { format: exportFormat
-      , typeFilter: exportTypeFilter
-      , statusFilter: exportStatusFilter
-      , categoryFilter: exportCategoryFilter
-      , startDate: exportStartDate
-      , endDate: exportEndDate
-      , output: exportOutput
-      }
-  , draft
-  , validationError
-  , editPanel
-  }
-
+    { activeModal
+    , filters:
+        { showConflictsOnly
+        , conflictGroups
+        , offlineMode
+        , sortMode
+        }
+    , notifications:
+        { defaults: notificationDefaults
+        , overrides: notificationOverrides
+        , editor: notificationEditor
+        , intentions: filter (isUnplannedIntention items) items
+        }
+    , templates:
+        { items: templateItems
+        , draft: templateDraft
+        , editingId: editingTemplateId
+        }
+    , csvImport:
+        { input: csvInput
+        , result: csvImportResult
+        }
+    , icsImport:
+        { input: icsInput
+        , result: icsImportResult
+        }
+    , export:
+        { format: exportFormat
+        , typeFilter: exportTypeFilter
+        , statusFilter: exportStatusFilter
+        , categoryFilter: exportCategoryFilter
+        , startDate: exportStartDate
+        , endDate: exportEndDate
+        , output: exportOutput
+        }
+    , draft
+    , validationError
+    , editPanel
+    }
 
 renderAccordion :: forall w i. String -> String -> HTML w i -> HTML w i
 renderAccordion title extraClass content =

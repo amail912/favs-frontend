@@ -31,14 +31,12 @@ import Halogen.HTML.Events (onClick)
 import Ui.Utils (class_)
 import Type.Proxy (Proxy(..))
 
-
 type SyncState =
   { offlineMode :: Boolean
   , pendingSync :: Array CalendarItem
   , syncConflict :: Maybe (Array CalendarItem)
   , updateError :: Maybe String
   }
-
 
 syncInitialState :: SyncState
 syncInitialState =
@@ -47,7 +45,6 @@ syncInitialState =
   , syncConflict: Nothing
   , updateError: Nothing
   }
-
 
 _syncOfflineMode :: Lens' SyncState Boolean
 _syncOfflineMode = prop (Proxy :: _ "offlineMode")
@@ -61,7 +58,6 @@ _syncConflict = prop (Proxy :: _ "syncConflict")
 _syncUpdateError :: Lens' SyncState (Maybe String)
 _syncUpdateError = prop (Proxy :: _ "updateError")
 
-
 data SyncAction
   = SyncDraftTitleKeyDown String
   | SyncSubmitIntention
@@ -70,7 +66,6 @@ data SyncAction
   | SyncResolveKeepLocal
   | SyncResolveDiscardLocal
   | SyncDismissUpdateError
-
 
 handleSyncAction :: Array CalendarItem -> SyncAction -> StateT SyncState (WriterT (Array Command) Aff) Unit
 handleSyncAction items = case _ of
@@ -86,7 +81,7 @@ handleSyncAction items = case _ of
         result = applyOfflineMutation true item items (syncState ^. _syncPendingSync)
       modify_ (_syncPendingSync .~ result.pending)
       tellCmd $ SyncCmd (SyncSetItems result.items)
-    else do
+    else
       tellCmd $ SyncCmd (SyncCreateItem item)
   SyncToggleOffline -> do
     syncState <- get
@@ -102,7 +97,6 @@ handleSyncAction items = case _ of
   SyncDismissUpdateError ->
     modify_ (_syncUpdateError .~ Nothing)
 
-
 toScheduledBlock :: String -> CalendarItemContent -> CalendarItem
 toScheduledBlock sourceId content =
   NewCalendarItem
@@ -113,7 +107,6 @@ toScheduledBlock sourceId content =
           , sourceItemId = Just sourceId
           }
     }
-
 
 renderOfflineToggle :: forall w. Boolean -> HTML w SyncAction
 renderOfflineToggle offlineMode =

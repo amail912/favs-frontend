@@ -64,7 +64,7 @@ _checklistItems :: Lens' Checklist (Array ChecklistItem)
 _checklistItems = _content <<< (lens _.items $ _ { items = _ })
 
 _label :: Lens' ChecklistItem String
-_label = lens' $ (\(ChecklistItem { label, checked }) -> Tuple label (\newLabel -> ChecklistItem { label: newLabel, checked: checked }))
+_label = lens' $ (\(ChecklistItem { label, checked }) -> Tuple label (\newLabel -> ChecklistItem { label: newLabel, checked }))
 
 data Action
   = Initialize
@@ -165,14 +165,14 @@ handleAction action = handleError $
         }
       goInput (length st.checklists)
     EditChecklistName idx -> do
-      modify_ \st -> st { editingState = EditingChecklistName idx }
+      modify_ (_ { editingState = EditingChecklistName idx })
       goInput idx
     EditLabelContent checklistIdx itemIdx -> do
-      modify_ \st -> st { editingState = EditingChecklistContent checklistIdx itemIdx }
+      modify_ (_ { editingState = EditingChecklistContent checklistIdx itemIdx })
       goInput checklistIdx
     ChecklistNameChanged idx newTitle -> updateChecklistWithSaveAndRefreshChecklists idx _name newTitle
     ChecklistLabelChanged checklistIdx itemIdx newLabel -> updateChecklistWithSaveAndRefreshChecklists checklistIdx (_checklistItems <<< ix itemIdx <<< _label) newLabel
-    EditDone -> modify_ \st -> st { editingState = None }
+    EditDone -> modify_ (_ { editingState = None })
     DeleteChecklist storageId -> do
       deleteChecklist storageId
       refreshChecklists
@@ -213,7 +213,7 @@ updateChecklistWithSaveAndRefreshChecklists idx lens_ newVal = do
   writeAndRefreshThenStopEditing :: Checklist -> ErrorChecklistAppM Unit
   writeAndRefreshThenStopEditing checklist = do
     saveChecklistAndRefresh checklist
-    lift $ modify_ \st -> st { editingState = None }
+    lift $ modify_ (_ { editingState = None })
 
 goInput :: Int -> ErrorChecklistAppM Unit
 goInput idx = do
@@ -227,7 +227,7 @@ goInput idx = do
 refreshChecklists :: ErrorChecklistAppM Unit
 refreshChecklists = do
   newChecklists <- getChecklists
-  lift $ modify_ \st -> st { checklists = newChecklists }
+  lift $ modify_ (_ { checklists = newChecklists })
 
 getChecklists :: ErrorChecklistAppM (Array Checklist)
 getChecklists = do

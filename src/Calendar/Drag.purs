@@ -52,7 +52,6 @@ import Web.TouchEvent.TouchList as TouchList
 import Ui.Utils (class_)
 import Ui.Vibration (vibrateIfAvailable)
 
-
 type DragState =
   { draggingId :: Maybe String
   , dragHoverIndex :: Maybe Int
@@ -62,13 +61,11 @@ type DragState =
   , touchDragActive :: Boolean
   }
 
-
 type DragCtx =
   { items :: Array CalendarItem
   , focusDate :: String
   , offlineMode :: Boolean
   }
-
 
 dragInitialState :: DragState
 dragInitialState =
@@ -79,7 +76,6 @@ dragInitialState =
   , touchStartAt: Nothing
   , touchDragActive: false
   }
-
 
 _draggingIdS :: Lens' DragState (Maybe String)
 _draggingIdS = prop (Proxy :: _ "draggingId")
@@ -99,7 +95,6 @@ _touchStartAtS = prop (Proxy :: _ "touchStartAt")
 _touchDragActiveS :: Lens' DragState Boolean
 _touchDragActiveS = prop (Proxy :: _ "touchDragActive")
 
-
 data DragAction
   = DragStart String DragEvent
   | DragOver String DragEvent
@@ -112,7 +107,6 @@ data DragAction
   | DragTouchMoveCalendar TouchEvent.TouchEvent
   | DragTouchEnd
   | DragTouchCancel
-
 
 handleDragAction :: DragCtx -> DragAction -> StateT DragState (WriterT (Array Command) Aff) Unit
 handleDragAction ctx = case _ of
@@ -188,7 +182,7 @@ handleDragAction ctx = case _ of
             case result.updated of
               Nothing ->
                 modify_ resetDragState
-              Just updatedItem -> do
+              Just updatedItem ->
                 if ctx.offlineMode then do
                   tellCmd $ DragCmd (DragSetItems result.items)
                   tellCmd $ DragCmd (DragUpsertPending updatedItem)
@@ -218,8 +212,9 @@ handleDragAction ctx = case _ of
       )
   DragTouchMove ev -> do
     dragState <- get
-    when (dragState ^. _touchDragActiveS) $
-      liftEffect $ preventDefault (TouchEvent.toEvent ev)
+    when (dragState ^. _touchDragActiveS)
+      $ liftEffect
+      $ preventDefault (TouchEvent.toEvent ev)
     case { draggingId: dragState ^. _draggingIdS, touchStartAt: dragState ^. _touchStartAtS, touchStartItemId: dragState ^. _touchStartItemIdS } of
       { draggingId: Nothing, touchStartAt: Just startedAt, touchStartItemId: Just itemId } -> do
         now <- liftEffect Now.now
@@ -251,7 +246,7 @@ handleDragAction ctx = case _ of
     case dragState ^. _draggingIdS of
       Nothing ->
         modify_ resetTouchState
-      Just draggingId -> do
+      Just draggingId ->
         case dragState ^. _dragHoverIndexS of
           Nothing -> modify_ resetTouchState
           Just minuteIndex -> do
@@ -283,7 +278,7 @@ handleDragAction ctx = case _ of
                 case result.updated of
                   Nothing ->
                     modify_ resetTouchState
-                  Just updatedItem -> do
+                  Just updatedItem ->
                     if ctx.offlineMode then do
                       tellCmd $ DragCmd (DragSetItems result.items)
                       tellCmd $ DragCmd (DragUpsertPending updatedItem)
@@ -301,7 +296,6 @@ handleDragAction ctx = case _ of
           <<< (_touchStartAtS .~ Nothing)
           <<< (_touchDragActiveS .~ false)
       )
-
 
 dragHandlers
   :: forall action r
@@ -326,7 +320,6 @@ dragHandlers onAction (ServerCalendarItem { id }) =
   , onDragEnd (const (onAction DragEnd))
   ]
 dragHandlers _ _ = []
-
 
 dragCalendarHandlers
   :: forall action r
@@ -371,7 +364,6 @@ renderDropIndicator idx =
       ]
       [ div [ class_ "calendar-calendar-drop-label" ] [ text label ] ]
 
-
 computeDropMinuteIndex :: Int -> Int -> Int
 computeDropMinuteIndex cursorIndex offsetMinutes =
   let
@@ -393,9 +385,7 @@ indexToTimeLabel idx =
   in
     pad2 hour <> ":" <> pad2 minute
 
-
 -- Internal helpers
-
 
 dragOffsetFromEvent :: DragEvent -> Maybe Int -> Effect (Maybe Int)
 dragOffsetFromEvent ev duration = do
@@ -422,7 +412,6 @@ dragOffsetFromEvent ev duration = do
         snapped = Int.quot clamped 5 * 5
       pure (Just snapped)
 
-
 dragMinuteIndexFromEvent :: DragEvent -> Effect (Maybe Int)
 dragMinuteIndexFromEvent ev = do
   let
@@ -445,11 +434,9 @@ dragMinuteIndexFromEvent ev = do
         index = Int.quot minutes 5
       pure (Just index)
 
-
 touchClientY :: TouchEvent.TouchEvent -> Maybe Int
 touchClientY ev =
   TouchList.item 0 (TouchEvent.touches ev) <#> Touch.clientY
-
 
 dragOffsetFromTouch :: TouchEvent.TouchEvent -> Maybe Int -> Effect (Maybe Int)
 dragOffsetFromTouch ev duration = do
@@ -474,7 +461,6 @@ dragOffsetFromTouch ev duration = do
         clamped = max 0 (min (safeDuration - 1) minutes)
         snapped = Int.quot clamped 5 * 5
       pure (Just snapped)
-
 
 dragMinuteIndexFromTouch :: TouchEvent.TouchEvent -> Effect (Maybe Int)
 dragMinuteIndexFromTouch ev = do
@@ -503,7 +489,6 @@ dragMinuteIndexFromTouch ev = do
         minutes = max 0 (min 1439 (Int.floor rawMinutes))
         index = Int.quot minutes 5
       pure (Just index)
-
 
 moveItemBefore :: String -> String -> Array CalendarItem -> Array CalendarItem
 moveItemBefore dragId targetId items =

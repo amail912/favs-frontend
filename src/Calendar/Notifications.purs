@@ -28,6 +28,7 @@ import Data.Array (catMaybes, filter, find, null)
 import Data.Lens (Lens', (.~), (%~), (^.))
 import Data.Lens.Record (prop)
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
+import Data.Monoid (guard)
 import Effect.Aff (Aff)
 import Halogen.HTML (HTML, button, div, input, section, text)
 import Halogen.HTML.Events (onClick, onValueChange)
@@ -37,7 +38,6 @@ import Ui.AgendaRender (renderPanelHeader)
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Ui.Utils (class_)
 
-
 type NotificationState =
   { notificationDefaults :: NotificationDefaults
   , notificationOverrides :: Array NotificationOverride
@@ -45,13 +45,11 @@ type NotificationState =
   , notificationEditor :: Maybe NotificationEditor
   }
 
-
 type NotificationEditor =
   { itemId :: String
   , startTime :: String
   , beforeEndRaw :: String
   }
-
 
 notificationInitialState :: NotificationState
 notificationInitialState =
@@ -60,7 +58,6 @@ notificationInitialState =
   , notificationPanelOpen: false
   , notificationEditor: Nothing
   }
-
 
 _notificationDefaultsS :: Lens' NotificationState NotificationDefaults
 _notificationDefaultsS = prop (Proxy :: _ "notificationDefaults")
@@ -74,7 +71,6 @@ _notificationPanelOpenS = prop (Proxy :: _ "notificationPanelOpen")
 _notificationEditorS :: Lens' NotificationState (Maybe NotificationEditor)
 _notificationEditorS = prop (Proxy :: _ "notificationEditor")
 
-
 data NotificationAction
   = NotificationTogglePanel
   | NotificationDefaultStartTimeChanged String
@@ -85,7 +81,6 @@ data NotificationAction
   | NotificationSaveOverride
   | NotificationResetOverride String
   | NotificationCancelOverride
-
 
 handleNotificationAction :: NotificationAction -> StateT NotificationState (WriterT (Array Command) Aff) Unit
 handleNotificationAction = case _ of
@@ -111,9 +106,9 @@ handleNotificationAction = case _ of
         fromMaybe (st ^. _notificationDefaultsS).beforeEndHours (existing >>= _.beforeEndHours)
     modify_ (_notificationEditorS .~ Just { itemId, startTime, beforeEndRaw: show beforeEnd })
   NotificationStartTimeChanged raw ->
-    modify_ (_notificationEditorS %~ map (\editor -> editor { startTime = raw }))
+    modify_ (_notificationEditorS %~ map (_ { startTime = raw }))
   NotificationBeforeEndChanged raw ->
-    modify_ (_notificationEditorS %~ map (\editor -> editor { beforeEndRaw = raw }))
+    modify_ (_notificationEditorS %~ map (_ { beforeEndRaw = raw }))
   NotificationSaveOverride -> do
     st <- get
     case st ^. _notificationEditorS of
@@ -133,7 +128,6 @@ handleNotificationAction = case _ of
       )
   NotificationCancelOverride ->
     modify_ (_notificationEditorS .~ Nothing)
-
 
 renderNotificationsPanel
   :: forall w
@@ -240,7 +234,7 @@ renderNotificationItem defaults overrides editor item =
                   , div [ class_ "calendar-notification-window" ] [ text $ content.windowStart <> " → " <> content.windowEnd ]
                   ]
               , div [ class_ "calendar-notification-actions" ]
-                  [ div [ class_ $ "calendar-notification-badge" <> if hasOverride then " calendar-notification-badge--custom" else "" ]
+                  [ div [ class_ $ "calendar-notification-badge" <> guard hasOverride " calendar-notification-badge--custom" ]
                       [ text $ if hasOverride then "Personnalisé" else "Par défaut" ]
                   , button
                       [ class_ "btn btn-sm btn-outline-secondary"
@@ -297,8 +291,8 @@ reminderTimesForIntention defaults override content =
     let
       startTime = fromMaybe defaults.startDayTime (override >>= _.startDayTime)
       beforeEndHours = fromMaybe defaults.beforeEndHours (override >>= _.beforeEndHours)
-      startReminder = combineDateWithTime content.windowStart startTime <#> \at -> { label: "Jour de début", at }
-      beforeEndReminder = shiftMinutes (negate (beforeEndHours * 60)) content.windowEnd <#> \at -> { label: show beforeEndHours <> "h avant fin", at }
+      startReminder = combineDateWithTime content.windowStart startTime <#> \at -> { label: "Jour de début", at: _ }
+      beforeEndReminder = shiftMinutes (negate (beforeEndHours * 60)) content.windowEnd <#> \at -> { label: show beforeEndHours <> "h avant fin", at: _ }
     in
       catMaybes [ startReminder, beforeEndReminder ]
 

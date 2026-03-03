@@ -60,10 +60,12 @@ import Control.Monad.Writer.Trans (WriterT)
 import Data.Array (filter, find, findIndex, foldl, length, mapMaybe, mapWithIndex, null, sortBy, uncons, updateAt)
 import Data.Either (Either(..))
 import Data.Enum (enumFromTo)
+import Data.Foldable (fold)
 import Data.Generic.Rep (class Generic)
 import Data.Lens (Lens', (.~), (%~))
 import Data.Lens.Record (prop)
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
+import Data.Monoid (guard)
 import Data.String.Common as StringCommon
 import Effect.Aff (Aff)
 import Halogen.HTML (HTML, button, div, i, input, li, option, section, select, span, text, ul)
@@ -78,7 +80,6 @@ import Web.UIEvent.MouseEvent as MouseEvent
 import Web.TouchEvent.TouchEvent as TouchEvent
 import Ui.Utils (class_)
 
-
 type CalendarState =
   { items :: Array CalendarItem
   , draft :: IntentionDraft
@@ -88,7 +89,6 @@ type CalendarState =
   , conflictResolution :: Maybe ConflictResolution
   , sortMode :: SortMode
   }
-
 
 calendarInitialState :: CalendarState
 calendarInitialState =
@@ -101,7 +101,6 @@ calendarInitialState =
   , sortMode: SortByTime
   }
 
-
 emptyDraft :: IntentionDraft
 emptyDraft =
   { itemType: Intention
@@ -113,7 +112,6 @@ emptyDraft =
   , actualDurationMinutes: ""
   , recurrence: defaultRecurrenceDraft
   }
-
 
 data CalendarAction
   = CalendarDraftTitleChanged String
@@ -137,23 +135,19 @@ data CalendarUiAction
   | CalendarUiView ViewAction
   | CalendarUiDrag DragAction
 
-
 type ConflictResolution =
   { groupIds :: Array String
   , pendingStrategy :: Maybe ResolutionStrategy
   }
 
-
 data ResolutionStrategy
   = StrategyShift30
   | StrategySwap
-
 
 derive instance resolutionStrategyGeneric :: Generic ResolutionStrategy _
 derive instance resolutionStrategyEq :: Eq ResolutionStrategy
 instance resolutionStrategyShow :: Show ResolutionStrategy where
   show = genericShow
-
 
 data PrimaryAction
   = PrimaryPlanify
@@ -210,7 +204,6 @@ _draftRecurrenceS = _draft <<< prop (Proxy :: _ "recurrence")
 _lastCreateType :: Lens' CalendarState ItemType
 _lastCreateType = prop (Proxy :: _ "lastCreateType")
 
-
 handleCalendarAction :: CalendarAction -> StateT CalendarState (WriterT (Array Command) Aff) Unit
 handleCalendarAction action =
   modify_ $ applyCalendarAction action
@@ -241,12 +234,11 @@ applyCalendarAction action dataState =
     CalendarOpenConflictResolution groupIds ->
       (_conflictResolutionS .~ Just { groupIds, pendingStrategy: Nothing }) dataState
     CalendarChooseResolutionStrategy strategy ->
-      (_conflictResolutionS %~ map (\res -> res { pendingStrategy = Just strategy })) dataState
+      (_conflictResolutionS %~ map (_ { pendingStrategy = Just strategy })) dataState
     CalendarConfirmResolution ->
       (_conflictResolutionS .~ Nothing) dataState
     CalendarCancelResolution ->
       (_conflictResolutionS .~ Nothing) dataState
-
 
 toNewIntention :: IntentionDraft -> Either String CalendarItem
 toNewIntention draft = do
@@ -278,7 +270,6 @@ toNewIntention draft = do
       case parsePositiveInt raw of
         Just minutes -> Right (Just minutes)
         Nothing -> Left "Durée réelle invalide."
-
 
 renderCreateContent
   :: forall w
@@ -475,7 +466,6 @@ renderAgendaView viewMode focusDate conflictIds items isMobile draggingId dragHo
     ViewMonth ->
       renderRangeView "Mois" (generateMonthDates focusDate) conflictIds items isMobile
 
-
 type TimelineBlock =
   { item :: CalendarItem
   , startMin :: Int
@@ -561,23 +551,27 @@ renderTimelineItem conflictIds isMobile draggingId layout =
       case content.itemType of
         ScheduledBlock -> " calendar-calendar-item--scheduled"
         Intention -> " calendar-calendar-item--intention"
-    conflictClass = if isConflict conflictIds layout.item then " calendar-calendar-item--conflict" else ""
+    conflictClass = guard (isConflict conflictIds layout.item) " calendar-calendar-item--conflict"
     draggingClass =
       case { draggingId, item: layout.item } of
         { draggingId: Just activeId, item: ServerCalendarItem { id } } | activeId == id ->
           " calendar-calendar-item--dragging"
         _ -> ""
     inlineStyle =
-      " --start:" <> show layout.startMin <> ";"
-        <> " --duration:"
-        <> show layout.duration
-        <> ";"
-        <> " --column:"
-        <> show layout.columnIndex
-        <> ";"
-        <> " --columns:"
-        <> show layout.columnCount
-        <> ";"
+      fold
+        [ " --start:"
+        , show layout.startMin
+        , ";"
+        , " --duration:"
+        , show layout.duration
+        , ";"
+        , " --column:"
+        , show layout.columnIndex
+        , ";"
+        , " --columns:"
+        , show layout.columnCount
+        , ";"
+        ]
     dragProps = dragCalendarHandlers CalendarUiDrag layout.item
     editProps = editHandlers isMobile draggingId layout.item
   in
@@ -660,7 +654,6 @@ assignColumns group =
       )
       result.placements
 
-
 toTimelineBlock :: CalendarItem -> Maybe TimelineBlock
 toTimelineBlock item = do
   let content = calendarItemContent item
@@ -732,7 +725,7 @@ renderItem
 renderItem conflictIds isMobile _ item =
   let
     content = calendarItemContent item
-    conflictClass = if isConflict conflictIds item then " calendar-card--conflict" else ""
+    conflictClass = guard (isConflict conflictIds item) " calendar-card--conflict"
     dragProps = dragHandlers CalendarUiDrag item
     editProps = editHandlers isMobile Nothing item
   in
@@ -808,7 +801,8 @@ editHandlers
 editHandlers isMobile draggingId item =
   if isMobile then
     [ onDoubleClick (const (CalendarUiView (ViewOpenEditFromDoubleClick item))) ]
-      <> if draggingId == Nothing then
+      <>
+        if draggingId == Nothing then
           [ onTouchEnd (const (CalendarUiView (ViewMobileTap item))) ]
         else
           []

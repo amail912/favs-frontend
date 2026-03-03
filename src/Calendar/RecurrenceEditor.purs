@@ -122,7 +122,8 @@ renderRecurrenceEditor draft =
             , option [ value "every" ] [ text "Tous les X jours" ]
             ]
         ]
-    , if draft.ruleType /= "every" then text "" else
+    , if draft.ruleType /= "every" then text ""
+      else
         div [ class_ "calendar-modal-field" ]
           [ div [ class_ "calendar-notifications-label" ] [ text "Intervalle (jours)" ]
           , input

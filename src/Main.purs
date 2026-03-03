@@ -1,4 +1,4 @@
-module Main where
+module Main (main, logError) where
 
 import Prelude
 

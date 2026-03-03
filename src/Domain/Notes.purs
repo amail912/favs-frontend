@@ -42,7 +42,7 @@ instance noteDecodeJsonInstance :: DecodeJson Note where
       content <- dec .: "content"
       title <- content .: "title"
       noteContent <- content .: "noteContent"
-      either (const $ pure $ NewNote { content: { title: title, noteContent: noteContent } })
+      either (const $ pure $ NewNote { content: { title, noteContent } })
         (decodeServerNote title noteContent)
         (dec .: "storageId")
 
@@ -51,15 +51,15 @@ instance noteDecodeJsonInstance :: DecodeJson Note where
       dec <- decodeJson flatJson
       title <- dec .: "title"
       noteContent <- dec .: "noteContent"
-      pure $ NewNote { content: { title: title, noteContent: noteContent } }
+      pure $ NewNote { content: { title, noteContent } }
 
     decodeServerNote :: String -> String -> Object Json -> Either JsonDecodeError Note
     decodeServerNote title noteContent storageIdObj = do
       version <- storageIdObj .: "version"
       id <- storageIdObj .: "id"
       pure $ ServerNote
-        { content: { title: title, noteContent: noteContent }
-        , storageId: { version: version, id: id }
+        { content: { title, noteContent }
+        , storageId: { version, id }
         }
 
 instance noteEncodeJson :: EncodeJson Note where

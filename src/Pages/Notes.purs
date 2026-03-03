@@ -152,14 +152,14 @@ handleAction action = handleError $
         }
       goInput (length st.notes)
     EditNoteTitle idx -> do
-      modify_ \st -> st { editingState = EditingNoteTitle idx }
+      modify_ (_ { editingState = EditingNoteTitle idx })
       goInput idx
     EditNoteContent idx -> do
-      modify_ \st -> st { editingState = EditingNoteContent idx }
+      modify_ (_ { editingState = EditingNoteContent idx })
       goInput idx
     NoteTitleChanged idx newTitle -> updateNoteWithSaveAndRefreshNotes idx _title newTitle
     NoteContentChanged idx newContent -> updateNoteWithSaveAndRefreshNotes idx _noteContent newContent
-    EditDone -> modify_ \st -> st { editingState = None }
+    EditDone -> modify_ (_ { editingState = None })
     DeleteNote storageId -> do
       deleteNote storageId
       refreshNotes
@@ -176,7 +176,7 @@ updateNoteWithSaveAndRefreshNotes idx lens_ newVal = do
   writeAndRefreshThenStopEditing :: Note -> ErrorNoteAppM Unit
   writeAndRefreshThenStopEditing note = do
     saveAndRefresh writeToServer refreshNotes "note" note
-    lift $ modify_ \st -> st { editingState = None }
+    lift $ modify_ (_ { editingState = None })
 
 goInput :: Int -> ErrorNoteAppM Unit
 goInput idx = do
@@ -190,7 +190,7 @@ goInput idx = do
 refreshNotes :: ErrorNoteAppM Unit
 refreshNotes = do
   newNotes <- getNotes
-  lift $ modify_ \st -> st { notes = newNotes }
+  lift $ modify_ (_ { notes = newNotes })
 
 getNotes :: ErrorNoteAppM (Array Note)
 getNotes = do

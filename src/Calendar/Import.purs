@@ -28,7 +28,6 @@ import Type.Proxy (Proxy(..))
 import Ui.AgendaRender (renderPanelHeader)
 import Ui.Utils (class_)
 
-
 type ImportState =
   { csvInput :: String
   , csvImportResult :: Maybe CsvImportResult
@@ -36,13 +35,11 @@ type ImportState =
   , icsImportResult :: Maybe IcsImportResult
   }
 
-
 type ImportCtx =
   { items :: Array CalendarItem
   , pending :: Array CalendarItem
   , offlineMode :: Boolean
   }
-
 
 importInitialState :: ImportState
 importInitialState =
@@ -51,7 +48,6 @@ importInitialState =
   , icsInput: ""
   , icsImportResult: Nothing
   }
-
 
 _csvInputS :: Lens' ImportState String
 _csvInputS = prop (Proxy :: _ "csvInput")
@@ -65,7 +61,6 @@ _icsInputS = prop (Proxy :: _ "icsInput")
 _icsImportResultS :: Lens' ImportState (Maybe IcsImportResult)
 _icsImportResultS = prop (Proxy :: _ "icsImportResult")
 
-
 data ImportAction
   = ImportCsvInputChanged String
   | ImportParseCsvInput
@@ -75,7 +70,6 @@ data ImportAction
   | ImportParseIcsInput
   | ImportApplyIcs
   | ImportClearIcs
-
 
 handleImportAction :: ImportCtx -> ImportAction -> StateT ImportState (WriterT (Array Command) Aff) Unit
 handleImportAction ctx = case _ of
@@ -125,7 +119,6 @@ handleImportAction ctx = case _ of
           modify_ ((_icsInputS .~ "") <<< (_icsImportResultS .~ Nothing))
   ImportClearIcs ->
     modify_ ((_icsInputS .~ "") <<< (_icsImportResultS .~ Nothing))
-
 
 renderCsvImportPanel :: forall w. String -> Maybe CsvImportResult -> HTML w ImportAction
 renderCsvImportPanel csvInput result =

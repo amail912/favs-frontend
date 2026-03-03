@@ -9,7 +9,6 @@ import Halogen.HTML (HTML, button, div, input, text)
 import Halogen.HTML.Events (handler', onClick)
 import Halogen.HTML.Properties (IProp, autofocus, ref, type_)
 import Ui.Utils (class_)
-import Unsafe.Coerce (unsafeCoerce)
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Web.UIEvent.KeyboardEvent as KE
 import Web.UIEvent.KeyboardEvent.EventTypes as KeyboardEventTypes
@@ -77,8 +76,7 @@ renderModal activeModal modalToRender title content onCancel onValidate =
          i
   escapeHandler =
     handler' KeyboardEventTypes.keydown \ev ->
-      let
-        keyEvent = unsafeCoerce ev :: KE.KeyboardEvent
-        key = KE.key keyEvent
-      in
-        if key == "Escape" then Just onCancel else Nothing
+      case KE.fromEvent ev of
+        Nothing -> Nothing
+        Just keyEvent ->
+          if KE.key keyEvent == "Escape" then Just onCancel else Nothing

@@ -48,13 +48,11 @@ import DOM.HTML.Indexed.InputType (InputType(..))
 import Ui.AgendaRender (renderPanelHeader)
 import Ui.Utils (class_)
 
-
 type TemplateState =
   { templates :: Array TaskTemplate
   , templateDraft :: TemplateDraft
   , editingTemplateId :: Maybe String
   }
-
 
 templateInitialState :: TemplateState
 templateInitialState =
@@ -62,7 +60,6 @@ templateInitialState =
   , templateDraft: emptyTemplateDraft
   , editingTemplateId: Nothing
   }
-
 
 _templatesS :: Lens' TemplateState (Array TaskTemplate)
 _templatesS = prop (Proxy :: _ "templates")
@@ -82,7 +79,6 @@ _templateDraftDurationS = prop (Proxy :: _ "durationMinutes")
 _templateDraftCategoryS :: Lens' TemplateDraft String
 _templateDraftCategoryS = prop (Proxy :: _ "category")
 
-
 data TemplateAction
   = TemplateTitleChangedAction String
   | TemplateDurationChangedAction String
@@ -92,7 +88,6 @@ data TemplateAction
   | TemplateCancelEdit
   | TemplateDelete String
   | TemplateUse String
-
 
 handleTemplateAction :: TemplateAction -> StateT TemplateState (WriterT (Array Command) Aff) Unit
 handleTemplateAction = case _ of
@@ -157,7 +152,6 @@ handleTemplateAction = case _ of
         let startStr = formatDateTimeLocal now
         let endStr = fromMaybe startStr (shiftMinutes template.durationMinutes startStr)
         tellCmd $ TemplateCmd (TemplateSetDraft (applyTemplateToDraft template startStr endStr))
-
 
 renderTemplatesPanel
   :: forall w
@@ -235,7 +229,6 @@ renderTemplateCard template =
         ]
     ]
 
-
 applyTemplateToDraft :: TaskTemplate -> String -> String -> IntentionDraft
 applyTemplateToDraft template windowStart windowEnd =
   { itemType: Intention
@@ -282,7 +275,6 @@ nextTemplateId templates =
         if elem candidate existing then findId (n + 1) else candidate
   in
     findId 1
-
 
 instantiateRoutine :: RoutineTemplate -> RoutineInstance
 instantiateRoutine template =

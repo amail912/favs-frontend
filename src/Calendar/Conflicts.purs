@@ -10,13 +10,11 @@ import Data.Array (elem, filter, find, length, mapMaybe, nub, uncons)
 import Data.Foldable (foldl)
 import Data.Maybe (Maybe(..))
 
-
 type ConflictBlock =
   { id :: String
   , start :: String
   , end :: String
   }
-
 
 detectConflictIds :: Array CalendarItem -> Array String
 detectConflictIds items =
@@ -44,7 +42,6 @@ detectConflictIds items =
               rest
         in
           go rest acc'
-
 
 detectConflictGroups :: Array CalendarItem -> Array (Array String)
 detectConflictGroups items =

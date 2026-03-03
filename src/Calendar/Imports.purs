@@ -19,7 +19,7 @@ parseCsvImport :: String -> CsvImportResult
 parseCsvImport raw =
   let
     lines = map stripCR (StringCommon.split (Pattern "\n") raw)
-    indexed = mapWithIndex (\idx line -> { row: idx + 1, raw: line }) lines
+    indexed = mapWithIndex (\idx -> { row: idx + 1, raw: _ }) lines
     nonEmpty = filter (\line -> StringCommon.trim line.raw /= "") indexed
   in
     case uncons nonEmpty of
