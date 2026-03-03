@@ -291,8 +291,8 @@ reminderTimesForIntention defaults override content =
     let
       startTime = fromMaybe defaults.startDayTime (override >>= _.startDayTime)
       beforeEndHours = fromMaybe defaults.beforeEndHours (override >>= _.beforeEndHours)
-      startReminder = combineDateWithTime content.windowStart startTime <#> \at -> { label: "Jour de début", at: _ }
-      beforeEndReminder = shiftMinutes (negate (beforeEndHours * 60)) content.windowEnd <#> \at -> { label: show beforeEndHours <> "h avant fin", at: _ }
+      startReminder = combineDateWithTime content.windowStart startTime <#> \at -> { label: "Jour de début", at }
+      beforeEndReminder = shiftMinutes (negate (beforeEndHours * 60)) content.windowEnd <#> \at -> { label: show beforeEndHours <> "h avant fin", at }
     in
       catMaybes [ startReminder, beforeEndReminder ]
 
