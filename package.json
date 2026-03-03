@@ -15,7 +15,9 @@
     "e2e": "npm run build && playwright test",
     "e2e:headed": "npm run build && playwright test --headed",
     "e2e:ui": "npm run build && playwright test --ui",
-    "e2e:install": "playwright install chromium"
+    "e2e:install": "playwright install chromium",
+    "lint:ps": "purescript-linter -c purs-lint.json",
+    "lint": "npm run lint:ps"
   },
   "author": "",
   "license": "ISC",
@@ -25,6 +27,7 @@
     "express": "^4.18.1",
     "http-proxy-middleware": "^2.0.6",
     "playwright": "^1.58.2",
+    "purescript-linter": "^1.2.1",
     "spago": "^1.0.3"
   }
 }
