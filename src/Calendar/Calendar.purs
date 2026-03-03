@@ -285,12 +285,12 @@ renderCreateContent draft validationError =
             ]
         ]
     , div [ class_ "calendar-modal-field" ]
-        [ div [ class_ "calendar-notifications-label" ] [ text "Debut" ]
+        [ div [ class_ "calendar-notifications-label" ] [ text "Début" ]
         , input
             [ class_ "form-control calendar-input"
             , type_ InputDatetimeLocal
             , attr (AttrName "lang") "fr"
-            , placeholder "Debut"
+            , placeholder "Début"
             , onValueChange (CalendarUiCalendar <<< CalendarDraftStartChanged)
             , value draft.windowStart
             ]
@@ -307,10 +307,10 @@ renderCreateContent draft validationError =
             ]
         ]
     , div [ class_ "calendar-modal-field" ]
-        [ div [ class_ "calendar-notifications-label" ] [ text "Categorie" ]
+        [ div [ class_ "calendar-notifications-label" ] [ text "Catégorie" ]
         , input
             [ class_ "form-control calendar-input"
-            , placeholder "Categorie"
+            , placeholder "Catégorie"
             , onValueChange (CalendarUiCalendar <<< CalendarDraftCategoryChanged)
             , value draft.category
             ]
@@ -322,14 +322,14 @@ renderCreateContent draft validationError =
             , onValueChange (CalendarUiCalendar <<< CalendarDraftStatusChanged)
             , value (statusValue draft.status)
             ]
-            [ option [ value "todo" ] [ text "A faire" ]
+            [ option [ value "todo" ] [ text "À faire" ]
             , option [ value "progress" ] [ text "En cours" ]
             , option [ value "done" ] [ text "Fait" ]
-            , option [ value "canceled" ] [ text "Annule" ]
+            , option [ value "canceled" ] [ text "Annulé" ]
             ]
         ]
     , div [ class_ "calendar-modal-field" ]
-        [ div [ class_ "calendar-notifications-label" ] [ text "Duree reelle (minutes)" ]
+        [ div [ class_ "calendar-notifications-label" ] [ text "Durée réelle (minutes)" ]
         , input
             [ class_ "form-control calendar-input"
             , type_ InputNumber
@@ -353,7 +353,7 @@ renderSortPicker sortMode =
         ]
         [ option [ value "time" ] [ text "Horaire" ]
         , option [ value "status" ] [ text "Statut" ]
-        , option [ value "category" ] [ text "Categorie" ]
+        , option [ value "category" ] [ text "Catégorie" ]
         , option [ value "conflict" ] [ text "Conflit" ]
         ]
     ]
@@ -367,7 +367,7 @@ renderConflictActions conflictGroups =
           [ class_ "btn btn-sm btn-outline-danger calendar-conflict-button"
           , onClick (const (CalendarUiCalendar (CalendarOpenConflictResolution (headOrEmpty conflictGroups))))
           ]
-          [ text "Resoudre un conflit" ]
+          [ text "Résoudre un conflit" ]
       ]
   where
   headOrEmpty groups =
@@ -378,20 +378,20 @@ renderConflictActions conflictGroups =
 renderConflictResolution :: forall w. Array CalendarItem -> ConflictResolution -> HTML w CalendarUiAction
 renderConflictResolution items resolution =
   div [ class_ "calendar-conflict-panel" ]
-    [ div [ class_ "calendar-conflict-title" ] [ text "Resolution de conflit" ]
-    , div [ class_ "calendar-conflict-subtitle" ] [ text "Choisissez une strategie puis confirmez." ]
+    [ div [ class_ "calendar-conflict-title" ] [ text "Résolution de conflit" ]
+    , div [ class_ "calendar-conflict-subtitle" ] [ text "Choisissez une stratégie puis confirmez." ]
     , ul [ class_ "calendar-conflict-list" ] (map (renderConflictItem items) resolution.groupIds)
     , div [ class_ "calendar-conflict-strategies" ]
         [ button
             [ class_ "btn btn-sm btn-outline-primary"
             , onClick (const (CalendarUiCalendar (CalendarChooseResolutionStrategy StrategyShift30)))
             ]
-            [ text "Decaler de 30 min" ]
+            [ text "Décaler de 30 min" ]
         , button
             [ class_ "btn btn-sm btn-outline-primary"
             , onClick (const (CalendarUiCalendar (CalendarChooseResolutionStrategy StrategySwap)))
             ]
-            [ text "Echanger" ]
+            [ text "Échanger" ]
         ]
     , renderConfirmation resolution.pendingStrategy
     , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const (CalendarUiCalendar CalendarCancelResolution)) ] [ text "Fermer" ]
@@ -421,7 +421,7 @@ renderConfirmation pending =
     Just strategy ->
       div [ class_ "calendar-conflict-confirmation" ]
         [ div [ class_ "calendar-conflict-confirmation-text" ]
-            [ text $ "Confirmer la strategie: " <> show strategy <> " ?" ]
+            [ text $ "Confirmer la stratégie: " <> show strategy <> " ?" ]
         , div [ class_ "calendar-conflict-confirmation-actions" ]
             [ button [ class_ "btn btn-sm btn-danger", onClick (const (CalendarUiCalendar CalendarConfirmResolution)) ] [ text "Confirmer" ]
             , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const (CalendarUiCalendar CalendarCancelResolution)) ] [ text "Annuler" ]

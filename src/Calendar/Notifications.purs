@@ -149,8 +149,8 @@ renderNotificationsPanel isOpen defaults overrides editor intentions =
     section [ class_ "calendar-notifications" ]
       [ renderPanelHeader
           "calendar-notifications"
-          "Rappels des intentions non planifiees"
-          "Les rappels par defaut s'appliquent aux intentions non planifiees."
+          "Rappels des intentions non planifiées"
+          "Les rappels par défaut s'appliquent aux intentions non planifiées."
           [ button
               [ class_ $ "btn btn-sm calendar-notifications-toggle" <> if isOpen then " btn-outline-primary" else " btn-outline-secondary"
               , onClick (const NotificationTogglePanel)
@@ -171,7 +171,7 @@ renderNotificationsContent
 renderNotificationsContent defaults overrides editor intentions =
   if null intentions then
     div [ class_ "calendar-modal-empty" ]
-      [ text "Aucune intention non planifiee." ]
+      [ text "Aucune intention non planifiée." ]
   else
     div [ class_ "calendar-notifications-modal" ]
       [ renderNotificationDefaults defaults
@@ -181,10 +181,10 @@ renderNotificationsContent defaults overrides editor intentions =
 renderNotificationDefaults :: forall w. NotificationDefaults -> HTML w NotificationAction
 renderNotificationDefaults defaults =
   div [ class_ "calendar-notifications-defaults" ]
-    [ div [ class_ "calendar-notifications-section-title" ] [ text "Rappels par defaut" ]
+    [ div [ class_ "calendar-notifications-section-title" ] [ text "Rappels par défaut" ]
     , div [ class_ "calendar-notifications-controls" ]
         [ div [ class_ "calendar-notifications-control" ]
-            [ div [ class_ "calendar-notifications-label" ] [ text "Jour de debut" ]
+            [ div [ class_ "calendar-notifications-label" ] [ text "Jour de début" ]
             , input
                 [ class_ "form-control calendar-input"
                 , type_ InputTime
@@ -241,7 +241,7 @@ renderNotificationItem defaults overrides editor item =
                   ]
               , div [ class_ "calendar-notification-actions" ]
                   [ div [ class_ $ "calendar-notification-badge" <> if hasOverride then " calendar-notification-badge--custom" else "" ]
-                      [ text $ if hasOverride then "Personnalise" else "Par defaut" ]
+                      [ text $ if hasOverride then "Personnalisé" else "Par défaut" ]
                   , button
                       [ class_ "btn btn-sm btn-outline-secondary"
                       , onClick (const (NotificationOpenEditor id))
@@ -265,7 +265,7 @@ renderNotificationEditor itemId editor =
     [ div [ class_ "calendar-notifications-section-title" ] [ text "Surcharge de rappel" ]
     , div [ class_ "calendar-notifications-controls" ]
         [ div [ class_ "calendar-notifications-control" ]
-            [ div [ class_ "calendar-notifications-label" ] [ text "Jour de debut" ]
+            [ div [ class_ "calendar-notifications-label" ] [ text "Jour de début" ]
             , input
                 [ class_ "form-control calendar-input"
                 , type_ InputTime
@@ -286,7 +286,7 @@ renderNotificationEditor itemId editor =
     , div [ class_ "calendar-notification-editor-actions" ]
         [ button [ class_ "btn btn-sm btn-success", onClick (const NotificationSaveOverride) ] [ text "Enregistrer" ]
         , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const NotificationCancelOverride) ] [ text "Annuler" ]
-        , button [ class_ "btn btn-sm btn-outline-danger", onClick (const (NotificationResetOverride itemId)) ] [ text "Reinitialiser" ]
+        , button [ class_ "btn btn-sm btn-outline-danger", onClick (const (NotificationResetOverride itemId)) ] [ text "Réinitialiser" ]
         ]
     ]
 
@@ -297,7 +297,7 @@ reminderTimesForIntention defaults override content =
     let
       startTime = fromMaybe defaults.startDayTime (override >>= _.startDayTime)
       beforeEndHours = fromMaybe defaults.beforeEndHours (override >>= _.beforeEndHours)
-      startReminder = combineDateWithTime content.windowStart startTime <#> \at -> { label: "Jour de debut", at }
+      startReminder = combineDateWithTime content.windowStart startTime <#> \at -> { label: "Jour de début", at }
       beforeEndReminder = shiftMinutes (negate (beforeEndHours * 60)) content.windowEnd <#> \at -> { label: show beforeEndHours <> "h avant fin", at }
     in
       catMaybes [ startReminder, beforeEndReminder ]

@@ -168,8 +168,8 @@ renderTemplatesPanel templates draft editingId =
   section [ class_ "calendar-templates" ]
     [ renderPanelHeader
         "calendar-templates"
-        "Templates de taches"
-        "Creez des templates reutilisables pour accelerer la saisie."
+        "Templates de tâches"
+        "Créez des templates réutilisables pour accélérer la saisie."
         []
     , div [ class_ "calendar-templates-form" ]
         [ input
@@ -182,13 +182,13 @@ renderTemplatesPanel templates draft editingId =
             [ input
                 [ class_ "form-control calendar-input"
                 , type_ InputNumber
-                , placeholder "Duree (minutes)"
+                , placeholder "Durée (minutes)"
                 , value draft.durationMinutes
                 , onValueChange TemplateDurationChangedAction
                 ]
             , input
                 [ class_ "form-control calendar-input"
-                , placeholder "Categorie (optionnelle)"
+                , placeholder "Catégorie (optionnelle)"
                 , value draft.category
                 , onValueChange TemplateCategoryChangedAction
                 ]
@@ -198,7 +198,7 @@ renderTemplatesPanel templates draft editingId =
                   [ class_ "btn btn-sm btn-primary"
                   , onClick (const TemplateSubmit)
                   ]
-                  [ text $ if editingId == Nothing then "Ajouter" else "Mettre a jour" ]
+                  [ text $ if editingId == Nothing then "Ajouter" else "Mettre à jour" ]
               ] <>
                 if editingId == Nothing then []
                 else

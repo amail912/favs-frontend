@@ -93,9 +93,9 @@ parseCsvItem header fields typeVal titleVal startVal endVal = do
     windowEnd = StringCommon.trim endVal
     category = lookupField header.categoryIdx fields >>= toOptionalString
   if title == "" then Left "Le titre est vide."
-  else if not (isDateTimeLocal windowStart) then Left "Debut invalide (format YYYY-MM-DDTHH:MM)."
+  else if not (isDateTimeLocal windowStart) then Left "Début invalide (format YYYY-MM-DDTHH:MM)."
   else if not (isDateTimeLocal windowEnd) then Left "Fin invalide (format YYYY-MM-DDTHH:MM)."
-  else if windowEnd <= windowStart then Left "La fin doit etre apres le debut."
+  else if windowEnd <= windowStart then Left "La fin doit être après le début."
   else
     Right $ NewCalendarItem
       { content:
@@ -230,7 +230,7 @@ buildIcsItem index event = do
   endRaw <- maybe (Left { eventIndex: index, message: "DTEND manquant." }) Right event.dtEnd
   windowStart <- maybe (Left { eventIndex: index, message: "DTSTART invalide." }) Right (parseIcsDateTime startRaw)
   windowEnd <- maybe (Left { eventIndex: index, message: "DTEND invalide." }) Right (parseIcsDateTime endRaw)
-  if windowEnd <= windowStart then Left { eventIndex: index, message: "La fin doit etre apres le debut." }
+  if windowEnd <= windowStart then Left { eventIndex: index, message: "La fin doit être après le début." }
   else
     Right $ NewCalendarItem
       { content:

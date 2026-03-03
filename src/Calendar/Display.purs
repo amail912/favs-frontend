@@ -275,7 +275,7 @@ renderViewSelector viewMode focusDate =
             [ text "Mois" ]
         ]
     , div [ class_ "calendar-view-date-field" ]
-        [ div [ class_ "calendar-notifications-label" ] [ text "Date de reference" ]
+        [ div [ class_ "calendar-notifications-label" ] [ text "Date de référence" ]
         , input
             [ class_ "form-control calendar-input calendar-view-date"
             , type_ InputDate
@@ -319,12 +319,12 @@ renderEditContent panel =
               ]
           ]
       , div [ class_ "calendar-modal-field" ]
-          [ div [ class_ "calendar-notifications-label" ] [ text "Debut" ]
+          [ div [ class_ "calendar-notifications-label" ] [ text "Début" ]
           , input
               [ class_ "form-control calendar-input"
               , type_ InputDatetimeLocal
               , attr (AttrName "lang") "fr"
-              , placeholder "Debut"
+              , placeholder "Début"
               , onValueChange ViewEditStartChanged
               , value draft.windowStart
               ]
@@ -341,10 +341,10 @@ renderEditContent panel =
               ]
           ]
       , div [ class_ "calendar-modal-field" ]
-          [ div [ class_ "calendar-notifications-label" ] [ text "Categorie" ]
+          [ div [ class_ "calendar-notifications-label" ] [ text "Catégorie" ]
           , input
               [ class_ "form-control calendar-input"
-              , placeholder "Categorie"
+              , placeholder "Catégorie"
               , onValueChange ViewEditCategoryChanged
               , value draft.category
               ]
@@ -356,14 +356,14 @@ renderEditContent panel =
               , onValueChange ViewEditStatusChanged
               , value (statusValue draft.status)
               ]
-              [ option [ value "todo" ] [ text "A faire" ]
+              [ option [ value "todo" ] [ text "À faire" ]
               , option [ value "progress" ] [ text "En cours" ]
               , option [ value "done" ] [ text "Fait" ]
-              , option [ value "canceled" ] [ text "Annule" ]
+              , option [ value "canceled" ] [ text "Annulé" ]
               ]
           ]
       , div [ class_ "calendar-modal-field" ]
-          [ div [ class_ "calendar-notifications-label" ] [ text "Duree reelle (minutes)" ]
+          [ div [ class_ "calendar-notifications-label" ] [ text "Durée réelle (minutes)" ]
           , input
               [ class_ "form-control calendar-input"
               , type_ InputNumber
@@ -379,13 +379,13 @@ renderEditContent panel =
 renderValidationPanel :: forall w. ValidationPanel -> HTML w ViewAction
 renderValidationPanel panel =
   div [ class_ "calendar-validation-panel" ]
-    [ div [ class_ "calendar-conflict-title" ] [ text "Valider la tache" ]
+    [ div [ class_ "calendar-conflict-title" ] [ text "Valider la tâche" ]
     , div [ class_ "calendar-conflict-subtitle" ]
-        [ text "Saisissez la duree reelle (minutes) ou acceptez la proposition." ]
+        [ text "Saisissez la durée réelle (minutes) ou acceptez la proposition." ]
     , maybe (text "") (\minutes -> div [ class_ "calendar-validation-proposal" ] [ text $ "Proposition: " <> show minutes <> " min" ]) panel.proposedMinutes
     , input
         [ class_ "form-control calendar-input"
-        , placeholder "Duree reelle (minutes)"
+        , placeholder "Durée réelle (minutes)"
         , onValueChange ViewValidationMinutesChanged
         , value panel.inputValue
         ]
@@ -423,7 +423,7 @@ validationErrorMessage :: ValidationError -> String
 validationErrorMessage err =
   case err of
     TitleEmpty -> "Le titre est obligatoire."
-    WindowStartInvalid -> "La date de debut est invalide."
+    WindowStartInvalid -> "La date de début est invalide."
     WindowEndInvalid -> "La date de fin est invalide."
-    WindowOrderInvalid -> "La fin doit etre apres le debut."
-    WindowTooShort -> "La fin doit etre au minimum 5 minutes apres le debut."
+    WindowOrderInvalid -> "La fin doit être après le début."
+    WindowTooShort -> "La fin doit être au minimum 5 minutes après le début."

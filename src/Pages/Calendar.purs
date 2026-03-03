@@ -625,7 +625,7 @@ render { calendar, sync, drag, notifications, templates, imports, exports, view 
   div [ class_ "entity-page calendar-page" ]
       [ section [ class_ "calendar-header" ]
           [ h2 [ class_ "calendar-title" ] [ text (viewTitle viewMode) ]
-          , div [ class_ "calendar-subtitle" ] [ text "Capture rapide des intentions a planifier." ]
+          , div [ class_ "calendar-subtitle" ] [ text "Capture rapide des intentions à planifier." ]
           , div [ class_ "calendar-controls" ]
               [ button
                   [ class_ $ "btn btn-sm calendar-filter" <> if showConflictsOnly then " btn-outline-primary" else " btn-outline-secondary"
@@ -651,7 +651,7 @@ render { calendar, sync, drag, notifications, templates, imports, exports, view 
               ]
           , div [ class_ "calendar-side" ]
               [ renderNotificationsPanel notificationPanelOpen notificationDefaults notificationOverrides notificationEditor unplannedIntentions
-              , renderAccordion "Templates de taches" "calendar-accordion templates" $ renderTemplatesPanel templateItems templateDraft editingTemplateId
+              , renderAccordion "Templates de tâches" "calendar-accordion templates" $ renderTemplatesPanel templateItems templateDraft editingTemplateId
               , renderAccordion "Import CSV" "calendar-accordion import-csv" $ renderCsvImportPanel csvInput csvImportResult
               , renderAccordion "Import ICS" "calendar-accordion import-ics" $ renderIcsImportPanel icsInput icsImportResult
               , renderAccordion "Export" "calendar-accordion export" $ renderExportPanel exportFormat exportTypeFilter exportStatusFilter exportCategoryFilter exportStartDate exportEndDate exportOutput
@@ -740,7 +740,7 @@ renderAgendaModals { activeModal, filters, notifications, templates, csvImport, 
         [ renderNotificationsContent notifications.defaults notifications.overrides notifications.editor notifications.intentions ]
         (ViewAction ViewCloseModal)
         (ViewAction ViewCloseModal)
-    , renderModal ModalTemplates "Templates de taches"
+    , renderModal ModalTemplates "Templates de tâches"
         [ renderTemplatesPanel templates.items templates.draft templates.editingId ]
         (ViewAction ViewCloseModal)
         (ViewAction ViewCloseModal)
@@ -769,10 +769,10 @@ validationErrorMessage :: ValidationError -> String
 validationErrorMessage err =
   case err of
     TitleEmpty -> "Le titre est obligatoire."
-    WindowStartInvalid -> "La date de debut est invalide."
+    WindowStartInvalid -> "La date de début est invalide."
     WindowEndInvalid -> "La date de fin est invalide."
-    WindowOrderInvalid -> "La fin doit etre apres le debut."
-    WindowTooShort -> "La fin doit etre au minimum 5 minutes apres le debut."
+    WindowOrderInvalid -> "La fin doit être après le début."
+    WindowTooShort -> "La fin doit être au minimum 5 minutes après le début."
 
 buildAgendaModalsInput :: State -> AgendaModalsInput
 buildAgendaModalsInput { calendar, sync, notifications, templates, imports, exports, view } =

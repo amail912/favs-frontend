@@ -204,7 +204,7 @@ spec =
         content = calendarContent Intention "Notif" "2026-02-19T09:00" "2026-02-20T12:00"
         reminders = reminderTimesForIntention defaultNotificationDefaults Nothing content
       reminders `shouldEqual`
-        [ { label: "Jour de debut", at: "2026-02-19T06:00" }
+        [ { label: "Jour de début", at: "2026-02-19T06:00" }
         , { label: "24h avant fin", at: "2026-02-19T12:00" }
         ]
 
@@ -219,7 +219,7 @@ spec =
             }
         reminders = reminderTimesForIntention defaultNotificationDefaults override content
       reminders `shouldEqual`
-        [ { label: "Jour de debut", at: "2026-02-19T08:30" }
+        [ { label: "Jour de début", at: "2026-02-19T08:30" }
         , { label: "12h avant fin", at: "2026-02-20T00:00" }
         ]
 

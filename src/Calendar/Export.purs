@@ -139,7 +139,7 @@ renderExportPanel format typeFilter statusFilter categoryFilter startDate endDat
     [ renderPanelHeader
         "calendar-export"
         "Export"
-        "Filtres: type, categorie, statut, periode."
+        "Filtres: type, catégorie, statut, période."
         []
     , div [ class_ "calendar-export-controls" ]
         [ div [ class_ "calendar-export-control" ]
@@ -162,7 +162,7 @@ renderExportPanel format typeFilter statusFilter categoryFilter startDate endDat
                 ]
                 [ option [ value "" ] [ text "Tous" ]
                 , option [ value "INTENTION" ] [ text "Intention" ]
-                , option [ value "BLOC_PLANIFIE" ] [ text "Bloc planifie" ]
+                , option [ value "BLOC_PLANIFIE" ] [ text "Bloc planifié" ]
                 ]
             ]
         , div [ class_ "calendar-export-control" ]
@@ -180,7 +180,7 @@ renderExportPanel format typeFilter statusFilter categoryFilter startDate endDat
                 ]
             ]
         , div [ class_ "calendar-export-control" ]
-            [ div [ class_ "calendar-notifications-label" ] [ text "Categorie" ]
+            [ div [ class_ "calendar-notifications-label" ] [ text "Catégorie" ]
             , input
                 [ class_ "form-control calendar-input"
                 , placeholder "Ex: Sport"
@@ -189,7 +189,7 @@ renderExportPanel format typeFilter statusFilter categoryFilter startDate endDat
                 ]
             ]
         , div [ class_ "calendar-export-control" ]
-            [ div [ class_ "calendar-notifications-label" ] [ text "Debut" ]
+            [ div [ class_ "calendar-notifications-label" ] [ text "Début" ]
             , input
                 [ class_ "form-control calendar-input"
                 , type_ InputDate
@@ -208,7 +208,7 @@ renderExportPanel format typeFilter statusFilter categoryFilter startDate endDat
             ]
         ]
     , div [ class_ "calendar-export-actions" ]
-        [ button [ class_ "btn btn-sm btn-primary", onClick (const ExportGenerate) ] [ text "Generer" ]
+        [ button [ class_ "btn btn-sm btn-primary", onClick (const ExportGenerate) ] [ text "Générer" ]
         , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const ExportClearOutput) ] [ text "Effacer" ]
         ]
     , if output == "" then text ""
