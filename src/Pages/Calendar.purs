@@ -54,6 +54,7 @@ import Calendar.Helpers
   ( formatDate
   , isConflict
   , isUnplannedIntention
+  , shiftMinutes
   , sortItems
   , validateIntention
   )
@@ -95,6 +96,7 @@ import Calendar.Model
   , ExportFormat
   , IcsImportResult
   , IntentionDraft
+  , ItemType(..)
   , NotificationDefaults
   , NotificationOverride
   , SortMode
@@ -116,8 +118,9 @@ import Data.Either (Either(..))
 import Data.Foldable (traverse_)
 import Data.Lens (Lens', (.~), (%~), (^.))
 import Data.Lens.Record (prop)
-import Data.Maybe (Maybe(..), maybe)
+import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.Newtype (unwrap, wrap)
+import Data.String.CodeUnits as String
 import Data.Tuple (Tuple(..))
 import Effect.Aff (Aff)
 import Effect.Aff.Class (liftAff)
@@ -228,7 +231,7 @@ renderCreateFab :: forall w. HTML w Action
 renderCreateFab =
   button
     [ class_ "calendar-fab"
-    , attr (AttrName "aria-label") "Nouvelle intention"
+    , attr (AttrName "aria-label") "Nouvel item"
     , onClick (const (ViewAction ViewOpenCreate))
     ]
     [ i [ class_ "bi bi-plus" ] [] ]
@@ -265,6 +268,36 @@ renderNotificationsContent
   -> HTML w Action
 renderNotificationsContent defaults overrides editor intentions =
   map NotificationAction (Notif.renderNotificationsContent defaults overrides editor intentions)
+
+defaultStartDateTime :: String -> String
+defaultStartDateTime focusDate =
+  if String.length focusDate >= 16 then
+    focusDate
+  else if String.length focusDate >= 10 then
+    String.slice 0 10 focusDate <> "T09:00"
+  else
+    ""
+
+prefillCreateDraft :: ItemType -> String -> IntentionDraft -> IntentionDraft
+prefillCreateDraft itemType focusDate draft =
+  if itemType /= ScheduledBlock then
+    draft
+  else if draft.windowStart /= "" then
+    draft
+  else
+    let
+      start = defaultStartDateTime focusDate
+    in
+      if start == "" then
+        draft
+      else
+        let
+          end = fromMaybe start (shiftMinutes 30 start)
+        in
+          draft
+            { windowStart = start
+            , windowEnd = if draft.windowEnd == "" then end else draft.windowEnd
+            }
 
 renderTemplatesPanel
   :: forall w
@@ -352,6 +385,9 @@ _calendarDraft = _calendar <<< Cal._draft
 
 _calendarValidationError :: Lens' State (Maybe String)
 _calendarValidationError = _calendar <<< Cal._validationError
+
+_calendarLastCreateType :: Lens' State ItemType
+_calendarLastCreateType = _calendar <<< Cal._lastCreateType
 
 _syncOfflineMode :: Lens' State Boolean
 _syncOfflineMode = _sync <<< Sync._syncOfflineMode
@@ -448,7 +484,14 @@ handleAction :: Action -> AgendaAppM Unit
 handleAction action = handleError $
   case action of
     Init -> initAction
-    CalendarAction calendarAction -> withSubState _calendar $ handleCalendarAction calendarAction
+    CalendarAction calendarAction -> do
+      withSubState _calendar $ handleCalendarAction calendarAction
+      case calendarAction of
+        CalendarDraftTypeChanged itemType -> do
+          st <- get
+          let updatedDraft = prefillCreateDraft itemType (st ^. _viewFocusDate) (st ^. _calendarDraft)
+          modify_ (_calendarDraft .~ updatedDraft)
+        _ -> pure unit
     SyncAction syncAction -> do
       st <- get
       withSubState _sync $ handleSyncAction (st ^. _calendarItems) syncAction
@@ -465,10 +508,21 @@ handleAction action = handleError $
       withSubState _view $ handleViewAction viewAction
       case viewAction of
         ViewOpenModal _ -> focusModal
-        ViewOpenCreate -> focusModal
+        ViewOpenCreate -> do
+          focusModal
+          st <- get
+          let
+            lastType = st ^. _calendarLastCreateType
+            baseDraft = emptyDraft { itemType = lastType }
+            nextDraft = prefillCreateDraft lastType (st ^. _viewFocusDate) baseDraft
+          modify_ ((_calendarDraft .~ nextDraft) <<< (_calendarValidationError .~ Nothing))
         ViewOpenEdit _ -> focusModal
         ViewOpenEditFromDoubleClick _ -> focusModal
-        ViewCloseCreate -> modify_ ((_calendarDraft .~ emptyDraft) <<< (_calendarValidationError .~ Nothing))
+        ViewCloseCreate -> do
+          st <- get
+          let
+            lastType = st ^. _calendarLastCreateType
+          modify_ ((_calendarDraft .~ (emptyDraft { itemType = lastType })) <<< (_calendarValidationError .~ Nothing))
         _ -> pure unit
     GlobalKeyDown key -> do
       if key == "Escape" then do
@@ -477,7 +531,10 @@ handleAction action = handleError $
           Just ModalEditItem -> withSubState _view $ handleViewAction ViewEditCancel
           Just ModalCreateItem -> do
             withSubState _view $ handleViewAction ViewCloseCreate
-            modify_ ((_calendarDraft .~ emptyDraft) <<< (_calendarValidationError .~ Nothing))
+            st' <- get
+            let
+              lastType = st' ^. _calendarLastCreateType
+            modify_ ((_calendarDraft .~ (emptyDraft { itemType = lastType })) <<< (_calendarValidationError .~ Nothing))
           Just _ -> withSubState _view $ handleViewAction ViewCloseModal
           Nothing -> pure unit
       else pure unit
@@ -732,7 +789,7 @@ renderAgendaModals { activeModal, filters, notifications, templates, csvImport, 
         [ renderToolsContent ]
         (ViewAction ViewCloseModal)
         (ViewAction ViewCloseModal)
-    , renderModal ModalCreateItem "Creer une intention"
+    , renderModal ModalCreateItem "Créer un item"
         [ renderCreateContent draft validationError ]
         (ViewAction ViewCloseCreate)
         (SyncAction SyncSubmitIntention)

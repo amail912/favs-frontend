@@ -11,8 +11,8 @@ function toLocalDatetimeInput(date) {
 }
 
 async function openCreateModal(page) {
-  await page.getByRole("button", { name: "Nouvelle intention" }).click();
-  const modal = page.locator(".app-modal__dialog", { hasText: "Creer une intention" });
+  await page.getByRole("button", { name: "Nouvel item" }).click();
+  const modal = page.locator(".app-modal__dialog", { hasText: "Créer un item" });
   await expect(modal).toBeVisible();
   return modal;
 }
@@ -28,7 +28,7 @@ test("calendar integration: create intention then planify", async ({ authenticat
 
   const modal = await openCreateModal(page);
   await modal.getByPlaceholder("Titre").fill(title);
-  await modal.getByPlaceholder("Debut").fill(toLocalDatetimeInput(start));
+  await modal.getByPlaceholder("Début").fill(toLocalDatetimeInput(start));
   await modal.getByPlaceholder("Fin").fill(toLocalDatetimeInput(end));
   const createResponsePromise = page.waitForResponse(
     response =>
@@ -65,6 +65,48 @@ test("calendar integration: create intention then planify", async ({ authenticat
   await appTitle(page).click();
 });
 
+test("calendar integration: create scheduled block via modal toggle", async ({ authenticatedPage: page }) => {
+  const now = new Date();
+  const start = new Date(now.getTime() + 3 * 60 * 60 * 1000);
+  const end = new Date(now.getTime() + 4 * 60 * 60 * 1000);
+  const title = `Planifié ${Date.now()}`;
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+
+  const modal = await openCreateModal(page);
+  await modal.getByRole("button", { name: "Bloc planifié" }).click();
+  await modal.getByPlaceholder("Titre").fill(title);
+  await modal.getByPlaceholder("Début").fill(toLocalDatetimeInput(start));
+  await modal.getByPlaceholder("Fin").fill(toLocalDatetimeInput(end));
+
+  const createResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items") &&
+      response.request().method() === "POST"
+  );
+  const listResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items") &&
+      response.request().method() === "GET"
+  );
+
+  await modal.getByRole("button", { name: "Valider" }).click();
+  const createResponse = await createResponsePromise;
+  expect(createResponse.ok()).toBeTruthy();
+
+  const listResponse = await listResponsePromise;
+  expect(listResponse.ok()).toBeTruthy();
+
+  const row = page.locator(".calendar-calendar-card", {
+    has: page.locator(".calendar-calendar-item-title", { hasText: title })
+  }).first();
+
+  await expect(row).toBeVisible();
+  await expect(row.getByRole("button", { name: "Valider" })).toBeVisible();
+  await expect(row.getByRole("button", { name: "Planifier" })).toHaveCount(0);
+});
+
 test("calendar: create modal resets on cancel", async ({ authenticatedPage: page }) => {
   await calendarTab(page).click();
   await expect(page).toHaveURL(/\/calendar$/);
@@ -82,7 +124,7 @@ test("calendar: create fab stays visible across views", async ({ authenticatedPa
   await calendarTab(page).click();
   await expect(page).toHaveURL(/\/calendar$/);
 
-  const fab = page.getByRole("button", { name: "Nouvelle intention" });
+  const fab = page.getByRole("button", { name: "Nouvel item" });
   await expect(fab).toBeVisible();
 
   await page.getByRole("button", { name: "Semaine" }).click();
@@ -103,7 +145,7 @@ test("calendar integration: edit item via modal", async ({ authenticatedPage: pa
 
   const createModal = await openCreateModal(page);
   await createModal.getByPlaceholder("Titre").fill(title);
-  await createModal.getByPlaceholder("Debut").fill(toLocalDatetimeInput(start));
+  await createModal.getByPlaceholder("Début").fill(toLocalDatetimeInput(start));
   await createModal.getByPlaceholder("Fin").fill(toLocalDatetimeInput(end));
 
   const createResponsePromise = page.waitForResponse(
@@ -165,7 +207,7 @@ test("calendar integration: escape closes edit modal", async ({ authenticatedPag
 
   const createModal = await openCreateModal(page);
   await createModal.getByPlaceholder("Titre").fill(title);
-  await createModal.getByPlaceholder("Debut").fill(toLocalDatetimeInput(start));
+  await createModal.getByPlaceholder("Début").fill(toLocalDatetimeInput(start));
   await createModal.getByPlaceholder("Fin").fill(toLocalDatetimeInput(end));
 
   const createResponsePromise = page.waitForResponse(
@@ -206,7 +248,7 @@ test("calendar desktop: edit button is visible in timeline", async ({ authentica
 
   const createModal = await openCreateModal(page);
   await createModal.getByPlaceholder("Titre").fill(title);
-  await createModal.getByPlaceholder("Debut").fill(toLocalDatetimeInput(start));
+  await createModal.getByPlaceholder("Début").fill(toLocalDatetimeInput(start));
   await createModal.getByPlaceholder("Fin").fill(toLocalDatetimeInput(end));
 
   const createResponsePromise = page.waitForResponse(
@@ -240,7 +282,7 @@ test("calendar desktop: double click does not open edit modal", async ({ authent
 
   const createModal = await openCreateModal(page);
   await createModal.getByPlaceholder("Titre").fill(title);
-  await createModal.getByPlaceholder("Debut").fill(toLocalDatetimeInput(start));
+  await createModal.getByPlaceholder("Début").fill(toLocalDatetimeInput(start));
   await createModal.getByPlaceholder("Fin").fill(toLocalDatetimeInput(end));
 
   const createResponsePromise = page.waitForResponse(
@@ -276,7 +318,7 @@ test("calendar mobile: double tap opens edit modal", async ({ authenticatedPage:
 
   const createModal = await openCreateModal(page);
   await createModal.getByPlaceholder("Titre").fill(title);
-  await createModal.getByPlaceholder("Debut").fill(toLocalDatetimeInput(start));
+  await createModal.getByPlaceholder("Début").fill(toLocalDatetimeInput(start));
   await createModal.getByPlaceholder("Fin").fill(toLocalDatetimeInput(end));
 
   const createResponsePromise = page.waitForResponse(
@@ -315,7 +357,7 @@ test.describe("calendar mobile touch", () => {
 
   const createModal = await openCreateModal(page);
   await createModal.getByPlaceholder("Titre").fill(title);
-  await createModal.getByPlaceholder("Debut").fill(toLocalDatetimeInput(start));
+  await createModal.getByPlaceholder("Début").fill(toLocalDatetimeInput(start));
   await createModal.getByPlaceholder("Fin").fill(toLocalDatetimeInput(end));
 
   const createResponsePromise = page.waitForResponse(
@@ -384,7 +426,7 @@ test("calendar mobile: edit button is not rendered", async ({ authenticatedPage:
 
   const createModal = await openCreateModal(page);
   await createModal.getByPlaceholder("Titre").fill(title);
-  await createModal.getByPlaceholder("Debut").fill(toLocalDatetimeInput(start));
+  await createModal.getByPlaceholder("Début").fill(toLocalDatetimeInput(start));
   await createModal.getByPlaceholder("Fin").fill(toLocalDatetimeInput(end));
 
   const createResponsePromise = page.waitForResponse(

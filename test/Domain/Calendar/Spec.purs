@@ -31,7 +31,8 @@ spec =
       let
         draft :: IntentionDraft
         draft =
-          { title: "Deep work"
+          { itemType: Intention
+          , title: "Deep work"
           , windowStart: "2026-02-19T09:00"
           , windowEnd: "2026-02-19T10:00"
           , category: ""
@@ -45,6 +46,24 @@ spec =
           case decodeJson (encodeJson newItem) of
             Right decoded -> decoded `shouldEqual` newItem
             Left err -> fail $ "Decoding encoded intention failed: " <> show err
+
+    it "creates a scheduled block from a draft" do
+      let
+        draft :: IntentionDraft
+        draft =
+          { itemType: ScheduledBlock
+          , title: "Planifié"
+          , windowStart: "2026-02-19T13:00"
+          , windowEnd: "2026-02-19T14:00"
+          , category: ""
+          , status: Todo
+          , actualDurationMinutes: ""
+          , recurrence: defaultRecurrenceDraft
+          }
+      case toNewIntention draft of
+        Left err -> fail $ "Creation failed: " <> err
+        Right (NewCalendarItem { content }) -> content.itemType `shouldEqual` ScheduledBlock
+        Right _ -> fail "Expected new calendar item for scheduled block"
 
     it "round-trips a scheduled block with source item id" do
       let
@@ -71,7 +90,8 @@ spec =
       let
         draft :: IntentionDraft
         draft =
-          { title: "   "
+          { itemType: Intention
+          , title: "   "
           , windowStart: "2026-02-19T09:00"
           , windowEnd: "2026-02-19T10:00"
           , category: ""
@@ -85,7 +105,8 @@ spec =
       let
         draft :: IntentionDraft
         draft =
-          { title: "Focus"
+          { itemType: Intention
+          , title: "Focus"
           , windowStart: "2026-02-19T10:00"
           , windowEnd: "2026-02-19T09:00"
           , category: ""
@@ -99,7 +120,8 @@ spec =
       let
         draft :: IntentionDraft
         draft =
-          { title: "Court"
+          { itemType: Intention
+          , title: "Court"
           , windowStart: "2026-02-19T10:00"
           , windowEnd: "2026-02-19T10:04"
           , category: ""
@@ -113,7 +135,8 @@ spec =
       let
         draft :: IntentionDraft
         draft =
-          { title: "Sprint"
+          { itemType: Intention
+          , title: "Sprint"
           , windowStart: "2026-02-19T09:00"
           , windowEnd: "2026-02-19T10:00"
           , category: ""

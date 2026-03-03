@@ -203,7 +203,8 @@ instance calendarItemShow :: Show CalendarItem where
   show = genericShow
 
 type IntentionDraft =
-  { title :: String
+  { itemType :: ItemType
+  , title :: String
   , windowStart :: String
   , windowEnd :: String
   , category :: String

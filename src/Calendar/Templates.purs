@@ -19,6 +19,7 @@ import Calendar.Helpers (durationMinutesBetween, formatDateTimeLocal, parsePosit
 import Calendar.Model
   ( IntentionDraft
   , ItemStatus(..)
+  , ItemType(..)
   , RoutineInstance
   , RoutineInstanceStep
   , RoutineTemplate
@@ -237,7 +238,8 @@ renderTemplateCard template =
 
 applyTemplateToDraft :: TaskTemplate -> String -> String -> IntentionDraft
 applyTemplateToDraft template windowStart windowEnd =
-  { title: template.title
+  { itemType: Intention
+  , title: template.title
   , windowStart
   , windowEnd
   , category: template.category

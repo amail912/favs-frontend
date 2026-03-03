@@ -65,7 +65,8 @@ applyEditDraft draft item = do
   let
     intentionDraft :: IntentionDraft
     intentionDraft =
-      { title: draft.title
+      { itemType: draft.itemType
+      , title: draft.title
       , windowStart: draft.windowStart
       , windowEnd: draft.windowEnd
       , category: draft.category

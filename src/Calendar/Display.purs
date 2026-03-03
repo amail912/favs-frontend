@@ -27,7 +27,7 @@ import Prelude hiding (div)
 import Calendar.Commands (ViewCommand(..), Command(..), tellCmd)
 import Calendar.Edit (EditDraft, EditError(..), applyEditDraft, buildEditDraft)
 import Calendar.Helpers (parsePositiveInt, suggestDurationMinutes)
-import Calendar.Model (AgendaView(..), CalendarItem, CalendarItemContent, ItemStatus(..), ValidationError(..))
+import Calendar.Model (AgendaView(..), CalendarItem, CalendarItemContent, ItemStatus(..), ItemType(..), ValidationError(..))
 import Calendar.RecurrenceEditor (RecurrenceAction, applyRecurrenceAction, renderRecurrenceEditor)
 import Control.Alt ((<|>))
 import Control.Monad.State.Trans (StateT, get, modify_)
@@ -310,6 +310,14 @@ renderEditContent panel =
   in
     div [ class_ "calendar-modal-stack" ]
       [ div [ class_ "calendar-modal-field" ]
+          [ div [ class_ "calendar-notifications-label" ] [ text "Type" ]
+          , div [ class_ "badge rounded-pill text-bg-secondary" ]
+              [ text $ case draft.itemType of
+                  Intention -> "Intention"
+                  ScheduledBlock -> "Bloc planifié"
+              ]
+          ]
+      , div [ class_ "calendar-modal-field" ]
           [ div [ class_ "calendar-notifications-label" ] [ text "Titre" ]
           , input
               [ class_ "form-control calendar-input"
