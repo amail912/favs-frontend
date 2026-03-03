@@ -2,6 +2,8 @@ module Calendar.Model
   ( CalendarItem(..)
   , CalendarItemContent
   , IntentionDraft
+  , RecurrenceDraft
+  , defaultRecurrenceDraft
   , ItemStatus(..)
   , ItemType(..)
   , SortMode(..)
@@ -205,6 +207,24 @@ type IntentionDraft =
   , windowStart :: String
   , windowEnd :: String
   , category :: String
+  , status :: ItemStatus
+  , actualDurationMinutes :: String
+  , recurrence :: RecurrenceDraft
+  }
+
+type RecurrenceDraft =
+  { ruleType :: String
+  , intervalRaw :: String
+  , exceptions :: Array String
+  , exceptionInput :: String
+  }
+
+defaultRecurrenceDraft :: RecurrenceDraft
+defaultRecurrenceDraft =
+  { ruleType: "none"
+  , intervalRaw: ""
+  , exceptions: []
+  , exceptionInput: ""
   }
 
 data ValidationError

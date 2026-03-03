@@ -297,6 +297,7 @@ a.nav-link:hover {
 .calendar-list-panel--calendar {
   display: block;
   max-width: none;
+  width: 100%;
   height: auto;
   min-height: 0;
   padding: 1rem;
@@ -563,6 +564,58 @@ a.nav-link:hover {
   gap: 6px;
   justify-content: flex-end;
   flex: 0 0 auto;
+}
+
+.calendar-fab {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #2d6cdf;
+  color: #fff;
+  border: none;
+  box-shadow: 0 16px 30px rgba(20, 37, 68, 0.25);
+  z-index: 70;
+}
+
+:root {
+  --container-max: 100vw;
+}
+
+@media (min-width: 576px) {
+  :root { --container-max: 540px; }
+}
+
+@media (min-width: 768px) {
+  :root { --container-max: 720px; }
+}
+
+@media (min-width: 992px) {
+  :root { --container-max: 960px; }
+  .calendar-fab {
+    right: calc((100vw - var(--container-max)) / 2 + 24px);
+  }
+}
+
+@media (min-width: 1200px) {
+  :root { --container-max: 1140px; }
+}
+
+@media (min-width: 1400px) {
+  :root { --container-max: 1320px; }
+}
+
+.calendar-fab:hover {
+  background: #1f5bd6;
+}
+
+.calendar-fab .bi {
+  font-size: 1.4rem;
 }
 
 .calendar-edit {

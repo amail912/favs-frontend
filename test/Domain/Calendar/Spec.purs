@@ -2,7 +2,7 @@ module Test.Domain.Calendar.Spec (spec) where
 
 import Prelude
 
-import Calendar.Model (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), RecurrenceRule(..), RoutineTemplate, SortMode(..), StepDependency(..), ValidationError(..), defaultNotificationDefaults)
+import Calendar.Model (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), RecurrenceRule(..), RoutineTemplate, SortMode(..), StepDependency(..), ValidationError(..), defaultNotificationDefaults, defaultRecurrenceDraft)
 import Calendar.Conflicts (detectConflictGroups, detectConflictIds)
 import Calendar.Calendar (PrimaryAction(..), primaryActionFor, toNewIntention)
 import Calendar.Edit (EditError(..), applyEditDraft, buildEditDraft)
@@ -35,11 +35,16 @@ spec =
           , windowStart: "2026-02-19T09:00"
           , windowEnd: "2026-02-19T10:00"
           , category: ""
+          , status: Todo
+          , actualDurationMinutes: ""
+          , recurrence: defaultRecurrenceDraft
           }
-        newItem = toNewIntention draft
-      case decodeJson (encodeJson newItem) of
-        Right decoded -> decoded `shouldEqual` newItem
-        Left err -> fail $ "Decoding encoded intention failed: " <> show err
+      case toNewIntention draft of
+        Left err -> fail $ "Creation failed: " <> err
+        Right newItem ->
+          case decodeJson (encodeJson newItem) of
+            Right decoded -> decoded `shouldEqual` newItem
+            Left err -> fail $ "Decoding encoded intention failed: " <> show err
 
     it "round-trips a scheduled block with source item id" do
       let
@@ -70,6 +75,9 @@ spec =
           , windowStart: "2026-02-19T09:00"
           , windowEnd: "2026-02-19T10:00"
           , category: ""
+          , status: Todo
+          , actualDurationMinutes: ""
+          , recurrence: defaultRecurrenceDraft
           }
       validateIntention draft `shouldEqual` Left TitleEmpty
 
@@ -81,6 +89,9 @@ spec =
           , windowStart: "2026-02-19T10:00"
           , windowEnd: "2026-02-19T09:00"
           , category: ""
+          , status: Todo
+          , actualDurationMinutes: ""
+          , recurrence: defaultRecurrenceDraft
           }
       validateIntention draft `shouldEqual` Left WindowOrderInvalid
 
@@ -92,6 +103,9 @@ spec =
           , windowStart: "2026-02-19T09:00"
           , windowEnd: "2026-02-19T10:00"
           , category: ""
+          , status: Todo
+          , actualDurationMinutes: ""
+          , recurrence: defaultRecurrenceDraft
           }
       validateIntention draft `shouldEqual` Right draft
 

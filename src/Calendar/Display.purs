@@ -58,7 +58,7 @@ data AgendaModal
   | ModalExport
   | ModalTools
   | ModalFilters
-  | ModalDateTime
+  | ModalCreateItem
   | ModalEditItem
 
 derive instance eqAgendaModal :: Eq AgendaModal
@@ -127,6 +127,8 @@ data ViewAction
   | ViewFocusDateChanged String
   | ViewOpenModal AgendaModal
   | ViewCloseModal
+  | ViewOpenCreate
+  | ViewCloseCreate
   | ViewOpenEdit CalendarItem
   | ViewOpenEditFromDoubleClick CalendarItem
   | ViewMobileTap CalendarItem
@@ -169,6 +171,10 @@ handleViewAction = case _ of
   ViewOpenModal modal ->
     modify_ (_viewActiveModalS .~ Just modal)
   ViewCloseModal ->
+    modify_ (_viewActiveModalS .~ Nothing)
+  ViewOpenCreate ->
+    modify_ (_viewActiveModalS .~ Just ModalCreateItem)
+  ViewCloseCreate ->
     modify_ (_viewActiveModalS .~ Nothing)
   ViewOpenEdit item -> do
     case buildEditDraft item of

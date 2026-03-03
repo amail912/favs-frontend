@@ -18,6 +18,7 @@ import Calendar.Commands (TemplateCommand(..), Command(..), tellCmd)
 import Calendar.Helpers (durationMinutesBetween, formatDateTimeLocal, parsePositiveInt, shiftMinutes)
 import Calendar.Model
   ( IntentionDraft
+  , ItemStatus(..)
   , RoutineInstance
   , RoutineInstanceStep
   , RoutineTemplate
@@ -25,6 +26,7 @@ import Calendar.Model
   , StepDependency(..)
   , TaskTemplate
   , TemplateDraft
+  , defaultRecurrenceDraft
   , emptyTemplateDraft
   )
 import Control.Monad.State.Trans (StateT, get, modify_)
@@ -239,6 +241,9 @@ applyTemplateToDraft template windowStart windowEnd =
   , windowStart
   , windowEnd
   , category: template.category
+  , status: Todo
+  , actualDurationMinutes: ""
+  , recurrence: defaultRecurrenceDraft
   }
 
 addTemplate :: TaskTemplate -> Array TaskTemplate -> Array TaskTemplate

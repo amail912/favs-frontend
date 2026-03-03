@@ -12,9 +12,7 @@ module Calendar.Calendar
   , handleCalendarAction
   , applyCalendarAction
   , toNewIntention
-  , renderForm
-  , renderDateTimeContent
-  , renderValidationError
+  , renderCreateContent
   , renderSortPicker
   , renderConflictActions
   , renderConflictResolution
@@ -34,6 +32,7 @@ import Calendar.Helpers
   , isItemOnDate
   , minuteOfDay
   , pad2
+  , parsePositiveInt
   , parseSortMode
   , sortItems
   , sortModeValue
@@ -47,23 +46,24 @@ import Calendar.Model
   , IntentionDraft
   , ItemStatus(..)
   , ItemType(..)
+  , RecurrenceDraft
   , SortMode(..)
-  , ValidationError(..)
+  , defaultRecurrenceDraft
   )
 import Calendar.Sync (SyncAction(..))
-import Calendar.Display (ViewAction(..), AgendaModal(..))
+import Calendar.Display (ViewAction(..))
 import Calendar.Commands (Command)
+import Calendar.RecurrenceEditor (RecurrenceAction, applyRecurrenceAction, draftToRecurrence, renderRecurrenceEditor)
 import Control.Monad.State.Trans (StateT, modify_)
 import Control.Monad.Writer.Trans (WriterT)
-import Data.Array (filter, find, findIndex, foldl, index, length, mapMaybe, mapWithIndex, null, sortBy, uncons, updateAt)
+import Data.Array (filter, find, findIndex, foldl, length, mapMaybe, mapWithIndex, null, sortBy, uncons, updateAt)
+import Data.Either (Either(..))
 import Data.Enum (enumFromTo)
 import Data.Generic.Rep (class Generic)
 import Data.Lens (Lens', (.~), (%~))
 import Data.Lens.Record (prop)
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
-import Data.String.CodeUnits as String
 import Data.String.Common as StringCommon
-import Data.String.Pattern (Pattern(..))
 import Effect.Aff (Aff)
 import Halogen.HTML (HTML, button, div, i, input, li, option, section, select, span, text, ul)
 import Halogen.HTML.Core (AttrName(..))
@@ -81,7 +81,7 @@ import Ui.Utils (class_)
 type CalendarState =
   { items :: Array CalendarItem
   , draft :: IntentionDraft
-  , validationError :: Maybe ValidationError
+  , validationError :: Maybe String
   , showConflictsOnly :: Boolean
   , conflictResolution :: Maybe ConflictResolution
   , sortMode :: SortMode
@@ -105,6 +105,9 @@ emptyDraft =
   , windowStart: ""
   , windowEnd: ""
   , category: ""
+  , status: Todo
+  , actualDurationMinutes: ""
+  , recurrence: defaultRecurrenceDraft
   }
 
 
@@ -113,6 +116,9 @@ data CalendarAction
   | CalendarDraftStartChanged String
   | CalendarDraftEndChanged String
   | CalendarDraftCategoryChanged String
+  | CalendarDraftStatusChanged String
+  | CalendarDraftDurationChanged String
+  | CalendarDraftRecurrenceChanged RecurrenceAction
   | CalendarToggleConflictFilter
   | CalendarSortChanged String
   | CalendarOpenConflictResolution (Array String)
@@ -160,7 +166,7 @@ _items = prop (Proxy :: _ "items")
 _draft :: Lens' CalendarState IntentionDraft
 _draft = prop (Proxy :: _ "draft")
 
-_validationError :: Lens' CalendarState (Maybe ValidationError)
+_validationError :: Lens' CalendarState (Maybe String)
 _validationError = prop (Proxy :: _ "validationError")
 
 _showConflictsOnlyS :: Lens' CalendarState Boolean
@@ -184,6 +190,15 @@ _draftWindowEndS = _draft <<< prop (Proxy :: _ "windowEnd")
 _draftCategoryS :: Lens' CalendarState String
 _draftCategoryS = _draft <<< prop (Proxy :: _ "category")
 
+_draftStatusS :: Lens' CalendarState ItemStatus
+_draftStatusS = _draft <<< prop (Proxy :: _ "status")
+
+_draftDurationS :: Lens' CalendarState String
+_draftDurationS = _draft <<< prop (Proxy :: _ "actualDurationMinutes")
+
+_draftRecurrenceS :: Lens' CalendarState RecurrenceDraft
+_draftRecurrenceS = _draft <<< prop (Proxy :: _ "recurrence")
+
 
 handleCalendarAction :: CalendarAction -> StateT CalendarState (WriterT (Array Command) Aff) Unit
 handleCalendarAction action =
@@ -200,6 +215,12 @@ applyCalendarAction action dataState =
       ((_draftWindowEndS .~ windowEnd) <<< (_validationError .~ Nothing)) dataState
     CalendarDraftCategoryChanged category ->
       ((_draftCategoryS .~ category) <<< (_validationError .~ Nothing)) dataState
+    CalendarDraftStatusChanged raw ->
+      ((_draftStatusS .~ parseStatus raw) <<< (_validationError .~ Nothing)) dataState
+    CalendarDraftDurationChanged raw ->
+      ((_draftDurationS .~ raw) <<< (_validationError .~ Nothing)) dataState
+    CalendarDraftRecurrenceChanged recurrenceAction ->
+      ((_draftRecurrenceS %~ applyRecurrenceAction recurrenceAction) <<< (_validationError .~ Nothing)) dataState
     CalendarToggleConflictFilter ->
       (_showConflictsOnlyS %~ not) dataState
     CalendarSortChanged raw ->
@@ -214,79 +235,56 @@ applyCalendarAction action dataState =
       (_conflictResolutionS .~ Nothing) dataState
 
 
-toNewIntention :: IntentionDraft -> CalendarItem
-toNewIntention { title, windowStart, windowEnd, category } =
-  NewCalendarItem
-    { content:
-        { itemType: Intention
-        , title
-        , windowStart
-        , windowEnd
-        , status: Todo
-        , sourceItemId: Nothing
-        , actualDurationMinutes: Nothing
-        , category: toOptionalString category
-        , recurrenceRule: Nothing
-        , recurrenceExceptionDates: []
+toNewIntention :: IntentionDraft -> Either String CalendarItem
+toNewIntention draft = do
+  recurrence <- case draftToRecurrence draft.recurrence of
+    Left err -> Left err
+    Right ok -> Right ok
+  actualDuration <- parseDuration draft.actualDurationMinutes
+  Right
+    ( NewCalendarItem
+        { content:
+            { itemType: Intention
+            , title: draft.title
+            , windowStart: draft.windowStart
+            , windowEnd: draft.windowEnd
+            , status: draft.status
+            , sourceItemId: Nothing
+            , actualDurationMinutes: actualDuration
+            , category: toOptionalString draft.category
+            , recurrenceRule: recurrence.rule
+            , recurrenceExceptionDates: recurrence.exceptions
+            }
         }
-    }
+    )
+  where
+  parseDuration raw =
+    if StringCommon.trim raw == "" then
+      Right Nothing
+    else
+      case parsePositiveInt raw of
+        Just minutes -> Right (Just minutes)
+        Nothing -> Left "Durée réelle invalide."
 
 
-renderForm
+renderCreateContent
   :: forall w
    . IntentionDraft
-  -> Maybe ValidationError
+  -> Maybe String
   -> HTML w CalendarUiAction
-renderForm draft validationError =
-  section [ class_ "calendar-form" ]
-    [ input
-        [ class_ "form-control calendar-input"
-        , placeholder "Titre de l'intention"
-        , onValueChange (CalendarUiCalendar <<< CalendarDraftTitleChanged)
-        , onKeyDown (\ev -> CalendarUiSync (SyncDraftTitleKeyDown (KE.key ev)))
-        , value draft.title
-        ]
-    , div [ class_ "calendar-time-row" ]
-        [ input
-            [ class_ "form-control calendar-input"
-            , type_ InputDatetimeLocal
-            , attr (AttrName "lang") "fr"
-            , placeholder "Debut"
-            , onValueChange (CalendarUiCalendar <<< CalendarDraftStartChanged)
-            , value draft.windowStart
-            ]
-        , input
-            [ class_ "form-control calendar-input"
-            , type_ InputDatetimeLocal
-            , attr (AttrName "lang") "fr"
-            , placeholder "Fin"
-            , onValueChange (CalendarUiCalendar <<< CalendarDraftEndChanged)
-            , value draft.windowEnd
-            ]
-        ]
-    , input
-        [ class_ "form-control calendar-input"
-        , placeholder "Categorie (optionnelle)"
-        , onValueChange (CalendarUiCalendar <<< CalendarDraftCategoryChanged)
-        , value draft.category
-        ]
-    , div [ class_ "calendar-datetime-row" ]
-        [ button
-            [ class_ "btn btn-outline-secondary calendar-datetime-button"
-            , onClick (const (CalendarUiView (ViewOpenModal ModalDateTime)))
-            ]
-            [ text "Dates & heures" ]
-        , div [ class_ "calendar-datetime-summary" ]
-            [ text $ summarizeDateRange draft.windowStart draft.windowEnd ]
-        ]
-    , maybe (text "") renderValidationError validationError
-    , button [ class_ "btn btn-primary calendar-submit", onClick (const (CalendarUiSync SyncSubmitIntention)) ] [ text "Creer l'intention" ]
-    ]
-
-renderDateTimeContent :: forall w. IntentionDraft -> HTML w CalendarUiAction
-renderDateTimeContent draft =
+renderCreateContent draft validationError =
   div [ class_ "calendar-modal-stack" ]
     [ div [ class_ "calendar-modal-field" ]
+        [ div [ class_ "calendar-notifications-label" ] [ text "Titre" ]
+        , input
+            [ class_ "form-control calendar-input"
+            , placeholder "Titre"
+            , onValueChange (CalendarUiCalendar <<< CalendarDraftTitleChanged)
+            , onKeyDown (\ev -> CalendarUiSync (SyncDraftTitleKeyDown (KE.key ev)))
+            , value draft.title
+            ]
+        ]
+    , div [ class_ "calendar-modal-field" ]
         [ div [ class_ "calendar-notifications-label" ] [ text "Debut" ]
         , input
             [ class_ "form-control calendar-input"
@@ -308,42 +306,40 @@ renderDateTimeContent draft =
             , value draft.windowEnd
             ]
         ]
-    ]
-
-summarizeDateRange :: String -> String -> String
-summarizeDateRange start end =
-  if start == "" && end == "" then "Aucune date selectionnee"
-  else if end == "" then "Debut: " <> formatDateTimeFr start
-  else if start == "" then "Fin: " <> formatDateTimeFr end
-  else formatDateTimeFr start <> " → " <> formatDateTimeFr end
-
-formatDateTimeFr :: String -> String
-formatDateTimeFr raw =
-  if raw == "" then ""
-  else
-    let
-      parts = StringCommon.split (Pattern "T") raw
-      rawDatePart = fromMaybe raw (index parts 0)
-      timePart = fromMaybe "" (index parts 1)
-      dateFr = formatDateFr rawDatePart
-      timeFr = if timePart == "" then "" else String.take 5 timePart
-    in
-      if timeFr == "" then dateFr else dateFr <> " " <> timeFr
-
-formatDateFr :: String -> String
-formatDateFr rawDate =
-  case StringCommon.split (Pattern "-") rawDate of
-    [ yearPart, monthPart, dayPart ] -> dayPart <> "/" <> monthPart <> "/" <> yearPart
-    _ -> rawDate
-
-renderValidationError :: forall w action. ValidationError -> HTML w action
-renderValidationError err =
-  div [ class_ "calendar-error" ]
-    [ text $ case err of
-        TitleEmpty -> "Le titre est obligatoire."
-        WindowStartInvalid -> "La date de debut est invalide."
-        WindowEndInvalid -> "La date de fin est invalide."
-        WindowOrderInvalid -> "La fin doit etre apres le debut."
+    , div [ class_ "calendar-modal-field" ]
+        [ div [ class_ "calendar-notifications-label" ] [ text "Categorie" ]
+        , input
+            [ class_ "form-control calendar-input"
+            , placeholder "Categorie"
+            , onValueChange (CalendarUiCalendar <<< CalendarDraftCategoryChanged)
+            , value draft.category
+            ]
+        ]
+    , div [ class_ "calendar-modal-field" ]
+        [ div [ class_ "calendar-notifications-label" ] [ text "Statut" ]
+        , select
+            [ class_ "form-select calendar-input"
+            , onValueChange (CalendarUiCalendar <<< CalendarDraftStatusChanged)
+            , value (statusValue draft.status)
+            ]
+            [ option [ value "todo" ] [ text "A faire" ]
+            , option [ value "progress" ] [ text "En cours" ]
+            , option [ value "done" ] [ text "Fait" ]
+            , option [ value "canceled" ] [ text "Annule" ]
+            ]
+        ]
+    , div [ class_ "calendar-modal-field" ]
+        [ div [ class_ "calendar-notifications-label" ] [ text "Duree reelle (minutes)" ]
+        , input
+            [ class_ "form-control calendar-input"
+            , type_ InputNumber
+            , placeholder "Ex: 30"
+            , onValueChange (CalendarUiCalendar <<< CalendarDraftDurationChanged)
+            , value draft.actualDurationMinutes
+            ]
+        ]
+    , map (CalendarUiCalendar <<< CalendarDraftRecurrenceChanged) (renderRecurrenceEditor draft.recurrence)
+    , maybe (text "") (\msg -> div [ class_ "calendar-error" ] [ text msg ]) validationError
     ]
 
 renderSortPicker :: forall w. SortMode -> HTML w CalendarUiAction
@@ -751,6 +747,22 @@ renderPrimaryAction item content =
             [ text "Valider" ]
         _ -> text ""
     PrimaryNone -> text ""
+
+statusValue :: ItemStatus -> String
+statusValue status =
+  case status of
+    Todo -> "todo"
+    EnCours -> "progress"
+    Fait -> "done"
+    Annule -> "canceled"
+
+parseStatus :: String -> ItemStatus
+parseStatus raw =
+  case raw of
+    "progress" -> EnCours
+    "done" -> Fait
+    "canceled" -> Annule
+    _ -> Todo
 
 editHandlers
   :: forall r

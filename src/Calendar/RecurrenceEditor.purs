@@ -11,6 +11,7 @@ module Calendar.RecurrenceEditor
 import Prelude hiding (div)
 
 import Calendar.Helpers (parseDateLocal, parsePositiveInt)
+import Calendar.Model as Model
 import Calendar.Model (RecurrenceRule(..))
 import Data.Array (delete, elem, filter)
 import Data.Either (Either(..))
@@ -23,20 +24,10 @@ import Halogen.HTML.Properties (attr, placeholder, type_, value)
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Ui.Utils (class_)
 
-type RecurrenceDraft =
-  { ruleType :: String
-  , intervalRaw :: String
-  , exceptions :: Array String
-  , exceptionInput :: String
-  }
+type RecurrenceDraft = Model.RecurrenceDraft
 
 defaultRecurrenceDraft :: RecurrenceDraft
-defaultRecurrenceDraft =
-  { ruleType: "none"
-  , intervalRaw: ""
-  , exceptions: []
-  , exceptionInput: ""
-  }
+defaultRecurrenceDraft = Model.defaultRecurrenceDraft
 
 data RecurrenceAction
   = RecurrenceRuleChanged String

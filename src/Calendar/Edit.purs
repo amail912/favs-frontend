@@ -8,8 +8,8 @@ module Calendar.Edit
 import Prelude
 
 import Calendar.Helpers (parsePositiveInt, toOptionalString, validateIntention)
-import Calendar.Model (CalendarItem(..), IntentionDraft, ItemStatus, ItemType, ValidationError)
-import Calendar.RecurrenceEditor (RecurrenceDraft, draftFromRecurrence, draftToRecurrence)
+import Calendar.Model (CalendarItem(..), IntentionDraft, ItemStatus, ItemType, RecurrenceDraft, ValidationError)
+import Calendar.RecurrenceEditor (draftFromRecurrence, draftToRecurrence)
 import Data.Either (Either(..))
 import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe(..))
@@ -69,6 +69,9 @@ applyEditDraft draft item = do
       , windowStart: draft.windowStart
       , windowEnd: draft.windowEnd
       , category: draft.category
+      , status: draft.status
+      , actualDurationMinutes: draft.actualDurationMinutes
+      , recurrence: draft.recurrence
       }
   case validateIntention intentionDraft of
     Left err -> Left (EditValidation err)
