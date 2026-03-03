@@ -32,11 +32,12 @@ module Calendar.Helpers
   , sortModeValue
   , parseSortMode
   , minuteOfDay
+  , validateIntention
   ) where
 
 import Prelude
 
-import Calendar.Model (CalendarItem(..), CalendarItemContent, ItemStatus(..), ItemType(..), SortMode(..))
+import Calendar.Model (CalendarItem(..), CalendarItemContent, IntentionDraft, ItemStatus(..), ItemType(..), SortMode(..), ValidationError(..))
 import Data.Array (elem, mapMaybe, sortBy)
 import Data.Date (Date, canonicalDate, day, exactDate, month, year)
 import Data.DateTime (DateTime(..), adjust, date, diff, time)
@@ -201,6 +202,15 @@ toOptionalString raw =
     trimmed = StringCommon.trim raw
   in
     if trimmed == "" then Nothing else Just trimmed
+
+validateIntention :: IntentionDraft -> Either ValidationError IntentionDraft
+validateIntention draft =
+  case unit of
+    _ | StringCommon.trim draft.title == "" -> Left TitleEmpty
+    _ | not (isDateTimeLocal draft.windowStart) -> Left WindowStartInvalid
+    _ | not (isDateTimeLocal draft.windowEnd) -> Left WindowEndInvalid
+    _ | draft.windowEnd <= draft.windowStart -> Left WindowOrderInvalid
+    _ -> Right draft
 
 calendarItemContent :: CalendarItem -> CalendarItemContent
 calendarItemContent (NewCalendarItem { content }) = content

@@ -4,9 +4,10 @@ import Prelude
 
 import Calendar.Model (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), RecurrenceRule(..), RoutineTemplate, SortMode(..), StepDependency(..), ValidationError(..), defaultNotificationDefaults)
 import Calendar.Conflicts (detectConflictGroups, detectConflictIds)
-import Calendar.Calendar (toNewIntention, validateIntention)
+import Calendar.Calendar (PrimaryAction(..), primaryActionFor, toNewIntention)
+import Calendar.Edit (EditError(..), applyEditDraft, buildEditDraft)
 import Calendar.Exports (exportItemsToCsv, exportItemsToIcs, filterItemsForExport)
-import Calendar.Helpers (durationMinutesBetween, sortItems)
+import Calendar.Helpers (durationMinutesBetween, sortItems, validateIntention)
 import Calendar.Imports (parseCsvImport, parseIcsImport)
 import Calendar.Notifications (reminderTimesForIntention)
 import Calendar.Offline (applyOfflineMutation)
@@ -93,6 +94,59 @@ spec =
           , category: ""
           }
       validateIntention draft `shouldEqual` Right draft
+
+    it "edits an item draft including actual duration and recurrence" do
+      let
+        content =
+          (calendarContent Intention "Intention" "2026-02-19T09:00" "2026-02-19T10:00")
+            { actualDurationMinutes = Just 25
+            , recurrenceRule = Just RecurrenceWeekly
+            , recurrenceExceptionDates = [ "2026-02-26" ]
+            }
+        item = serverCalendarItem "edit-1" content
+      case buildEditDraft item of
+        Nothing -> fail "Expected edit draft"
+        Just draft -> do
+          draft.actualDurationMinutes `shouldEqual` "25"
+          let
+            updatedDraft = draft
+              { title = "Mise a jour"
+              , actualDurationMinutes = "40"
+              }
+          case applyEditDraft updatedDraft item of
+            Left err -> fail $ "Edit failed: " <> show err
+            Right (ServerCalendarItem { content: updated }) -> do
+              updated.title `shouldEqual` "Mise a jour"
+              updated.actualDurationMinutes `shouldEqual` Just 40
+              updated.recurrenceRule `shouldEqual` Just RecurrenceWeekly
+              updated.recurrenceExceptionDates `shouldEqual` [ "2026-02-26" ]
+            Right _ -> fail "Expected server item"
+
+    it "rejects invalid actual duration" do
+      let
+        content = calendarContent Intention "Intention" "2026-02-19T09:00" "2026-02-19T10:00"
+        item = serverCalendarItem "edit-2" content
+      case buildEditDraft item of
+        Nothing -> fail "Expected edit draft"
+        Just draft -> do
+          let updatedDraft = draft { actualDurationMinutes = "0" }
+          applyEditDraft updatedDraft item `shouldEqual` Left (EditDuration "Durée réelle invalide.")
+
+    it "selects planify as primary action for intentions" do
+      let
+        item = serverCalendarItem "a" (calendarContent Intention "Intention" "2026-02-19T09:00" "2026-02-19T10:00")
+      primaryActionFor item `shouldEqual` PrimaryPlanify
+
+    it "selects validate as primary action for scheduled blocks" do
+      let
+        item = serverCalendarItem "b" (calendarContent ScheduledBlock "Bloc" "2026-02-19T09:00" "2026-02-19T10:00")
+      primaryActionFor item `shouldEqual` PrimaryValidate
+
+    it "removes primary action for completed blocks" do
+      let
+        content = (calendarContent ScheduledBlock "Bloc" "2026-02-19T09:00" "2026-02-19T10:00") { status = Fait }
+        item = serverCalendarItem "c" content
+      primaryActionFor item `shouldEqual` PrimaryNone
 
     it "flags conflicts between scheduled blocks" do
       let

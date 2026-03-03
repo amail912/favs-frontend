@@ -46,6 +46,7 @@ data DragCommand
 
 data ViewCommand
   = ViewValidateItem String Int
+  | ViewUpdateItem String CalendarItem
 
 
 data TemplateCommand

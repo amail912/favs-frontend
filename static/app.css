@@ -481,6 +481,11 @@ a.nav-link:hover {
   left: calc((100% / var(--columns)) * var(--column) + (var(--calendar-column-gap) / 2));
   width: calc((100% / var(--columns)) - var(--calendar-column-gap));
   min-height: 36px;
+}
+
+.calendar-calendar-card {
+  height: 100%;
+  width: 100%;
   padding: 0.45rem 0.6rem;
   border-radius: 12px;
   border: 1px solid rgba(45, 108, 223, 0.25);
@@ -514,6 +519,12 @@ a.nav-link:hover {
   border-color: rgba(178, 34, 34, 0.5);
   border-left-color: #b42318;
   box-shadow: 0 12px 22px rgba(178, 34, 34, 0.2);
+}
+
+.calendar-calendar-item--dragging {
+  box-shadow:
+    0 0 0 3px rgba(47, 111, 228, 0.28),
+    0 14px 24px rgba(20, 37, 68, 0.18);
 }
 
 .calendar-calendar-item-time {
@@ -554,8 +565,28 @@ a.nav-link:hover {
   flex: 0 0 auto;
 }
 
+.calendar-edit {
+  border-radius: 999px;
+  padding: 0.25rem 0.55rem;
+  line-height: 1;
+}
+
+.calendar-edit--timeline {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 3;
+  background: rgba(255, 255, 255, 0.88);
+  pointer-events: auto;
+}
+
+.calendar-edit .bi {
+  font-size: 0.9rem;
+}
+
 .calendar-calendar-actions .calendar-planify,
-.calendar-calendar-actions .calendar-validate {
+.calendar-calendar-actions .calendar-validate,
+.calendar-calendar-actions .calendar-primary-action {
   margin: 0;
   padding: 2px 8px;
   font-size: 0.75rem;
@@ -754,6 +785,12 @@ a.nav-link:hover {
 .calendar-validate {
   margin-top: 0.6rem;
   margin-right: 0.4rem;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.calendar-primary-action {
+  margin-top: 0.6rem;
   border-radius: 999px;
   font-weight: 600;
 }
@@ -996,6 +1033,36 @@ a.nav-link:hover {
   font-size: 0.85rem;
   color: var(--app-muted);
   margin-bottom: 0.35rem;
+}
+
+.calendar-recurrence-exception-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.calendar-recurrence-exceptions {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.calendar-recurrence-exception {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  border: 1px solid var(--app-border);
+  border-radius: 12px;
+  padding: 0.5rem 0.65rem;
+  background: #fff;
+}
+
+.calendar-recurrence-exception-date {
+  font-weight: 600;
 }
 
 .calendar-notifications-list {
@@ -1247,6 +1314,22 @@ a.nav-link:hover {
     font-size: 0.7rem;
   }
 
+  .calendar-calendar-actions .calendar-primary-action,
+  .calendar-calendar-actions .calendar-planify,
+  .calendar-calendar-actions .calendar-validate {
+    min-height: 40px;
+    min-width: 40px;
+    padding: 0.35rem 0.6rem;
+    font-size: 0.85rem;
+  }
+
+  .calendar-primary-action {
+    min-height: 40px;
+    min-width: 40px;
+    padding: 0.35rem 0.75rem;
+    font-size: 0.9rem;
+  }
+
   .calendar-mobile-tools {
     display: flex;
   }
@@ -1448,6 +1531,31 @@ a.nav-link:hover {
 .app-modal__body {
   display: grid;
   gap: 0.75rem;
+}
+
+.app-modal__focus {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.app-modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.app-modal__cancel,
+.app-modal__validate {
+  border-radius: 999px;
+  padding-inline: 0.85rem;
 }
 
 @keyframes fade-in {

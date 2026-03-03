@@ -11,7 +11,6 @@ module Calendar.Calendar
   , _validationError
   , handleCalendarAction
   , applyCalendarAction
-  , validateIntention
   , toNewIntention
   , renderForm
   , renderDateTimeContent
@@ -19,6 +18,8 @@ module Calendar.Calendar
   , renderSortPicker
   , renderConflictActions
   , renderConflictResolution
+  , PrimaryAction(..)
+  , primaryActionFor
   , renderAgendaView
   ) where
 
@@ -30,7 +31,6 @@ import Calendar.Helpers
   , generateDateRange
   , generateMonthDates
   , isConflict
-  , isDateTimeLocal
   , isItemOnDate
   , minuteOfDay
   , pad2
@@ -57,7 +57,6 @@ import Control.Monad.State.Trans (StateT, modify_)
 import Control.Monad.Writer.Trans (WriterT)
 import Data.Array (filter, find, findIndex, foldl, index, length, mapMaybe, mapWithIndex, null, sortBy, uncons, updateAt)
 import Data.Enum (enumFromTo)
-import Data.Either (Either(..))
 import Data.Generic.Rep (class Generic)
 import Data.Lens (Lens', (.~), (%~))
 import Data.Lens.Record (prop)
@@ -66,14 +65,16 @@ import Data.String.CodeUnits as String
 import Data.String.Common as StringCommon
 import Data.String.Pattern (Pattern(..))
 import Effect.Aff (Aff)
-import Halogen.HTML (HTML, button, div, input, li, option, section, select, span, text, ul)
+import Halogen.HTML (HTML, button, div, i, input, li, option, section, select, span, text, ul)
 import Halogen.HTML.Core (AttrName(..))
-import Halogen.HTML.Events (onClick, onDragOver, onDrop, onKeyDown, onValueChange)
-import Halogen.HTML.Properties (attr, placeholder, style, type_, value)
+import Halogen.HTML.Events (onClick, onDoubleClick, onDragOver, onDrop, onKeyDown, onMouseDown, onTouchCancel, onTouchEnd, onTouchMove, onValueChange)
+import Halogen.HTML.Properties (IProp, attr, placeholder, style, type_, value)
 import Data.Show.Generic (genericShow)
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Type.Proxy (Proxy(..))
 import Web.UIEvent.KeyboardEvent as KE
+import Web.UIEvent.MouseEvent as MouseEvent
+import Web.TouchEvent.TouchEvent as TouchEvent
 import Ui.Utils (class_)
 
 
@@ -143,6 +144,16 @@ instance resolutionStrategyShow :: Show ResolutionStrategy where
   show = genericShow
 
 
+data PrimaryAction
+  = PrimaryPlanify
+  | PrimaryValidate
+  | PrimaryNone
+
+derive instance eqPrimaryAction :: Eq PrimaryAction
+derive instance primaryActionGeneric :: Generic PrimaryAction _
+instance showPrimaryAction :: Show PrimaryAction where
+  show = genericShow
+
 _items :: Lens' CalendarState (Array CalendarItem)
 _items = prop (Proxy :: _ "items")
 
@@ -201,16 +212,6 @@ applyCalendarAction action dataState =
       (_conflictResolutionS .~ Nothing) dataState
     CalendarCancelResolution ->
       (_conflictResolutionS .~ Nothing) dataState
-
-
-validateIntention :: IntentionDraft -> Either ValidationError IntentionDraft
-validateIntention draft =
-  case unit of
-    _ | StringCommon.trim draft.title == "" -> Left TitleEmpty
-    _ | not (isDateTimeLocal draft.windowStart) -> Left WindowStartInvalid
-    _ | not (isDateTimeLocal draft.windowEnd) -> Left WindowEndInvalid
-    _ | draft.windowEnd <= draft.windowStart -> Left WindowOrderInvalid
-    _ -> Right draft
 
 
 toNewIntention :: IntentionDraft -> CalendarItem
@@ -437,17 +438,18 @@ renderAgendaView
   -> String
   -> Array String
   -> Array CalendarItem
+  -> Boolean
   -> Maybe String
   -> Maybe Int
   -> HTML w CalendarUiAction
-renderAgendaView viewMode focusDate conflictIds items draggingId dragHoverIndex =
+renderAgendaView viewMode focusDate conflictIds items isMobile draggingId dragHoverIndex =
   case viewMode of
     ViewDay ->
-      renderDayCalendar focusDate conflictIds items draggingId dragHoverIndex
+      renderDayCalendar focusDate conflictIds items isMobile draggingId dragHoverIndex
     ViewWeek ->
-      renderRangeView "Semaine" (generateDateRange focusDate 7) conflictIds items
+      renderRangeView "Semaine" (generateDateRange focusDate 7) conflictIds items isMobile
     ViewMonth ->
-      renderRangeView "Mois" (generateMonthDates focusDate) conflictIds items
+      renderRangeView "Mois" (generateMonthDates focusDate) conflictIds items isMobile
 
 
 type TimelineBlock =
@@ -469,10 +471,11 @@ renderDayCalendar
    . String
   -> Array String
   -> Array CalendarItem
+  -> Boolean
   -> Maybe String
   -> Maybe Int
   -> HTML w CalendarUiAction
-renderDayCalendar focusDate conflictIds items draggingId dragHoverIndex =
+renderDayCalendar focusDate conflictIds items isMobile draggingId dragHoverIndex =
   let
     itemsForDate = filter (isItemOnDate focusDate) items
     sorted = sortItems SortByTime conflictIds itemsForDate
@@ -492,13 +495,16 @@ renderDayCalendar focusDate conflictIds items draggingId dragHoverIndex =
                 [ class_ "calendar-calendar-grid"
                 , onDragOver (\ev -> CalendarUiDrag (DragOverCalendar ev))
                 , onDrop (\ev -> CalendarUiDrag (DropOnCalendar ev))
+                , onTouchMove (\ev -> CalendarUiDrag (DragTouchMoveCalendar ev))
+                , onTouchEnd (const (CalendarUiDrag DragTouchEnd))
+                , onTouchCancel (const (CalendarUiDrag DragTouchCancel))
                 ]
                 [ div [ class_ "calendar-calendar-lines" ]
                     (map renderHourLine (enumFromTo 0 23))
                 , maybe (text "") renderDropIndicator dragHoverIndex
                 , div
                     [ class_ $ "calendar-calendar-items" <> if draggingId == Nothing then "" else " calendar-calendar-items--dragging" ]
-                    (map (renderTimelineItem conflictIds) layout)
+                    (map (renderTimelineItem conflictIds isMobile draggingId) layout)
                 ]
             ]
         ]
@@ -520,9 +526,11 @@ renderHourLine _ =
 renderTimelineItem
   :: forall w
    . Array String
+  -> Boolean
+  -> Maybe String
   -> TimelineLayout
   -> HTML w CalendarUiAction
-renderTimelineItem conflictIds layout =
+renderTimelineItem conflictIds isMobile draggingId layout =
   let
     content = calendarItemContent layout.item
     typeClass =
@@ -530,6 +538,11 @@ renderTimelineItem conflictIds layout =
         ScheduledBlock -> " calendar-calendar-item--scheduled"
         Intention -> " calendar-calendar-item--intention"
     conflictClass = if isConflict conflictIds layout.item then " calendar-calendar-item--conflict" else ""
+    draggingClass =
+      case { draggingId, item: layout.item } of
+        { draggingId: Just activeId, item: ServerCalendarItem { id } } | activeId == id ->
+          " calendar-calendar-item--dragging"
+        _ -> ""
     inlineStyle =
       " --start:" <> show layout.startMin <> ";"
         <> " --duration:"
@@ -542,21 +555,26 @@ renderTimelineItem conflictIds layout =
         <> show layout.columnCount
         <> ";"
     dragProps = dragCalendarHandlers CalendarUiDrag layout.item
+    editProps = editHandlers isMobile draggingId layout.item
   in
     div
-      ( [ class_ $ "calendar-calendar-item" <> typeClass <> conflictClass
+      ( [ class_ "calendar-calendar-item"
         , style inlineStyle
-        ] <> dragProps
+        ] <> editProps
       )
-      [ div [ class_ "calendar-calendar-meta" ]
-          [ div [ class_ "calendar-calendar-item-time" ]
-              [ text $ timeLabel content.windowStart <> " → " <> timeLabel content.windowEnd ]
-          , div [ class_ "calendar-calendar-item-title" ] [ text content.title ]
-          , div [ class_ "calendar-calendar-footer" ]
-              [ renderCategory content.category
-              , div [ class_ "calendar-calendar-actions" ]
-                  [ renderValidationAction layout.item content
-                  , renderPlanifyAction layout.item content
+      [ renderTimelineEditButton isMobile layout.item
+      , div
+          ( [ class_ $ "calendar-calendar-card" <> typeClass <> conflictClass <> draggingClass
+            ] <> dragProps
+          )
+          [ div [ class_ "calendar-calendar-meta" ]
+              [ div [ class_ "calendar-calendar-item-time" ]
+                  [ text $ timeLabel content.windowStart <> " → " <> timeLabel content.windowEnd ]
+              , div [ class_ "calendar-calendar-item-title" ] [ text content.title ]
+              , div [ class_ "calendar-calendar-footer" ]
+                  [ renderCategory content.category
+                  , div [ class_ "calendar-calendar-actions" ]
+                      [ renderPrimaryAction layout.item content ]
                   ]
               ]
           ]
@@ -637,21 +655,23 @@ renderRangeView
   -> Array String
   -> Array String
   -> Array CalendarItem
+  -> Boolean
   -> HTML w CalendarUiAction
-renderRangeView label dates conflictIds items =
+renderRangeView label dates conflictIds items isMobile =
   if null dates then emptyAgendaRange label
   else
     div [ class_ "calendar-range" ]
-      (map (renderDateSection label conflictIds items) dates)
+      (map (renderDateSection label conflictIds items isMobile) dates)
 
 renderDateSection
   :: forall w
    . String
   -> Array String
   -> Array CalendarItem
+  -> Boolean
   -> String
   -> HTML w CalendarUiAction
-renderDateSection _ conflictIds items dateStr =
+renderDateSection _ conflictIds items isMobile dateStr =
   let
     itemsForDate = filter (isItemOnDate dateStr) items
     sorted = sortItems SortByTime conflictIds itemsForDate
@@ -659,7 +679,7 @@ renderDateSection _ conflictIds items dateStr =
     section [ class_ "calendar-date-section" ]
       [ div [ class_ "calendar-date-title" ] [ text dateStr ]
       , if null sorted then div [ class_ "calendar-date-empty" ] [ text "Aucun item" ]
-        else agendaList conflictIds sorted
+        else agendaList conflictIds sorted isMobile
       ]
 
 emptyAgendaRange :: forall w action. String -> HTML w action
@@ -673,53 +693,102 @@ agendaList
   :: forall w
    . Array String
   -> Array CalendarItem
+  -> Boolean
   -> HTML w CalendarUiAction
-agendaList conflictIds items =
-  ul [ class_ "list-group entity-list calendar-list" ] (mapWithIndex (renderItem conflictIds) items)
+agendaList conflictIds items isMobile =
+  ul [ class_ "list-group entity-list calendar-list" ] (mapWithIndex (renderItem conflictIds isMobile) items)
 
 renderItem
   :: forall w
    . Array String
+  -> Boolean
   -> Int
   -> CalendarItem
   -> HTML w CalendarUiAction
-renderItem conflictIds _ item =
+renderItem conflictIds isMobile _ item =
   let
     content = calendarItemContent item
     conflictClass = if isConflict conflictIds item then " calendar-card--conflict" else ""
     dragProps = dragHandlers CalendarUiDrag item
+    editProps = editHandlers isMobile Nothing item
   in
-    li ([ class_ $ "row list-group-item entity-card calendar-card" <> conflictClass ] <> dragProps)
+    li ([ class_ $ "row list-group-item entity-card calendar-card" <> conflictClass ] <> dragProps <> editProps)
       [ div [ class_ "col entity-card-body" ]
           [ div [ class_ "calendar-card-time" ] [ text (timeLabel content.windowStart) ]
           , div [ class_ "calendar-card-title" ] [ text content.title ]
           , div [ class_ "calendar-card-window" ]
               [ text $ content.windowStart <> " → " <> content.windowEnd ]
           , renderCategory content.category
-          , renderValidationAction item content
-          , renderPlanifyAction item content
+          , renderPrimaryAction item content
           ]
       ]
 
-renderPlanifyAction
-  :: forall w
-   . CalendarItem
-  -> CalendarItemContent
-  -> HTML w CalendarUiAction
-renderPlanifyAction (ServerCalendarItem { id, content }) _ | content.itemType == Intention =
-  button [ class_ "btn btn-sm btn-outline-primary calendar-planify", onClick (const (CalendarUiSync (SyncPlanifyFrom id content))) ]
-    [ text "Planifier" ]
-renderPlanifyAction _ _ = text ""
+primaryActionFor :: CalendarItem -> PrimaryAction
+primaryActionFor (ServerCalendarItem { content }) =
+  case content.itemType of
+    Intention -> PrimaryPlanify
+    ScheduledBlock ->
+      if content.status /= Fait then PrimaryValidate else PrimaryNone
+primaryActionFor _ = PrimaryNone
 
-renderValidationAction
+renderPrimaryAction
   :: forall w
    . CalendarItem
   -> CalendarItemContent
   -> HTML w CalendarUiAction
-renderValidationAction (ServerCalendarItem { id, content }) _ | content.status /= Fait =
-  button [ class_ "btn btn-sm btn-outline-success calendar-validate", onClick (const (CalendarUiView (ViewOpenValidation id content))) ]
-    [ text "Valider" ]
-renderValidationAction _ _ = text ""
+renderPrimaryAction item content =
+  case primaryActionFor item of
+    PrimaryPlanify ->
+      case item of
+        ServerCalendarItem { id } ->
+          button [ class_ "btn btn-sm btn-outline-primary calendar-primary-action", onClick (const (CalendarUiSync (SyncPlanifyFrom id content))) ]
+            [ text "Planifier" ]
+        _ -> text ""
+    PrimaryValidate ->
+      case item of
+        ServerCalendarItem { id } ->
+          button [ class_ "btn btn-sm btn-outline-success calendar-primary-action", onClick (const (CalendarUiView (ViewOpenValidation id content))) ]
+            [ text "Valider" ]
+        _ -> text ""
+    PrimaryNone -> text ""
+
+editHandlers
+  :: forall r
+   . Boolean
+  -> Maybe String
+  -> CalendarItem
+  -> Array
+       ( IProp
+           ( onDoubleClick :: MouseEvent.MouseEvent
+           , onTouchEnd :: TouchEvent.TouchEvent
+           | r
+           )
+           CalendarUiAction
+       )
+editHandlers isMobile draggingId item =
+  if isMobile then
+    [ onDoubleClick (const (CalendarUiView (ViewOpenEditFromDoubleClick item))) ]
+      <> if draggingId == Nothing then
+          [ onTouchEnd (const (CalendarUiView (ViewMobileTap item))) ]
+        else
+          []
+  else
+    []
+
+renderTimelineEditButton :: forall w. Boolean -> CalendarItem -> HTML w CalendarUiAction
+renderTimelineEditButton isMobile item =
+  if isMobile then text ""
+  else
+    case item of
+      ServerCalendarItem _ ->
+        button
+          [ class_ "btn btn-sm btn-outline-secondary calendar-edit calendar-edit--timeline"
+          , attr (AttrName "aria-label") "Editer"
+          , onMouseDown (const (CalendarUiView (ViewOpenEdit item)))
+          , onClick (const (CalendarUiView (ViewOpenEdit item)))
+          ]
+          [ i [ class_ "bi bi-pencil" ] [] ]
+      _ -> text ""
 
 renderCategory :: forall w action. Maybe String -> HTML w action
 renderCategory category =
