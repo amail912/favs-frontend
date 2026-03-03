@@ -16,7 +16,10 @@ Frontend pour gérer le quotidien avec un focus sur la gestion d’un calendrier
 - Tu proposeras de réaliser des tests dès que cela te semble nécessaire
 - Utilise la compilation comme une grande aide au développement. PureScript est un language fortement typé qui permet d'avoir beaucoup de garanties avec un système de types adapté.
 - On veillera à ne laisser aucun warning de compilation.
+- Le lint doit passer (`npm run lint`) et les violations doivent être corrigées même hors du scope initial si nécessaire.
 - Avant chaque commit, run tous les tests.
+- Les modules `Api.*` sont strictement techniques : aucune décision métier.
+- Les objets de payload sont construits par l’appelant, mais leurs types et `EncodeJson` vivent dans `Api.*`.
 - La logique et les vues de chaque domaine restent dans leur module de domaine, sans fichier centralisateur.
 - Les helpers partagés sont uniquement techniques, pas métier.
 - Les fonctions `render*` des domaines émettent leurs propres actions de domaine ; la conversion vers l’action page se fait au niveau de l’appelant.
@@ -25,6 +28,7 @@ Frontend pour gérer le quotidien avec un focus sur la gestion d’un calendrier
 - Quand un module doit émettre des actions multi-domaines, exposer un type `*Action` et faire la conversion vers l’action page au niveau de l’appelant.
 - Préférer la destructuration de premier niveau dans la signature des fonctions, et éviter les alias inutiles.
 - Éviter les suffixes inutiles dans les noms de lenses.
+- Éviter `unsafeCoerce` dans les handlers clavier, préférer `fromEvent` quand disponible.
 
 ## Principes de design
 - Ergonomie maximale.
@@ -101,6 +105,7 @@ Références de specs produit et user stories: `docs/specs/calendar-v1/`.
 - Suite principale: `test/SpecSuite.purs` (Notes, Checklists, Calendar, UI helpers).
 - E2E: `e2e/tests/*.spec.js` (navigation, lifecycle notes/checklists, agenda integration, signup feedback).
 - Support E2E: `e2e/support/auth-session.js` (signup/signin via `/api/signup` + `/api/signin`).
+- Si des labels/ARIA/textes UI changent, mettre à jour les tests E2E associés.
 
 ## Dev proxy
 - `dev/proxy-server.js` expose `http://localhost:1234` et proxy `/api` → `http://localhost:8081`.
