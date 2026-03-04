@@ -1,5 +1,5 @@
 module Calendar.Import
-  ( ImportState
+  ( ImportState(..)
   , ImportAction(..)
   , ImportCommand(..)
   , ImportCtx
@@ -18,18 +18,16 @@ import Control.Monad.State.Trans (StateT, get, modify_)
 import Control.Monad.Writer.Class (tell)
 import Control.Monad.Writer.Trans (WriterT)
 import Data.Array (foldl, length, null)
-import Data.Lens (Lens', (.~), (^.))
-import Data.Lens.Record (prop)
+import Data.Lens (Lens', lens, (.~), (^.))
 import Data.Maybe (Maybe(..), maybe)
 import Effect.Aff (Aff)
 import Halogen.HTML (HTML, button, div, section, textarea, text)
 import Halogen.HTML.Events (onClick, onValueChange)
 import Halogen.HTML.Properties (placeholder, value)
-import Type.Proxy (Proxy(..))
 import Ui.AgendaRender (renderPanelHeader)
 import Ui.Utils (class_)
 
-type ImportState =
+newtype ImportState = ImportState
   { csvInput :: String
   , csvImportResult :: Maybe CsvImportResult
   , icsInput :: String
@@ -44,23 +42,36 @@ type ImportCtx =
 
 importInitialState :: ImportState
 importInitialState =
-  { csvInput: ""
-  , csvImportResult: Nothing
-  , icsInput: ""
-  , icsImportResult: Nothing
-  }
+  ImportState
+    { csvInput: ""
+    , csvImportResult: Nothing
+    , icsInput: ""
+    , icsImportResult: Nothing
+    }
 
 _csvInputS :: Lens' ImportState String
-_csvInputS = prop (Proxy :: _ "csvInput")
+_csvInputS =
+  lens
+    (\(ImportState state) -> state.csvInput)
+    (\(ImportState state) csvInput -> ImportState (state { csvInput = csvInput }))
 
 _csvImportResultS :: Lens' ImportState (Maybe CsvImportResult)
-_csvImportResultS = prop (Proxy :: _ "csvImportResult")
+_csvImportResultS =
+  lens
+    (\(ImportState state) -> state.csvImportResult)
+    (\(ImportState state) csvImportResult -> ImportState (state { csvImportResult = csvImportResult }))
 
 _icsInputS :: Lens' ImportState String
-_icsInputS = prop (Proxy :: _ "icsInput")
+_icsInputS =
+  lens
+    (\(ImportState state) -> state.icsInput)
+    (\(ImportState state) icsInput -> ImportState (state { icsInput = icsInput }))
 
 _icsImportResultS :: Lens' ImportState (Maybe IcsImportResult)
-_icsImportResultS = prop (Proxy :: _ "icsImportResult")
+_icsImportResultS =
+  lens
+    (\(ImportState state) -> state.icsImportResult)
+    (\(ImportState state) icsImportResult -> ImportState (state { icsImportResult = icsImportResult }))
 
 data ImportAction
   = ImportCsvInputChanged String

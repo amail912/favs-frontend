@@ -1,5 +1,5 @@
 module Calendar.Notifications
-  ( NotificationState
+  ( NotificationState(..)
   , NotificationAction(..)
   , NotificationEditor
   , notificationInitialState
@@ -24,7 +24,7 @@ import Calendar.Model
 import Control.Monad.State.Trans (StateT, get, modify_)
 import Control.Monad.Writer.Trans (WriterT)
 import Data.Array (catMaybes, filter, find, null)
-import Data.Lens (Lens', (.~), (%~), (^.))
+import Data.Lens (Lens', lens, (.~), (%~), (^.))
 import Data.Lens.Record (prop)
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.Monoid (guard)
@@ -37,7 +37,7 @@ import Ui.AgendaRender (renderPanelHeader)
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Ui.Utils (class_)
 
-type NotificationState =
+newtype NotificationState = NotificationState
   { notificationDefaults :: NotificationDefaults
   , notificationOverrides :: Array NotificationOverride
   , notificationPanelOpen :: Boolean
@@ -52,23 +52,36 @@ type NotificationEditor =
 
 notificationInitialState :: NotificationState
 notificationInitialState =
-  { notificationDefaults: defaultNotificationDefaults
-  , notificationOverrides: []
-  , notificationPanelOpen: false
-  , notificationEditor: Nothing
-  }
+  NotificationState
+    { notificationDefaults: defaultNotificationDefaults
+    , notificationOverrides: []
+    , notificationPanelOpen: false
+    , notificationEditor: Nothing
+    }
 
 _notificationDefaultsS :: Lens' NotificationState NotificationDefaults
-_notificationDefaultsS = prop (Proxy :: _ "notificationDefaults")
+_notificationDefaultsS =
+  lens
+    (\(NotificationState state) -> state.notificationDefaults)
+    (\(NotificationState state) notificationDefaults -> NotificationState (state { notificationDefaults = notificationDefaults }))
 
 _notificationOverridesS :: Lens' NotificationState (Array NotificationOverride)
-_notificationOverridesS = prop (Proxy :: _ "notificationOverrides")
+_notificationOverridesS =
+  lens
+    (\(NotificationState state) -> state.notificationOverrides)
+    (\(NotificationState state) notificationOverrides -> NotificationState (state { notificationOverrides = notificationOverrides }))
 
 _notificationPanelOpenS :: Lens' NotificationState Boolean
-_notificationPanelOpenS = prop (Proxy :: _ "notificationPanelOpen")
+_notificationPanelOpenS =
+  lens
+    (\(NotificationState state) -> state.notificationPanelOpen)
+    (\(NotificationState state) notificationPanelOpen -> NotificationState (state { notificationPanelOpen = notificationPanelOpen }))
 
 _notificationEditorS :: Lens' NotificationState (Maybe NotificationEditor)
-_notificationEditorS = prop (Proxy :: _ "notificationEditor")
+_notificationEditorS =
+  lens
+    (\(NotificationState state) -> state.notificationEditor)
+    (\(NotificationState state) notificationEditor -> NotificationState (state { notificationEditor = notificationEditor }))
 
 data NotificationAction
   = NotificationTogglePanel

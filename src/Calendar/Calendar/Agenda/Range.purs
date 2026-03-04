@@ -12,8 +12,7 @@ import Data.Array (filter, null)
 import Halogen.HTML (HTML, div, section, text)
 import Ui.Utils (class_)
 
-data RangeAction
-  = RangeListAction ListAction
+data RangeAction = RangeListAction ListAction
 
 renderRangeView
   :: forall w

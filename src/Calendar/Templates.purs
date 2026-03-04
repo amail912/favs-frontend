@@ -1,5 +1,5 @@
 module Calendar.Templates
-  ( TemplateState
+  ( TemplateState(..)
   , TemplateAction(..)
   , TemplateCommand(..)
   , templateInitialState
@@ -34,7 +34,7 @@ import Control.Monad.State.Trans (StateT, get, modify_)
 import Control.Monad.Writer.Class (tell)
 import Control.Monad.Writer.Trans (WriterT)
 import Data.Array (elem, filter, find, null)
-import Data.Lens (Lens', (.~), (%~), (^.))
+import Data.Lens (Lens', lens, (.~), (%~), (^.))
 import Data.Lens.Record (prop)
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.String.Common as StringCommon
@@ -49,7 +49,7 @@ import DOM.HTML.Indexed.InputType (InputType(..))
 import Ui.AgendaRender (renderPanelHeader)
 import Ui.Utils (class_)
 
-type TemplateState =
+newtype TemplateState = TemplateState
   { templates :: Array TaskTemplate
   , templateDraft :: TemplateDraft
   , editingTemplateId :: Maybe String
@@ -57,19 +57,29 @@ type TemplateState =
 
 templateInitialState :: TemplateState
 templateInitialState =
-  { templates: []
-  , templateDraft: emptyTemplateDraft
-  , editingTemplateId: Nothing
-  }
+  TemplateState
+    { templates: []
+    , templateDraft: emptyTemplateDraft
+    , editingTemplateId: Nothing
+    }
 
 _templatesS :: Lens' TemplateState (Array TaskTemplate)
-_templatesS = prop (Proxy :: _ "templates")
+_templatesS =
+  lens
+    (\(TemplateState state) -> state.templates)
+    (\(TemplateState state) templates -> TemplateState (state { templates = templates }))
 
 _templateDraftS :: Lens' TemplateState TemplateDraft
-_templateDraftS = prop (Proxy :: _ "templateDraft")
+_templateDraftS =
+  lens
+    (\(TemplateState state) -> state.templateDraft)
+    (\(TemplateState state) templateDraft -> TemplateState (state { templateDraft = templateDraft }))
 
 _editingTemplateIdS :: Lens' TemplateState (Maybe String)
-_editingTemplateIdS = prop (Proxy :: _ "editingTemplateId")
+_editingTemplateIdS =
+  lens
+    (\(TemplateState state) -> state.editingTemplateId)
+    (\(TemplateState state) editingTemplateId -> TemplateState (state { editingTemplateId = editingTemplateId }))
 
 _templateDraftTitleS :: Lens' TemplateDraft String
 _templateDraftTitleS = prop (Proxy :: _ "title")
@@ -90,8 +100,7 @@ data TemplateAction
   | TemplateDelete String
   | TemplateUse String
 
-data TemplateCommand
-  = TemplateSetDraft IntentionDraft
+data TemplateCommand = TemplateSetDraft IntentionDraft
 
 handleTemplateAction :: TemplateAction -> StateT TemplateState (WriterT (Array TemplateCommand) Aff) Unit
 handleTemplateAction = case _ of

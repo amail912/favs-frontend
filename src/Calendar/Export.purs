@@ -1,5 +1,5 @@
 module Calendar.Export
-  ( ExportState
+  ( ExportState(..)
   , ExportAction(..)
   , exportInitialState
   , handleExportAction
@@ -21,18 +21,16 @@ import Calendar.Helpers (toOptionalString)
 import Calendar.Model (CalendarItem, ExportFormat(..))
 import Control.Monad.State.Trans (StateT, get, modify_)
 import Control.Monad.Writer.Trans (WriterT)
-import Data.Lens (Lens', (.~), (^.))
-import Data.Lens.Record (prop)
+import Data.Lens (Lens', lens, (.~), (^.))
 import Effect.Aff (Aff)
 import Halogen.HTML (HTML, button, div, input, option, section, select, text, textarea)
 import Halogen.HTML.Events (onClick, onValueChange)
 import Halogen.HTML.Properties (placeholder, type_, value)
-import Type.Proxy (Proxy(..))
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Ui.AgendaRender (renderPanelHeader)
 import Ui.Utils (class_)
 
-type ExportState =
+newtype ExportState = ExportState
   { exportFormat :: ExportFormat
   , exportTypeFilter :: String
   , exportStatusFilter :: String
@@ -44,35 +42,57 @@ type ExportState =
 
 exportInitialState :: ExportState
 exportInitialState =
-  { exportFormat: ExportCSV
-  , exportTypeFilter: ""
-  , exportStatusFilter: ""
-  , exportCategoryFilter: ""
-  , exportStartDate: ""
-  , exportEndDate: ""
-  , exportOutput: ""
-  }
+  ExportState
+    { exportFormat: ExportCSV
+    , exportTypeFilter: ""
+    , exportStatusFilter: ""
+    , exportCategoryFilter: ""
+    , exportStartDate: ""
+    , exportEndDate: ""
+    , exportOutput: ""
+    }
 
 _exportFormatS :: Lens' ExportState ExportFormat
-_exportFormatS = prop (Proxy :: _ "exportFormat")
+_exportFormatS =
+  lens
+    (\(ExportState state) -> state.exportFormat)
+    (\(ExportState state) exportFormat -> ExportState (state { exportFormat = exportFormat }))
 
 _exportTypeFilterS :: Lens' ExportState String
-_exportTypeFilterS = prop (Proxy :: _ "exportTypeFilter")
+_exportTypeFilterS =
+  lens
+    (\(ExportState state) -> state.exportTypeFilter)
+    (\(ExportState state) exportTypeFilter -> ExportState (state { exportTypeFilter = exportTypeFilter }))
 
 _exportStatusFilterS :: Lens' ExportState String
-_exportStatusFilterS = prop (Proxy :: _ "exportStatusFilter")
+_exportStatusFilterS =
+  lens
+    (\(ExportState state) -> state.exportStatusFilter)
+    (\(ExportState state) exportStatusFilter -> ExportState (state { exportStatusFilter = exportStatusFilter }))
 
 _exportCategoryFilterS :: Lens' ExportState String
-_exportCategoryFilterS = prop (Proxy :: _ "exportCategoryFilter")
+_exportCategoryFilterS =
+  lens
+    (\(ExportState state) -> state.exportCategoryFilter)
+    (\(ExportState state) exportCategoryFilter -> ExportState (state { exportCategoryFilter = exportCategoryFilter }))
 
 _exportStartDateS :: Lens' ExportState String
-_exportStartDateS = prop (Proxy :: _ "exportStartDate")
+_exportStartDateS =
+  lens
+    (\(ExportState state) -> state.exportStartDate)
+    (\(ExportState state) exportStartDate -> ExportState (state { exportStartDate = exportStartDate }))
 
 _exportEndDateS :: Lens' ExportState String
-_exportEndDateS = prop (Proxy :: _ "exportEndDate")
+_exportEndDateS =
+  lens
+    (\(ExportState state) -> state.exportEndDate)
+    (\(ExportState state) exportEndDate -> ExportState (state { exportEndDate = exportEndDate }))
 
 _exportOutputS :: Lens' ExportState String
-_exportOutputS = prop (Proxy :: _ "exportOutput")
+_exportOutputS =
+  lens
+    (\(ExportState state) -> state.exportOutput)
+    (\(ExportState state) exportOutput -> ExportState (state { exportOutput = exportOutput }))
 
 data ExportAction
   = ExportFormatChangedAction String

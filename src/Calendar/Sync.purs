@@ -1,5 +1,5 @@
 module Calendar.Sync
-  ( SyncState
+  ( SyncState(..)
   , SyncAction(..)
   , SyncCommand(..)
   , syncInitialState
@@ -23,16 +23,14 @@ import Control.Monad.State.Trans (StateT, get, modify_)
 import Control.Monad.Writer.Class (tell)
 import Control.Monad.Writer.Trans (WriterT)
 import Data.Array (find, mapMaybe, null)
-import Data.Lens (Lens', (.~), (^.))
-import Data.Lens.Record (prop)
+import Data.Lens (Lens', lens, (.~), (^.))
 import Data.Maybe (Maybe(..))
 import Effect.Aff (Aff)
 import Halogen.HTML (HTML, button, div, li, text, ul)
 import Halogen.HTML.Events (onClick)
 import Ui.Utils (class_)
-import Type.Proxy (Proxy(..))
 
-type SyncState =
+newtype SyncState = SyncState
   { offlineMode :: Boolean
   , pendingSync :: Array CalendarItem
   , syncConflict :: Maybe (Array CalendarItem)
@@ -41,23 +39,36 @@ type SyncState =
 
 syncInitialState :: SyncState
 syncInitialState =
-  { offlineMode: false
-  , pendingSync: []
-  , syncConflict: Nothing
-  , updateError: Nothing
-  }
+  SyncState
+    { offlineMode: false
+    , pendingSync: []
+    , syncConflict: Nothing
+    , updateError: Nothing
+    }
 
 _syncOfflineMode :: Lens' SyncState Boolean
-_syncOfflineMode = prop (Proxy :: _ "offlineMode")
+_syncOfflineMode =
+  lens
+    (\(SyncState state) -> state.offlineMode)
+    (\(SyncState state) offlineMode -> SyncState (state { offlineMode = offlineMode }))
 
 _syncPendingSync :: Lens' SyncState (Array CalendarItem)
-_syncPendingSync = prop (Proxy :: _ "pendingSync")
+_syncPendingSync =
+  lens
+    (\(SyncState state) -> state.pendingSync)
+    (\(SyncState state) pendingSync -> SyncState (state { pendingSync = pendingSync }))
 
 _syncConflict :: Lens' SyncState (Maybe (Array CalendarItem))
-_syncConflict = prop (Proxy :: _ "syncConflict")
+_syncConflict =
+  lens
+    (\(SyncState state) -> state.syncConflict)
+    (\(SyncState state) syncConflict -> SyncState (state { syncConflict = syncConflict }))
 
 _syncUpdateError :: Lens' SyncState (Maybe String)
-_syncUpdateError = prop (Proxy :: _ "updateError")
+_syncUpdateError =
+  lens
+    (\(SyncState state) -> state.updateError)
+    (\(SyncState state) updateError -> SyncState (state { updateError = updateError }))
 
 data SyncAction
   = SyncDraftTitleKeyDown String

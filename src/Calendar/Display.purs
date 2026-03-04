@@ -1,5 +1,5 @@
 module Calendar.Display
-  ( ViewState
+  ( ViewState(..)
   , ViewAction(..)
   , ViewCommand(..)
   , AgendaModal(..)
@@ -34,8 +34,7 @@ import Control.Monad.State.Trans (StateT, get, modify_)
 import Control.Monad.Writer.Class (tell)
 import Control.Monad.Writer.Trans (WriterT)
 import Data.Either (Either(..))
-import Data.Lens (Lens', (.~), (%~), (^.))
-import Data.Lens.Record (prop)
+import Data.Lens (Lens', lens, (.~), (%~), (^.))
 import Data.Maybe (Maybe(..), maybe)
 import Data.DateTime.Instant (Instant, diff)
 import Data.Time.Duration (Milliseconds(..))
@@ -49,7 +48,6 @@ import Halogen.HTML.Properties (attr, placeholder, type_, value)
 import Web.HTML (window)
 import Web.HTML.Window as Window
 import Ui.Utils (class_)
-import Type.Proxy (Proxy(..))
 import DOM.HTML.Indexed.InputType (InputType(..))
 
 data AgendaModal
@@ -71,7 +69,7 @@ type ValidationPanel =
   , inputValue :: String
   }
 
-type ViewState =
+newtype ViewState = ViewState
   { viewMode :: AgendaView
   , focusDate :: String
   , activeModal :: Maybe AgendaModal
@@ -83,35 +81,57 @@ type ViewState =
 
 viewInitialState :: ViewState
 viewInitialState =
-  { viewMode: ViewDay
-  , focusDate: ""
-  , activeModal: Nothing
-  , validationPanel: Nothing
-  , editPanel: Nothing
-  , isMobile: false
-  , lastTapAt: Nothing
-  }
+  ViewState
+    { viewMode: ViewDay
+    , focusDate: ""
+    , activeModal: Nothing
+    , validationPanel: Nothing
+    , editPanel: Nothing
+    , isMobile: false
+    , lastTapAt: Nothing
+    }
 
 _viewModeS :: Lens' ViewState AgendaView
-_viewModeS = prop (Proxy :: _ "viewMode")
+_viewModeS =
+  lens
+    (\(ViewState state) -> state.viewMode)
+    (\(ViewState state) viewMode -> ViewState (state { viewMode = viewMode }))
 
 _viewFocusDate :: Lens' ViewState String
-_viewFocusDate = prop (Proxy :: _ "focusDate")
+_viewFocusDate =
+  lens
+    (\(ViewState state) -> state.focusDate)
+    (\(ViewState state) focusDate -> ViewState (state { focusDate = focusDate }))
 
 _viewActiveModalS :: Lens' ViewState (Maybe AgendaModal)
-_viewActiveModalS = prop (Proxy :: _ "activeModal")
+_viewActiveModalS =
+  lens
+    (\(ViewState state) -> state.activeModal)
+    (\(ViewState state) activeModal -> ViewState (state { activeModal = activeModal }))
 
 _viewValidationPanelS :: Lens' ViewState (Maybe ValidationPanel)
-_viewValidationPanelS = prop (Proxy :: _ "validationPanel")
+_viewValidationPanelS =
+  lens
+    (\(ViewState state) -> state.validationPanel)
+    (\(ViewState state) validationPanel -> ViewState (state { validationPanel = validationPanel }))
 
 _viewEditPanelS :: Lens' ViewState (Maybe EditPanel)
-_viewEditPanelS = prop (Proxy :: _ "editPanel")
+_viewEditPanelS =
+  lens
+    (\(ViewState state) -> state.editPanel)
+    (\(ViewState state) editPanel -> ViewState (state { editPanel = editPanel }))
 
 _viewIsMobileS :: Lens' ViewState Boolean
-_viewIsMobileS = prop (Proxy :: _ "isMobile")
+_viewIsMobileS =
+  lens
+    (\(ViewState state) -> state.isMobile)
+    (\(ViewState state) isMobile -> ViewState (state { isMobile = isMobile }))
 
 _viewLastTapAtS :: Lens' ViewState (Maybe Instant)
-_viewLastTapAtS = prop (Proxy :: _ "lastTapAt")
+_viewLastTapAtS =
+  lens
+    (\(ViewState state) -> state.lastTapAt)
+    (\(ViewState state) lastTapAt -> ViewState (state { lastTapAt = lastTapAt }))
 
 type EditPanel =
   { item :: CalendarItem

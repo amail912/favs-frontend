@@ -15,57 +15,52 @@ import Web.UIEvent.KeyboardEvent.EventTypes as KeyboardEventTypes
 import Data.Newtype (wrap)
 
 renderModal
-  :: forall w a i
-   . Eq a
-  => Maybe a
-  -> a
-  -> String
+  :: forall w i
+  . String
   -> Array (HTML w i)
   -> i
   -> i
   -> HTML w i
-renderModal activeModal modalToRender title content onCancel onValidate =
-  if not (activeModal == Just modalToRender) then text ""
-  else
-    div
-      [ class_ "app-modal"
-      , escapeHandler
-      ]
-      [ div [ class_ "app-modal__backdrop", onClick (const onCancel) ] []
-      , div
-          [ class_ "app-modal__dialog"
-          , escapeHandler
-          ]
-          [ input
-              [ class_ "app-modal__focus"
-              , ref (wrap "modal-focus")
-              , type_ InputText
-              , autofocus true
-              , escapeHandler
-              ]
-          , div [ class_ "app-modal__header" ]
-              [ div [ class_ "app-modal__title" ] [ text title ]
-              , button
-                  [ class_ "btn btn-sm btn-outline-secondary app-modal__close"
-                  , onClick (const onCancel)
-                  ]
-                  [ text "Fermer" ]
-              ]
-          , div [ class_ "app-modal__body" ] content
-          , div [ class_ "app-modal__footer" ]
-              [ button
-                  [ class_ "btn btn-sm btn-outline-secondary app-modal__cancel"
-                  , onClick (const onCancel)
-                  ]
-                  [ text "Annuler" ]
-              , button
-                  [ class_ "btn btn-sm btn-primary app-modal__validate"
-                  , onClick (const onValidate)
-                  ]
-                  [ text "Valider" ]
-              ]
-          ]
-      ]
+renderModal title content onCancel onValidate =
+  div
+    [ class_ "app-modal"
+    , escapeHandler
+    ]
+    [ div [ class_ "app-modal__backdrop", onClick (const onCancel) ] []
+    , div
+        [ class_ "app-modal__dialog"
+        , escapeHandler
+        ]
+        [ input
+            [ class_ "app-modal__focus"
+            , ref (wrap "modal-focus")
+            , type_ InputText
+            , autofocus true
+            , escapeHandler
+            ]
+        , div [ class_ "app-modal__header" ]
+            [ div [ class_ "app-modal__title" ] [ text title ]
+            , button
+                [ class_ "btn btn-sm btn-outline-secondary app-modal__close"
+                , onClick (const onCancel)
+                ]
+                [ text "Fermer" ]
+            ]
+        , div [ class_ "app-modal__body" ] content
+        , div [ class_ "app-modal__footer" ]
+            [ button
+                [ class_ "btn btn-sm btn-outline-secondary app-modal__cancel"
+                , onClick (const onCancel)
+                ]
+                [ text "Annuler" ]
+            , button
+                [ class_ "btn btn-sm btn-primary app-modal__validate"
+                , onClick (const onValidate)
+                ]
+                [ text "Valider" ]
+            ]
+        ]
+    ]
   where
   escapeHandler
     :: forall r

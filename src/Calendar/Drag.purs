@@ -1,5 +1,5 @@
 module Calendar.Drag
-  ( DragState
+  ( DragState(..)
   , DragAction(..)
   , DragCommand(..)
   , DragCtx
@@ -24,8 +24,7 @@ import Control.Monad.Writer.Trans (WriterT)
 import Data.Array (find, index, uncons)
 import Data.Foldable (foldl)
 import Data.Int as Int
-import Data.Lens (Lens', (.~), (^.))
-import Data.Lens.Record (prop)
+import Data.Lens (Lens', lens, (.~), (^.))
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.DateTime.Instant (Instant, diff)
 import Data.Time.Duration (Milliseconds(..))
@@ -36,7 +35,6 @@ import Effect.Now as Now
 import Halogen.HTML (HTML, div, text)
 import Halogen.HTML.Events (onDragEnd, onDragOver, onDragStart, onDrop, onTouchCancel, onTouchEnd, onTouchMove, onTouchStart)
 import Halogen.HTML.Properties (IProp, draggable, style)
-import Type.Proxy (Proxy(..))
 import Web.Event.Event (preventDefault)
 import Web.Event.Event (currentTarget, target) as Event
 import Web.HTML.Event.DragEvent (DragEvent, toEvent)
@@ -53,7 +51,7 @@ import Web.TouchEvent.TouchList as TouchList
 import Ui.Utils (class_)
 import Ui.Vibration (vibrateIfAvailable)
 
-type DragState =
+newtype DragState = DragState
   { draggingId :: Maybe String
   , dragHoverIndex :: Maybe Int
   , dragOffsetMinutes :: Maybe Int
@@ -70,31 +68,50 @@ type DragCtx =
 
 dragInitialState :: DragState
 dragInitialState =
-  { draggingId: Nothing
-  , dragHoverIndex: Nothing
-  , dragOffsetMinutes: Nothing
-  , touchStartItemId: Nothing
-  , touchStartAt: Nothing
-  , touchDragActive: false
-  }
+  DragState
+    { draggingId: Nothing
+    , dragHoverIndex: Nothing
+    , dragOffsetMinutes: Nothing
+    , touchStartItemId: Nothing
+    , touchStartAt: Nothing
+    , touchDragActive: false
+    }
 
 _draggingIdS :: Lens' DragState (Maybe String)
-_draggingIdS = prop (Proxy :: _ "draggingId")
+_draggingIdS =
+  lens
+    (\(DragState state) -> state.draggingId)
+    (\(DragState state) draggingId -> DragState (state { draggingId = draggingId }))
 
 _dragHoverIndexS :: Lens' DragState (Maybe Int)
-_dragHoverIndexS = prop (Proxy :: _ "dragHoverIndex")
+_dragHoverIndexS =
+  lens
+    (\(DragState state) -> state.dragHoverIndex)
+    (\(DragState state) dragHoverIndex -> DragState (state { dragHoverIndex = dragHoverIndex }))
 
 _dragOffsetMinutesS :: Lens' DragState (Maybe Int)
-_dragOffsetMinutesS = prop (Proxy :: _ "dragOffsetMinutes")
+_dragOffsetMinutesS =
+  lens
+    (\(DragState state) -> state.dragOffsetMinutes)
+    (\(DragState state) dragOffsetMinutes -> DragState (state { dragOffsetMinutes = dragOffsetMinutes }))
 
 _touchStartItemIdS :: Lens' DragState (Maybe String)
-_touchStartItemIdS = prop (Proxy :: _ "touchStartItemId")
+_touchStartItemIdS =
+  lens
+    (\(DragState state) -> state.touchStartItemId)
+    (\(DragState state) touchStartItemId -> DragState (state { touchStartItemId = touchStartItemId }))
 
 _touchStartAtS :: Lens' DragState (Maybe Instant)
-_touchStartAtS = prop (Proxy :: _ "touchStartAt")
+_touchStartAtS =
+  lens
+    (\(DragState state) -> state.touchStartAt)
+    (\(DragState state) touchStartAt -> DragState (state { touchStartAt = touchStartAt }))
 
 _touchDragActiveS :: Lens' DragState Boolean
-_touchDragActiveS = prop (Proxy :: _ "touchDragActive")
+_touchDragActiveS =
+  lens
+    (\(DragState state) -> state.touchDragActive)
+    (\(DragState state) touchDragActive -> DragState (state { touchDragActive = touchDragActive }))
 
 data DragAction
   = DragStart String DragEvent
