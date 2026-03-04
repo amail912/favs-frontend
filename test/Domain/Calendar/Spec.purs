@@ -3,8 +3,11 @@ module Test.Domain.Calendar.Spec (spec) where
 import Prelude
 
 import Calendar.Model (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), RecurrenceRule(..), RoutineTemplate, SortMode(..), StepDependency(..), ValidationError(..), defaultNotificationDefaults, defaultRecurrenceDraft)
-import Calendar.Conflicts (detectConflictGroups, detectConflictIds)
-import Calendar.Calendar (PrimaryAction(..), primaryActionFor, toNewIntention)
+import Calendar.Conflict (detectConflictGroups, detectConflictIds)
+import Calendar.Calendar.Draft (toNewIntention)
+import Calendar.Calendar.Primary (primaryActionFor)
+import Calendar.Calendar.Types (PrimaryAction(..))
+import Calendar.Calendar.Timeline (buildTimelineLayout, toTimelineBlock)
 import Calendar.Edit (EditError(..), applyEditDraft, buildEditDraft)
 import Calendar.Exports (exportItemsToCsv, exportItemsToIcs, filterItemsForExport)
 import Calendar.Helpers (durationMinutesBetween, sortItems, validateIntention)
@@ -215,6 +218,27 @@ spec = do
         itemB = serverCalendarItem "b" (calendarContent ScheduledBlock "B" "2026-02-19T09:30" "2026-02-19T10:30")
         itemC = serverCalendarItem "c" (calendarContent ScheduledBlock "C" "2026-02-19T10:15" "2026-02-19T11:00")
       detectConflictGroups [ itemA, itemB, itemC ] `shouldEqual` [ [ "a", "b", "c" ] ]
+
+  describe "Calendar timeline layout" do
+    it "clamps end time when it is before the start" do
+      let
+        item = serverCalendarItem "t1" (calendarContent Intention "Late" "2026-02-19T23:00" "2026-02-19T22:00")
+      toTimelineBlock item
+        `shouldEqual`
+          Just { item, startMin: 1380, endMin: 1440 }
+
+    it "assigns distinct columns for overlapping items" do
+      let
+        itemA = serverCalendarItem "t2" (calendarContent ScheduledBlock "A" "2026-02-19T09:00" "2026-02-19T10:00")
+        itemB = serverCalendarItem "t3" (calendarContent ScheduledBlock "B" "2026-02-19T09:30" "2026-02-19T10:30")
+        layout = buildTimelineLayout [ itemA, itemB ]
+      length layout `shouldEqual` 2
+      case layout of
+        [ first, second ] -> do
+          first.columnCount `shouldEqual` 2
+          second.columnCount `shouldEqual` 2
+          (first.columnIndex == second.columnIndex) `shouldEqual` false
+        _ -> fail "Expected exactly two timeline items"
 
   describe "Calendar offline" do
     it "applyOfflineMutation enqueues items and pending when offline" do

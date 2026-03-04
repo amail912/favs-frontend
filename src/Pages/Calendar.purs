@@ -14,21 +14,28 @@ import Calendar.Commands
   , TemplateCommand(..)
   , ViewCommand(..)
   )
-import Calendar.Conflicts (detectConflictGroups, detectConflictIds)
-import Calendar.Calendar
-  ( CalendarAction(..)
-  , CalendarState
-  , CalendarUiAction(..)
+import Calendar.Calendar.Agenda.Day (DayAction(..), renderDayCalendar)
+import Calendar.Calendar.Agenda.List (ListAction(..))
+import Calendar.Calendar.Agenda.Range (RangeAction(..), renderRangeView)
+import Calendar.Conflict (ConflictAction, applyConflictAction, detectConflictGroups, detectConflictIds)
+import Calendar.Conflict as CConf
+import Calendar.Calendar.Controls (ControlsAction(..), applyControlsAction)
+import Calendar.Calendar.Controls as CCtrl
+import Calendar.Calendar.CreateForm (CreateFormAction(..), applyCreateFormAction)
+import Calendar.Calendar.CreateForm as CForm
+import Calendar.Calendar.Draft (toNewIntention)
+import Calendar.Calendar.State
+  ( CalendarState
+  , _draft
+  , _items
+  , _lastCreateType
+  , _validationError
   , calendarInitialState
   , emptyDraft
-  , handleCalendarAction
-  , toNewIntention
   )
-import Calendar.Calendar as Cal
 import Calendar.Display
   ( AgendaModal(..)
   , EditPanel
-  , ValidationPanel
   , ViewAction(..)
   , ViewState
   , _viewActiveModalS
@@ -52,6 +59,8 @@ import Calendar.Export
 import Calendar.Export as Exp
 import Calendar.Helpers
   ( formatDate
+  , generateDateRange
+  , generateMonthDates
   , isConflict
   , isUnplannedIntention
   , shiftMinutes
@@ -162,7 +171,9 @@ type State =
 
 data Action
   = Init
-  | CalendarAction CalendarAction
+  | CreateFormAction CreateFormAction
+  | ControlsAction ControlsAction
+  | ConflictAction ConflictAction
   | SyncAction SyncAction
   | DragAction DragAction
   | ViewAction ViewAction
@@ -173,38 +184,51 @@ data Action
   | ImportAction ImportAction
   | ExportAction ExportAction
 
-calendarUiToAction :: CalendarUiAction -> Action
-calendarUiToAction = case _ of
-  CalendarUiCalendar action -> CalendarAction action
-  CalendarUiSync action -> SyncAction action
-  CalendarUiView action -> ViewAction action
-  CalendarUiDrag action -> DragAction action
+class ToAction a where
+  toAction :: a -> Action
 
-mapCalendarUi :: forall w. HTML w CalendarUiAction -> HTML w Action
-mapCalendarUi = map calendarUiToAction
+instance toActionCreateFormAction :: ToAction CreateFormAction where
+  toAction = CreateFormAction
+
+instance toActionControlsAction :: ToAction ControlsAction where
+  toAction = ControlsAction
+
+instance toActionConflictAction :: ToAction ConflictAction where
+  toAction = ConflictAction
+
+instance toActionSyncAction :: ToAction SyncAction where
+  toAction = SyncAction
+
+instance toActionDragAction :: ToAction DragAction where
+  toAction = DragAction
+
+instance toActionViewAction :: ToAction ViewAction where
+  toAction = ViewAction
+
+instance toActionExportAction :: ToAction ExportAction where
+  toAction = ExportAction
+
+instance toActionListAction :: ToAction ListAction where
+  toAction (ListViewAction viewAction) = ViewAction viewAction
+  toAction (ListSyncAction syncAction) = SyncAction syncAction
+  toAction (ListDragAction dragAction) = DragAction dragAction
+
+instance toActionRangeAction :: ToAction RangeAction where
+  toAction (RangeListAction listAction) = toAction listAction
+
+instance toActionDayAction :: ToAction DayAction where
+  toAction (DayListAction listAction) = toAction listAction
+  toAction (DayDragAction dragAction) = DragAction dragAction
+  toAction (DayViewAction viewAction) = ViewAction viewAction
 
 renderOfflineToggle :: forall w. Boolean -> HTML w Action
-renderOfflineToggle = map SyncAction <<< Sync.renderOfflineToggle
-
-renderUpdateError :: forall w. String -> HTML w Action
-renderUpdateError = map SyncAction <<< Sync.renderUpdateError
-
-renderSyncConflict :: forall w. Array CalendarItem -> HTML w Action
-renderSyncConflict = map SyncAction <<< Sync.renderSyncConflict
+renderOfflineToggle = map toAction <<< Sync.renderOfflineToggle
 
 renderSortPicker :: forall w. SortMode -> HTML w Action
-renderSortPicker = mapCalendarUi <<< Cal.renderSortPicker
+renderSortPicker = map toAction <<< CCtrl.renderSortPicker
 
 renderConflictActions :: forall w. Array (Array String) -> HTML w Action
-renderConflictActions = mapCalendarUi <<< Cal.renderConflictActions
-
-renderConflictResolution :: forall w. Array CalendarItem -> Cal.ConflictResolution -> HTML w Action
-renderConflictResolution items resolution =
-  mapCalendarUi (Cal.renderConflictResolution items resolution)
-
-renderCreateContent :: forall w. IntentionDraft -> Maybe String -> HTML w Action
-renderCreateContent draft validationError =
-  mapCalendarUi (Cal.renderCreateContent draft validationError)
+renderConflictActions = map toAction <<< CConf.renderConflictActions
 
 renderAgendaView
   :: forall w
@@ -217,15 +241,13 @@ renderAgendaView
   -> Maybe Int
   -> HTML w Action
 renderAgendaView viewMode focusDate conflictIds items isMobile draggingId dragHoverIndex =
-  mapCalendarUi (Cal.renderAgendaView viewMode focusDate conflictIds items isMobile draggingId dragHoverIndex)
-
-renderViewSelector :: forall w. AgendaView -> String -> HTML w Action
-renderViewSelector viewMode focusDate =
-  map ViewAction (Disp.renderViewSelector viewMode focusDate)
-
-renderMobileTools :: forall w. AgendaView -> HTML w Action
-renderMobileTools viewMode =
-  map ViewAction (Disp.renderMobileTools viewMode)
+  case viewMode of
+    ViewDay ->
+      map toAction (renderDayCalendar focusDate conflictIds items isMobile draggingId dragHoverIndex)
+    ViewWeek ->
+      map toAction (renderRangeView "Semaine" (generateDateRange focusDate 7) conflictIds items isMobile)
+    ViewMonth ->
+      map toAction (renderRangeView "Mois" (generateMonthDates focusDate) conflictIds items isMobile)
 
 renderCreateFab :: forall w. HTML w Action
 renderCreateFab =
@@ -235,39 +257,6 @@ renderCreateFab =
     , onClick (const (ViewAction ViewOpenCreate))
     ]
     [ i [ class_ "bi bi-plus" ] [] ]
-
-renderToolsContent :: forall w. HTML w Action
-renderToolsContent =
-  map ViewAction Disp.renderToolsContent
-
-renderValidationPanel :: forall w. ValidationPanel -> HTML w Action
-renderValidationPanel panel =
-  map ViewAction (Disp.renderValidationPanel panel)
-
-renderEditContent :: forall w. EditPanel -> HTML w Action
-renderEditContent panel =
-  map ViewAction (Disp.renderEditContent panel)
-
-renderNotificationsPanel
-  :: forall w
-   . Boolean
-  -> NotificationDefaults
-  -> Array NotificationOverride
-  -> Maybe NotificationEditor
-  -> Array CalendarItem
-  -> HTML w Action
-renderNotificationsPanel isOpen defaults overrides editor intentions =
-  map NotificationAction (Notif.renderNotificationsPanel isOpen defaults overrides editor intentions)
-
-renderNotificationsContent
-  :: forall w
-   . NotificationDefaults
-  -> Array NotificationOverride
-  -> Maybe NotificationEditor
-  -> Array CalendarItem
-  -> HTML w Action
-renderNotificationsContent defaults overrides editor intentions =
-  map NotificationAction (Notif.renderNotificationsContent defaults overrides editor intentions)
 
 defaultStartDateTime :: String -> String
 defaultStartDateTime focusDate =
@@ -279,25 +268,15 @@ defaultStartDateTime focusDate =
     ""
 
 prefillCreateDraft :: ItemType -> String -> IntentionDraft -> IntentionDraft
-prefillCreateDraft itemType focusDate draft =
-  if itemType /= ScheduledBlock then
-    draft
-  else if draft.windowStart /= "" then
-    draft
-  else
-    let
-      start = defaultStartDateTime focusDate
-    in
-      if start == "" then
-        draft
-      else
-        let
-          end = fromMaybe start (shiftMinutes 30 start)
-        in
-          draft
-            { windowStart = start
-            , windowEnd = if draft.windowEnd == "" then end else draft.windowEnd
-            }
+prefillCreateDraft itemType focusDate draft
+  | itemType /= ScheduledBlock || draft.windowStart /= "" || defaultStartDateTime focusDate == "" = draft
+  | otherwise = let start = defaultStartDateTime focusDate
+                    end = if draft.windowEnd == "" then fromMaybe start (shiftMinutes 30 start) else draft.windowEnd
+                in
+                  draft
+                    { windowStart = start
+                    , windowEnd = end
+                    }
 
 renderTemplatesPanel
   :: forall w
@@ -327,7 +306,7 @@ renderExportPanel
   -> String
   -> HTML w Action
 renderExportPanel format typeFilter statusFilter categoryFilter startDate endDate output =
-  map ExportAction (Exp.renderExportPanel format typeFilter statusFilter categoryFilter startDate endDate output)
+  map toAction (Exp.renderExportPanel format typeFilter statusFilter categoryFilter startDate endDate output)
 
 component :: forall q i. H.Component q i NoOutput Aff
 component =
@@ -377,16 +356,16 @@ _view :: Lens' State ViewState
 _view = prop (Proxy :: _ "view")
 
 _calendarItems :: Lens' State (Array CalendarItem)
-_calendarItems = _calendar <<< Cal._items
+_calendarItems = _calendar <<< _items
 
 _calendarDraft :: Lens' State IntentionDraft
-_calendarDraft = _calendar <<< Cal._draft
+_calendarDraft = _calendar <<< _draft
 
 _calendarValidationError :: Lens' State (Maybe String)
-_calendarValidationError = _calendar <<< Cal._validationError
+_calendarValidationError = _calendar <<< _validationError
 
 _calendarLastCreateType :: Lens' State ItemType
-_calendarLastCreateType = _calendar <<< Cal._lastCreateType
+_calendarLastCreateType = _calendar <<< _lastCreateType
 
 _syncOfflineMode :: Lens' State Boolean
 _syncOfflineMode = _sync <<< Sync._syncOfflineMode
@@ -475,50 +454,65 @@ runCommand = case _ of
   TemplateCmd cmd -> runTemplateCommand cmd
   ImportCmd cmd -> runImportCommand cmd
 
+handleSyncActionFlow :: SyncAction -> ErrorAgendaAppM Unit
+handleSyncActionFlow syncAction = do
+  st <- get
+  withSubState _sync $ handleSyncAction (st ^. _calendarItems) syncAction
+
+handleDragActionFlow :: DragAction -> ErrorAgendaAppM Unit
+handleDragActionFlow dragAction = do
+  st <- get
+  let
+    ctx =
+      { items: st ^. _calendarItems
+      , focusDate: st ^. _viewFocusDate
+      , offlineMode: st ^. _syncOfflineMode
+      }
+  withSubState _drag $ handleDragAction ctx dragAction
+
+handleViewActionFlow :: ViewAction -> ErrorAgendaAppM Unit
+handleViewActionFlow viewAction = do
+  withSubState _view $ handleViewAction viewAction
+  case viewAction of
+    ViewOpenModal _ -> focusModal
+    ViewOpenCreate -> do
+      focusModal
+      st <- get
+      let
+        lastType = st ^. _calendarLastCreateType
+        baseDraft = emptyDraft { itemType = lastType }
+        nextDraft = prefillCreateDraft lastType (st ^. _viewFocusDate) baseDraft
+      modify_ ((_calendarDraft .~ nextDraft) <<< (_calendarValidationError .~ Nothing))
+    ViewOpenEdit _ -> focusModal
+    ViewOpenEditFromDoubleClick _ -> focusModal
+    ViewCloseCreate -> do
+      st <- get
+      let
+        lastType = st ^. _calendarLastCreateType
+      modify_ ((_calendarDraft .~ (emptyDraft { itemType = lastType })) <<< (_calendarValidationError .~ Nothing))
+    _ -> pure unit
+
 handleAction :: Action -> AgendaAppM Unit
 handleAction action = handleError $
   case action of
     Init -> initAction
-    CalendarAction calendarAction -> do
-      withSubState _calendar $ handleCalendarAction calendarAction
-      case calendarAction of
-        CalendarDraftTypeChanged itemType -> do
+    CreateFormAction formAction -> do
+      modify_ (_calendar %~ applyCreateFormAction formAction)
+      case formAction of
+        CreateFormDraftTypeChanged itemType -> do
           st <- get
           let updatedDraft = prefillCreateDraft itemType (st ^. _viewFocusDate) (st ^. _calendarDraft)
           modify_ (_calendarDraft .~ updatedDraft)
+        CreateFormSync syncAction ->
+          handleSyncActionFlow syncAction
         _ -> pure unit
-    SyncAction syncAction -> do
-      st <- get
-      withSubState _sync $ handleSyncAction (st ^. _calendarItems) syncAction
-    DragAction dragAction -> do
-      st <- get
-      let
-        ctx =
-          { items: st ^. _calendarItems
-          , focusDate: st ^. _viewFocusDate
-          , offlineMode: st ^. _syncOfflineMode
-          }
-      withSubState _drag $ handleDragAction ctx dragAction
-    ViewAction viewAction -> do
-      withSubState _view $ handleViewAction viewAction
-      case viewAction of
-        ViewOpenModal _ -> focusModal
-        ViewOpenCreate -> do
-          focusModal
-          st <- get
-          let
-            lastType = st ^. _calendarLastCreateType
-            baseDraft = emptyDraft { itemType = lastType }
-            nextDraft = prefillCreateDraft lastType (st ^. _viewFocusDate) baseDraft
-          modify_ ((_calendarDraft .~ nextDraft) <<< (_calendarValidationError .~ Nothing))
-        ViewOpenEdit _ -> focusModal
-        ViewOpenEditFromDoubleClick _ -> focusModal
-        ViewCloseCreate -> do
-          st <- get
-          let
-            lastType = st ^. _calendarLastCreateType
-          modify_ ((_calendarDraft .~ (emptyDraft { itemType = lastType })) <<< (_calendarValidationError .~ Nothing))
-        _ -> pure unit
+    ControlsAction controlsAction ->
+      modify_ (_calendar %~ applyControlsAction controlsAction)
+    ConflictAction conflictAction ->
+      modify_ (_calendar %~ applyConflictAction conflictAction)
+    SyncAction syncAction -> handleSyncActionFlow syncAction
+    DragAction dragAction -> handleDragActionFlow dragAction
+    ViewAction viewAction -> handleViewActionFlow viewAction
     GlobalKeyDown key ->
       if key == "Escape" then do
         st <- get
@@ -686,28 +680,28 @@ render { calendar, sync, drag, notifications, templates, imports, exports, view 
                   [ class_ $ "btn btn-sm calendar-filter"
                       <> guard showConflictsOnly " btn-outline-primary"
                       <> guard (not showConflictsOnly) " btn-outline-secondary"
-                  , onClick (const (CalendarAction CalendarToggleConflictFilter))
+                  , onClick (const (ControlsAction ControlsToggleConflictFilter))
                   ]
                   [ text "Filtrer: en conflit" ]
               , renderOfflineToggle offlineMode
               , renderSortPicker sortMode
               , renderConflictActions conflictGroups
               ]
-          , renderViewSelector viewMode focusDate
-          , renderMobileTools viewMode
+          , toAction <$> Disp.renderViewSelector viewMode focusDate
+          , toAction <$> Disp.renderMobileTools viewMode
           ]
       , div [ class_ $ "calendar-layout" <> guard (viewMode == ViewDay) " calendar-layout--calendar" ]
           [ div [ class_ "calendar-main" ]
-              [ maybe (text "") renderUpdateError updateError
-              , maybe (text "") renderValidationPanel validationPanel
+              [ maybe (text "") (map toAction <<< Sync.renderUpdateError) updateError
+              , maybe (text "") (map toAction <<< Disp.renderValidationPanel) validationPanel
               , section [ class_ $ "calendar-list-panel" <> guard (viewMode == ViewDay) " calendar-list-panel--calendar" ]
                   [ renderAgendaView viewMode focusDate conflictIds sortedItems isMobile draggingId dragHoverIndex
                   ]
-              , maybe (text "") (renderConflictResolution items) conflictResolution
-              , maybe (text "") renderSyncConflict syncConflict
+              , maybe (text "") (map toAction <<< CConf.renderConflictResolution items) conflictResolution
+              , maybe (text "") (map toAction <<< Sync.renderSyncConflict) syncConflict
               ]
           , div [ class_ "calendar-side" ]
-              [ renderNotificationsPanel notificationPanelOpen notificationDefaults notificationOverrides notificationEditor unplannedIntentions
+              [ NotificationAction <$> Notif.renderNotificationsPanel notificationPanelOpen notificationDefaults notificationOverrides notificationEditor unplannedIntentions
               , renderAccordion "Templates de tâches" "calendar-accordion templates" $ renderTemplatesPanel templateItems templateDraft editingTemplateId
               , renderAccordion "Import CSV" "calendar-accordion import-csv" $ renderCsvImportPanel csvInput csvImportResult
               , renderAccordion "Import ICS" "calendar-accordion import-ics" $ renderIcsImportPanel icsInput icsImportResult
@@ -723,7 +717,7 @@ renderFiltersContent showConflictsOnly conflictGroups offlineMode sortMode =
   div [ class_ "calendar-modal-stack" ]
     [ button
         [ class_ $ "btn btn-sm calendar-filter" <> if showConflictsOnly then " btn-outline-primary" else "btn-outline-secondary"
-        , onClick (const (CalendarAction CalendarToggleConflictFilter))
+        , onClick (const (ControlsAction ControlsToggleConflictFilter))
         ]
         [ text "Filtrer: en conflit" ]
     , renderOfflineToggle offlineMode
@@ -784,15 +778,15 @@ renderAgendaModals { activeModal, filters, notifications, templates, csvImport, 
           (ViewAction ViewCloseModal)
           (ViewAction ViewCloseModal)
       , renderModal ModalTools "Outils"
-          [ renderToolsContent ]
+          [ map toAction Disp.renderToolsContent ]
           (ViewAction ViewCloseModal)
           (ViewAction ViewCloseModal)
       , renderModal ModalCreateItem "Créer un item"
-          [ renderCreateContent draft validationError ]
+          [ map toAction (CForm.renderCreateContent draft validationError) ]
           (ViewAction ViewCloseCreate)
           (SyncAction SyncSubmitIntention)
       , renderModal ModalNotifications "Rappels"
-          [ renderNotificationsContent notifications.defaults notifications.overrides notifications.editor notifications.intentions ]
+          [ NotificationAction <$> Notif.renderNotificationsContent notifications.defaults notifications.overrides notifications.editor notifications.intentions ]
           (ViewAction ViewCloseModal)
           (ViewAction ViewCloseModal)
       , renderModal ModalTemplates "Templates de tâches"
@@ -815,7 +809,7 @@ renderAgendaModals { activeModal, filters, notifications, templates, csvImport, 
           Nothing -> text ""
           Just panel ->
             renderModal ModalEditItem "Modifier l'item"
-              [ renderEditContent panel ]
+              [ toAction <$> Disp.renderEditContent panel ]
               (ViewAction ViewEditCancel)
               (ViewAction ViewEditSave)
       ]
