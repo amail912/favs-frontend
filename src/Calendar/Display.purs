@@ -1,6 +1,7 @@
 module Calendar.Display
   ( ViewState
   , ViewAction(..)
+  , ViewCommand(..)
   , AgendaModal(..)
   , ValidationPanel
   , EditPanel
@@ -24,13 +25,13 @@ module Calendar.Display
 
 import Prelude hiding (div)
 
-import Calendar.Commands (ViewCommand(..), Command(..), tellCmd)
 import Calendar.Edit (EditDraft, EditError(..), applyEditDraft, buildEditDraft)
 import Calendar.Helpers (parsePositiveInt, suggestDurationMinutes)
 import Calendar.Model (AgendaView(..), CalendarItem, CalendarItemContent, ItemStatus(..), ItemType(..), ValidationError(..))
 import Calendar.RecurrenceEditor (RecurrenceAction, applyRecurrenceAction, renderRecurrenceEditor)
 import Control.Alt ((<|>))
 import Control.Monad.State.Trans (StateT, get, modify_)
+import Control.Monad.Writer.Class (tell)
 import Control.Monad.Writer.Trans (WriterT)
 import Data.Either (Either(..))
 import Data.Lens (Lens', (.~), (%~), (^.))
@@ -143,7 +144,11 @@ data ViewAction
   | ViewEditCancel
   | ViewSetIsMobile Boolean
 
-handleViewAction :: ViewAction -> StateT ViewState (WriterT (Array Command) Aff) Unit
+data ViewCommand
+  = ViewValidateItem String Int
+  | ViewUpdateItem String CalendarItem
+
+handleViewAction :: ViewAction -> StateT ViewState (WriterT (Array ViewCommand) Aff) Unit
 handleViewAction = case _ of
   ViewOpenValidation itemId content -> do
     suggested <- liftEffect $ suggestDurationMinutes content.windowStart
@@ -160,7 +165,7 @@ handleViewAction = case _ of
           Nothing -> pure unit
           Just minutes -> do
             modify_ (_viewValidationPanelS .~ Nothing)
-            tellCmd $ ViewCmd (ViewValidateItem panel.itemId minutes)
+            tell [ ViewValidateItem panel.itemId minutes ]
   ViewCancelValidation ->
     modify_ (_viewValidationPanelS .~ Nothing)
   ViewChangedAction raw ->
@@ -230,7 +235,7 @@ handleViewAction = case _ of
           Left err ->
             modify_ (_viewEditPanelS .~ Just (panel { validationError = Just (editErrorMessage err) }))
           Right updatedItem -> do
-            tellCmd $ ViewCmd (ViewUpdateItem panel.draft.itemId updatedItem)
+            tell [ ViewUpdateItem panel.draft.itemId updatedItem ]
             modify_ ((_viewEditPanelS .~ Nothing) <<< (_viewActiveModalS .~ Nothing))
   ViewEditCancel ->
     modify_ ((_viewEditPanelS .~ Nothing) <<< (_viewActiveModalS .~ Nothing))

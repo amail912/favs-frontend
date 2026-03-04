@@ -1,6 +1,7 @@
 module Calendar.Import
   ( ImportState
   , ImportAction(..)
+  , ImportCommand(..)
   , ImportCtx
   , importInitialState
   , handleImportAction
@@ -10,11 +11,11 @@ module Calendar.Import
 
 import Prelude hiding (div)
 
-import Calendar.Commands (ImportCommand(..), Command(..), tellCmd)
 import Calendar.Imports (parseCsvImport, parseIcsImport)
 import Calendar.Model (CalendarItem, CsvImportError, CsvImportResult, IcsImportError, IcsImportResult)
 import Calendar.Offline (applyOfflineMutation)
 import Control.Monad.State.Trans (StateT, get, modify_)
+import Control.Monad.Writer.Class (tell)
 import Control.Monad.Writer.Trans (WriterT)
 import Data.Array (foldl, length, null)
 import Data.Lens (Lens', (.~), (^.))
@@ -71,7 +72,11 @@ data ImportAction
   | ImportApplyIcs
   | ImportClearIcs
 
-handleImportAction :: ImportCtx -> ImportAction -> StateT ImportState (WriterT (Array Command) Aff) Unit
+data ImportCommand
+  = ImportSetItems (Array CalendarItem)
+  | ImportSetPending (Array CalendarItem)
+
+handleImportAction :: ImportCtx -> ImportAction -> StateT ImportState (WriterT (Array ImportCommand) Aff) Unit
 handleImportAction ctx = case _ of
   ImportCsvInputChanged raw ->
     modify_ (_csvInputS .~ raw)
@@ -90,9 +95,9 @@ handleImportAction ctx = case _ of
             let
               initial = { items: ctx.items, pending: ctx.pending }
               final = foldl (\acc item -> applyOfflineMutation true item acc.items acc.pending) initial result.items
-            tellCmd $ ImportCmd (ImportSetItems final.items)
-            tellCmd $ ImportCmd (ImportSetPending final.pending)
-          else tellCmd $ ImportCmd (ImportSetItems (ctx.items <> result.items))
+            tell [ ImportSetItems final.items ]
+            tell [ ImportSetPending final.pending ]
+          else tell [ ImportSetItems (ctx.items <> result.items) ]
           modify_ ((_csvInputS .~ "") <<< (_csvImportResultS .~ Nothing))
   ImportClearCsv ->
     modify_ ((_csvInputS .~ "") <<< (_csvImportResultS .~ Nothing))
@@ -113,9 +118,9 @@ handleImportAction ctx = case _ of
             let
               initial = { items: ctx.items, pending: ctx.pending }
               final = foldl (\acc item -> applyOfflineMutation true item acc.items acc.pending) initial result.items
-            tellCmd $ ImportCmd (ImportSetItems final.items)
-            tellCmd $ ImportCmd (ImportSetPending final.pending)
-          else tellCmd $ ImportCmd (ImportSetItems (ctx.items <> result.items))
+            tell [ ImportSetItems final.items ]
+            tell [ ImportSetPending final.pending ]
+          else tell [ ImportSetItems (ctx.items <> result.items) ]
           modify_ ((_icsInputS .~ "") <<< (_icsImportResultS .~ Nothing))
   ImportClearIcs ->
     modify_ ((_icsInputS .~ "") <<< (_icsImportResultS .~ Nothing))

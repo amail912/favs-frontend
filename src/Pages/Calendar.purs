@@ -6,14 +6,6 @@ module Pages.Calendar
 import Prelude hiding (div)
 
 import Affjax.Web (Response)
-import Calendar.Commands
-  ( Command(..)
-  , DragCommand(..)
-  , ImportCommand(..)
-  , SyncCommand(..)
-  , TemplateCommand(..)
-  , ViewCommand(..)
-  )
 import Calendar.Calendar.Agenda.Day (DayAction(..), renderDayCalendar)
 import Calendar.Calendar.Agenda.List (ListAction(..))
 import Calendar.Calendar.Agenda.Range (RangeAction(..), renderRangeView)
@@ -37,6 +29,7 @@ import Calendar.Display
   ( AgendaModal(..)
   , EditPanel
   , ViewAction(..)
+  , ViewCommand(..)
   , ViewState
   , _viewActiveModalS
   , handleViewAction
@@ -46,6 +39,7 @@ import Calendar.Display
 import Calendar.Display as Disp
 import Calendar.Drag
   ( DragAction
+  , DragCommand(..)
   , DragState
   , dragInitialState
   , handleDragAction
@@ -69,6 +63,7 @@ import Calendar.Helpers
   )
 import Calendar.Import
   ( ImportAction
+  , ImportCommand(..)
   , ImportState
   , handleImportAction
   , importInitialState
@@ -85,6 +80,7 @@ import Calendar.Notifications as Notif
 import Calendar.Offline (applyOfflineMutation, upsertPendingItem)
 import Calendar.Sync
   ( SyncAction(..)
+  , SyncCommand(..)
   , SyncState
   , handleSyncAction
   , syncInitialState
@@ -93,6 +89,7 @@ import Calendar.Sync
 import Calendar.Sync as Sync
 import Calendar.Templates
   ( TemplateAction
+  , TemplateCommand(..)
   , TemplateState
   , handleTemplateAction
   , templateInitialState
@@ -183,6 +180,34 @@ data Action
   | TemplateAction TemplateAction
   | ImportAction ImportAction
   | ExportAction ExportAction
+
+data Command
+  = SyncCmd SyncCommand
+  | DragCmd DragCommand
+  | ViewCmd ViewCommand
+  | TemplateCmd TemplateCommand
+  | ImportCmd ImportCommand
+
+class ToCommand cmd where
+  toCommand :: cmd -> Command
+
+instance toCommandSyncCommand :: ToCommand SyncCommand where
+  toCommand = SyncCmd
+
+instance toCommandDragCommand :: ToCommand DragCommand where
+  toCommand = DragCmd
+
+instance toCommandViewCommand :: ToCommand ViewCommand where
+  toCommand = ViewCmd
+
+instance toCommandTemplateCommand :: ToCommand TemplateCommand where
+  toCommand = TemplateCmd
+
+instance toCommandImportCommand :: ToCommand ImportCommand where
+  toCommand = ImportCmd
+
+instance toCommandVoid :: ToCommand Void where
+  toCommand = absurd
 
 class ToAction a where
   toAction :: a -> Action
@@ -382,13 +407,13 @@ _syncUpdateError = _sync <<< Sync._syncUpdateError
 _viewFocusDate :: Lens' State String
 _viewFocusDate = _view <<< Disp._viewFocusDate
 
-withSubState :: forall s a. Lens' State s -> StateT s (WriterT (Array Command) Aff) a -> ErrorAgendaAppM a
+withSubState :: forall s a cmd. ToCommand cmd => Lens' State s -> StateT s (WriterT (Array cmd) Aff) a -> ErrorAgendaAppM a
 withSubState lens action = do
   st <- get
   let subState = st ^. lens
   Tuple (Tuple result nextSubState) cmds <- liftAff $ runWriterT (runStateT action subState)
   modify_ (lens .~ nextSubState)
-  traverse_ runCommand cmds
+  traverse_ (runCommand <<< toCommand) cmds
   pure result
 
 runSyncCommand :: SyncCommand -> ErrorAgendaAppM Unit

@@ -11,7 +11,6 @@ module Calendar.Notifications
 
 import Prelude hiding (div)
 
-import Calendar.Commands (Command)
 import Calendar.Helpers (combineDateWithTime, isTimeLocal, parsePositiveInt, shiftMinutes)
 import Calendar.Model
   ( CalendarItem(..)
@@ -82,7 +81,7 @@ data NotificationAction
   | NotificationResetOverride String
   | NotificationCancelOverride
 
-handleNotificationAction :: NotificationAction -> StateT NotificationState (WriterT (Array Command) Aff) Unit
+handleNotificationAction :: NotificationAction -> StateT NotificationState (WriterT (Array Void) Aff) Unit
 handleNotificationAction = case _ of
   NotificationTogglePanel ->
     modify_ (_notificationPanelOpenS %~ not)

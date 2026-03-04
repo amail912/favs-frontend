@@ -1,6 +1,7 @@
 module Calendar.Templates
   ( TemplateState
   , TemplateAction(..)
+  , TemplateCommand(..)
   , templateInitialState
   , handleTemplateAction
   , renderTemplatesPanel
@@ -14,7 +15,6 @@ module Calendar.Templates
 
 import Prelude hiding (div)
 
-import Calendar.Commands (TemplateCommand(..), Command(..), tellCmd)
 import Calendar.Helpers (durationMinutesBetween, formatDateTimeLocal, parsePositiveInt, shiftMinutes)
 import Calendar.Model
   ( IntentionDraft
@@ -31,6 +31,7 @@ import Calendar.Model
   , emptyTemplateDraft
   )
 import Control.Monad.State.Trans (StateT, get, modify_)
+import Control.Monad.Writer.Class (tell)
 import Control.Monad.Writer.Trans (WriterT)
 import Data.Array (elem, filter, find, null)
 import Data.Lens (Lens', (.~), (%~), (^.))
@@ -89,7 +90,10 @@ data TemplateAction
   | TemplateDelete String
   | TemplateUse String
 
-handleTemplateAction :: TemplateAction -> StateT TemplateState (WriterT (Array Command) Aff) Unit
+data TemplateCommand
+  = TemplateSetDraft IntentionDraft
+
+handleTemplateAction :: TemplateAction -> StateT TemplateState (WriterT (Array TemplateCommand) Aff) Unit
 handleTemplateAction = case _ of
   TemplateTitleChangedAction title ->
     modify_ (_templateDraftS <<< _templateDraftTitleS .~ title)
@@ -151,7 +155,7 @@ handleTemplateAction = case _ of
         now <- liftEffect nowDateTime
         let startStr = formatDateTimeLocal now
         let endStr = fromMaybe startStr (shiftMinutes template.durationMinutes startStr)
-        tellCmd $ TemplateCmd (TemplateSetDraft (applyTemplateToDraft template startStr endStr))
+        tell [ TemplateSetDraft (applyTemplateToDraft template startStr endStr) ]
 
 renderTemplatesPanel
   :: forall w

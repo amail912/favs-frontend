@@ -19,7 +19,6 @@ import Calendar.Exports
   )
 import Calendar.Helpers (toOptionalString)
 import Calendar.Model (CalendarItem, ExportFormat(..))
-import Calendar.Commands (Command)
 import Control.Monad.State.Trans (StateT, get, modify_)
 import Control.Monad.Writer.Trans (WriterT)
 import Data.Lens (Lens', (.~), (^.))
@@ -85,7 +84,7 @@ data ExportAction
   | ExportGenerate
   | ExportClearOutput
 
-handleExportAction :: Array CalendarItem -> ExportAction -> StateT ExportState (WriterT (Array Command) Aff) Unit
+handleExportAction :: Array CalendarItem -> ExportAction -> StateT ExportState (WriterT (Array Void) Aff) Unit
 handleExportAction items = case _ of
   ExportFormatChangedAction raw ->
     modify_ (_exportFormatS .~ parseExportFormat raw)

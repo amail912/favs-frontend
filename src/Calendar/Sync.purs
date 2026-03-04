@@ -1,6 +1,7 @@
 module Calendar.Sync
   ( SyncState
   , SyncAction(..)
+  , SyncCommand(..)
   , syncInitialState
   , handleSyncAction
   , renderOfflineToggle
@@ -15,11 +16,11 @@ module Calendar.Sync
 
 import Prelude hiding (div)
 
-import Calendar.Commands (SyncCommand(..), Command(..), tellCmd)
 import Calendar.Helpers (calendarItemContent)
 import Calendar.Model (CalendarItem(..), CalendarItemContent, ItemStatus(..), ItemType(..))
 import Calendar.Offline (applyOfflineMutation)
 import Control.Monad.State.Trans (StateT, get, modify_)
+import Control.Monad.Writer.Class (tell)
 import Control.Monad.Writer.Trans (WriterT)
 import Data.Array (find, mapMaybe, null)
 import Data.Lens (Lens', (.~), (^.))
@@ -67,12 +68,19 @@ data SyncAction
   | SyncResolveDiscardLocal
   | SyncDismissUpdateError
 
-handleSyncAction :: Array CalendarItem -> SyncAction -> StateT SyncState (WriterT (Array Command) Aff) Unit
+data SyncCommand
+  = SyncSetItems (Array CalendarItem)
+  | SyncCreateItem CalendarItem
+  | SyncRefreshItems
+  | SyncSubmitIntentionCmd
+  | SyncRunPending (Array CalendarItem)
+
+handleSyncAction :: Array CalendarItem -> SyncAction -> StateT SyncState (WriterT (Array SyncCommand) Aff) Unit
 handleSyncAction items = case _ of
   SyncDraftTitleKeyDown key ->
-    when (key == "Enter") (tellCmd $ SyncCmd SyncSubmitIntentionCmd)
+    when (key == "Enter") (tell [ SyncSubmitIntentionCmd ])
   SyncSubmitIntention ->
-    tellCmd $ SyncCmd SyncSubmitIntentionCmd
+    tell [ SyncSubmitIntentionCmd ]
   SyncPlanifyFrom sourceId content -> do
     syncState <- get
     let item = toScheduledBlock sourceId content
@@ -80,9 +88,9 @@ handleSyncAction items = case _ of
       let
         result = applyOfflineMutation true item items (syncState ^. _syncPendingSync)
       modify_ (_syncPendingSync .~ result.pending)
-      tellCmd $ SyncCmd (SyncSetItems result.items)
+      tell [ SyncSetItems result.items ]
     else
-      tellCmd $ SyncCmd (SyncCreateItem item)
+      tell [ SyncCreateItem item ]
   SyncToggleOffline -> do
     syncState <- get
     if syncState ^. _syncOfflineMode then do
@@ -93,7 +101,7 @@ handleSyncAction items = case _ of
     modify_ ((_syncConflict .~ Nothing) <<< (_syncOfflineMode .~ true))
   SyncResolveDiscardLocal -> do
     modify_ ((_syncConflict .~ Nothing) <<< (_syncPendingSync .~ []))
-    tellCmd $ SyncCmd SyncRefreshItems
+    tell [ SyncRefreshItems ]
   SyncDismissUpdateError ->
     modify_ (_syncUpdateError .~ Nothing)
 
@@ -167,10 +175,10 @@ renderConflictItem items itemId =
   matchId id (ServerCalendarItem { id: candidate }) = id == candidate
   matchId _ _ = false
 
-syncPending :: StateT SyncState (WriterT (Array Command) Aff) Unit
+syncPending :: StateT SyncState (WriterT (Array SyncCommand) Aff) Unit
 syncPending = do
   syncState <- get
   if null (syncState ^. _syncPendingSync) then
-    tellCmd $ SyncCmd SyncRefreshItems
+    tell [ SyncRefreshItems ]
   else
-    tellCmd $ SyncCmd (SyncRunPending (syncState ^. _syncPendingSync))
+    tell [ SyncRunPending (syncState ^. _syncPendingSync) ]

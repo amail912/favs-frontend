@@ -1,6 +1,7 @@
 module Calendar.Drag
   ( DragState
   , DragAction(..)
+  , DragCommand(..)
   , DragCtx
   , dragInitialState
   , handleDragAction
@@ -14,11 +15,11 @@ module Calendar.Drag
 
 import Prelude hiding (div)
 
-import Calendar.Commands (DragCommand(..), Command(..), tellCmd)
 import Calendar.Helpers (calendarItemContent, combineDateWithTime, durationMinutesBetween, pad2, shiftMinutes)
 import Calendar.Model (CalendarItem(..), ItemType(..))
 import Control.Alt ((<|>))
 import Control.Monad.State.Trans (StateT, get, modify_)
+import Control.Monad.Writer.Class (tell)
 import Control.Monad.Writer.Trans (WriterT)
 import Data.Array (find, index, uncons)
 import Data.Foldable (foldl)
@@ -108,7 +109,14 @@ data DragAction
   | DragTouchEnd
   | DragTouchCancel
 
-handleDragAction :: DragCtx -> DragAction -> StateT DragState (WriterT (Array Command) Aff) Unit
+data DragCommand
+  = DragSetItems (Array CalendarItem)
+  | DragUpsertPending CalendarItem
+  | DragSetUpdateError (Maybe String)
+  | DragUpdateItem String CalendarItem
+  | DragRefreshItems
+
+handleDragAction :: DragCtx -> DragAction -> StateT DragState (WriterT (Array DragCommand) Aff) Unit
 handleDragAction ctx = case _ of
   DragStart itemId ev -> do
     let
@@ -130,7 +138,7 @@ handleDragAction ctx = case _ of
       Nothing -> pure unit
       Just draggingId -> do
         let reordered = moveItemBefore draggingId targetId ctx.items
-        tellCmd $ DragCmd (DragSetItems reordered)
+        tell [ DragSetItems reordered ]
         modify_ (_draggingIdS .~ Nothing)
   DragEnd ->
     modify_ ((_draggingIdS .~ Nothing) <<< (_dragHoverIndexS .~ Nothing) <<< (_dragOffsetMinutesS .~ Nothing))
@@ -184,12 +192,12 @@ handleDragAction ctx = case _ of
                 modify_ resetDragState
               Just updatedItem ->
                 if ctx.offlineMode then do
-                  tellCmd $ DragCmd (DragSetItems result.items)
-                  tellCmd $ DragCmd (DragUpsertPending updatedItem)
-                  tellCmd $ DragCmd (DragSetUpdateError Nothing)
+                  tell [ DragSetItems result.items ]
+                  tell [ DragUpsertPending updatedItem ]
+                  tell [ DragSetUpdateError Nothing ]
                   modify_ resetDragState
                 else do
-                  tellCmd $ DragCmd (DragUpdateItem draggingId updatedItem)
+                  tell [ DragUpdateItem draggingId updatedItem ]
                   modify_ resetDragState
   DragTouchStart itemId ev -> do
     liftEffect $ preventDefault (TouchEvent.toEvent ev)
@@ -280,12 +288,12 @@ handleDragAction ctx = case _ of
                     modify_ resetTouchState
                   Just updatedItem ->
                     if ctx.offlineMode then do
-                      tellCmd $ DragCmd (DragSetItems result.items)
-                      tellCmd $ DragCmd (DragUpsertPending updatedItem)
-                      tellCmd $ DragCmd (DragSetUpdateError Nothing)
+                      tell [ DragSetItems result.items ]
+                      tell [ DragUpsertPending updatedItem ]
+                      tell [ DragSetUpdateError Nothing ]
                       modify_ resetTouchState
                     else do
-                      tellCmd $ DragCmd (DragUpdateItem draggingId updatedItem)
+                      tell [ DragUpdateItem draggingId updatedItem ]
                       modify_ resetTouchState
   DragTouchCancel ->
     modify_
