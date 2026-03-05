@@ -10,6 +10,15 @@ function toLocalDatetimeInput(date) {
   ].join("-") + "T" + [pad(date.getHours()), pad(date.getMinutes())].join(":");
 }
 
+function toLocalDateInput(date) {
+  const pad = value => `${value}`.padStart(2, "0");
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate())
+  ].join("-");
+}
+
 async function openCreateModal(page) {
   await page.getByRole("button", { name: "Nouvel item" }).click();
   const modal = page.locator(".app-modal__dialog", { hasText: "Créer un item" });
@@ -66,9 +75,9 @@ test("calendar integration: create intention then planify", async ({ authenticat
 });
 
 test("calendar integration: create scheduled block via modal toggle", async ({ authenticatedPage: page }) => {
-  const now = new Date();
-  const start = new Date(now.getTime() + 3 * 60 * 60 * 1000);
-  const end = new Date(now.getTime() + 4 * 60 * 60 * 1000);
+  const focusDate = toLocalDateInput(new Date());
+  const start = new Date(`${focusDate}T10:00`);
+  const end = new Date(`${focusDate}T11:00`);
   const title = `Planifié ${Date.now()}`;
 
   await calendarTab(page).click();
@@ -105,6 +114,49 @@ test("calendar integration: create scheduled block via modal toggle", async ({ a
   await expect(row).toBeVisible();
   await expect(row.getByRole("button", { name: "Valider" })).toBeVisible();
   await expect(row.getByRole("button", { name: "Planifier" })).toHaveCount(0);
+});
+
+test("calendar integration: create item on a later day", async ({ authenticatedPage: page }) => {
+  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const focusDate = toLocalDateInput(tomorrow);
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+
+  await page.locator(".calendar-view-date").fill(focusDate);
+
+  const start = new Date(`${focusDate}T10:00`);
+  const end = new Date(`${focusDate}T11:00`);
+  const title = `Future ${Date.now()}`;
+
+  const modal = await openCreateModal(page);
+  await modal.getByPlaceholder("Titre").fill(title);
+  await modal.getByPlaceholder("Début").fill(toLocalDatetimeInput(start));
+  await modal.getByPlaceholder("Fin").fill(toLocalDatetimeInput(end));
+
+  const createResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items") &&
+      response.request().method() === "POST"
+  );
+  const listResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items") &&
+      response.request().method() === "GET"
+  );
+
+  await modal.getByRole("button", { name: "Valider" }).click();
+  const createResponse = await createResponsePromise;
+  expect(createResponse.ok()).toBeTruthy();
+
+  const listResponse = await listResponsePromise;
+  expect(listResponse.ok()).toBeTruthy();
+
+  const row = page.locator(".calendar-calendar-card", {
+    has: page.locator(".calendar-calendar-item-title", { hasText: title })
+  }).first();
+
+  await expect(row).toBeVisible();
 });
 
 test("calendar: create modal resets on cancel", async ({ authenticatedPage: page }) => {
@@ -271,6 +323,9 @@ test("calendar desktop: edit button is visible in timeline", async ({ authentica
 
 test("calendar desktop: double click does not open edit modal", async ({ authenticatedPage: page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
+  await page.waitForFunction(() => window.innerWidth >= 1024);
+  await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+  await page.reload();
 
   const now = new Date();
   const start = new Date(now.getTime() + 60 * 60 * 1000);
@@ -305,46 +360,10 @@ test("calendar desktop: double click does not open edit modal", async ({ authent
   await expect(page.locator(".app-modal__dialog")).toHaveCount(0);
 });
 
-test("calendar mobile: double tap opens edit modal", async ({ authenticatedPage: page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-
-  const now = new Date();
-  const start = new Date(now.getTime() + 60 * 60 * 1000);
-  const end = new Date(now.getTime() + 2 * 60 * 60 * 1000);
-  const title = `Mobile ${Date.now()}`;
-
-  await calendarTab(page).click();
-  await expect(page).toHaveURL(/\/calendar$/);
-
-  const createModal = await openCreateModal(page);
-  await createModal.getByPlaceholder("Titre").fill(title);
-  await createModal.getByPlaceholder("Début").fill(toLocalDatetimeInput(start));
-  await createModal.getByPlaceholder("Fin").fill(toLocalDatetimeInput(end));
-
-  const createResponsePromise = page.waitForResponse(
-    response =>
-      response.url().includes("/api/v1/calendar-items") &&
-      response.request().method() === "POST"
-  );
-
-  await createModal.getByRole("button", { name: "Valider" }).click();
-  const createResponse = await createResponsePromise;
-  expect(createResponse.ok()).toBeTruthy();
-
-  const row = page.locator(".calendar-calendar-card", {
-    has: page.locator(".calendar-calendar-item-title", { hasText: title })
-  }).first();
-
-  await expect(row).toBeVisible();
-  await row.scrollIntoViewIfNeeded();
-  await row.dblclick({ force: true });
-  await expect(page.getByText("Modifier l'item")).toBeVisible();
-});
-
 test.describe("calendar mobile touch", () => {
   test.use({ hasTouch: true });
 
-  test("calendar mobile: touch double tap opens edit modal", async ({ authenticatedPage: page }) => {
+  test("calendar mobile: double tap opens edit modal", async ({ authenticatedPage: page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
 
   const now = new Date();

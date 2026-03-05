@@ -2,20 +2,44 @@ module Test.Domain.Calendar.Spec (spec) where
 
 import Prelude
 
-import Calendar.Model (CalendarItem(..), IntentionDraft, ItemStatus(..), ItemType(..), RecurrenceRule(..), RoutineTemplate, SortMode(..), StepDependency(..), ValidationError(..), defaultNotificationDefaults, defaultRecurrenceDraft)
-import Calendar.Conflict (detectConflictGroups, detectConflictIds)
-import Calendar.Calendar.Draft (toNewIntention)
-import Calendar.Calendar.Primary (primaryActionFor)
-import Calendar.Calendar.Types (PrimaryAction(..))
-import Calendar.Calendar.Timeline (buildTimelineLayout, toTimelineBlock)
-import Calendar.Edit (EditError(..), applyEditDraft, buildEditDraft)
-import Calendar.Exports (exportItemsToCsv, exportItemsToIcs, filterItemsForExport)
-import Calendar.Helpers (durationMinutesBetween, sortItems, validateIntention)
-import Calendar.Imports (parseCsvImport, parseIcsImport)
-import Calendar.Notifications (reminderTimesForIntention)
-import Calendar.Offline (applyOfflineMutation)
-import Calendar.Recurrence (generateOccurrencesForMonth)
-import Calendar.Templates (applyTemplateToDraft, instantiateRoutine, templateSummary, addTemplate, removeTemplate, updateTemplate)
+import Pages.Calendar
+  ( CalendarItem(..)
+  , IntentionDraft
+  , ItemStatus(..)
+  , ItemType(..)
+  , RoutineTemplate
+  , SortMode(..)
+  , StepDependency(..)
+  , ValidationError(..)
+  , defaultNotificationDefaults
+  , detectConflictGroups
+  , detectConflictIds
+  , toNewIntention
+  , primaryActionFor
+  , PrimaryAction(..)
+  , buildTimelineLayout
+  , toTimelineBlock
+  , EditError(..)
+  , applyEditDraft
+  , buildEditDraft
+  , exportItemsToCsv
+  , exportItemsToIcs
+  , filterItemsForExport
+  , durationMinutesBetween
+  , sortItems
+  , validateIntention
+  , parseCsvImport
+  , parseIcsImport
+  , reminderTimesForIntention
+  , applyOfflineMutation
+  , applyTemplateToDraft
+  , instantiateRoutine
+  , templateSummary
+  , addTemplate
+  , removeTemplate
+  , updateTemplate
+  )
+import Calendar.Recurrence (RecurrenceRule(..), defaultRecurrenceDraft, generateOccurrencesForMonth)
 import Data.Argonaut.Decode (decodeJson)
 import Data.Argonaut.Encode (encodeJson)
 import Data.Array (head, length)
@@ -156,7 +180,7 @@ spec = do
         content =
           (calendarContent Intention "Intention" "2026-02-19T09:00" "2026-02-19T10:00")
             { actualDurationMinutes = Just 25
-            , recurrenceRule = Just RecurrenceWeekly
+            , recurrenceRule = Just Weekly
             , recurrenceExceptionDates = [ "2026-02-26" ]
             }
         item = serverCalendarItem "edit-1" content
@@ -174,7 +198,7 @@ spec = do
             Right (ServerCalendarItem { content: updated }) -> do
               updated.title `shouldEqual` "Mise a jour"
               updated.actualDurationMinutes `shouldEqual` Just 40
-              updated.recurrenceRule `shouldEqual` Just RecurrenceWeekly
+              updated.recurrenceRule `shouldEqual` Just Weekly
               updated.recurrenceExceptionDates `shouldEqual` [ "2026-02-26" ]
             Right _ -> fail "Expected server item"
 
@@ -407,7 +431,7 @@ spec = do
   describe "Calendar recurrence" do
     it "generateOccurrencesForMonth excludes exception dates" do
       let
-        occurrences = generateOccurrencesForMonth RecurrenceWeekly [ "2026-02-19" ] "2026-02-05T09:00"
+        occurrences = generateOccurrencesForMonth Weekly [ "2026-02-19" ] "2026-02-05T09:00"
       occurrences `shouldEqual` [ "2026-02-05", "2026-02-12", "2026-02-26" ]
 
   describe "Calendar routines" do

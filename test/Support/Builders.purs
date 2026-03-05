@@ -3,7 +3,7 @@ module Test.Support.Builders
   , serverCalendarItem
   ) where
 
-import Calendar.Model (CalendarItem(..), CalendarItemContent, ItemStatus(..), ItemType)
+import Pages.Calendar (CalendarItem(..), CalendarItemContent, ItemStatus(..), ItemType)
 import Data.Maybe (Maybe(..))
 
 calendarContent :: ItemType -> String -> String -> String -> CalendarItemContent

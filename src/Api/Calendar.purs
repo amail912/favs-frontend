@@ -15,7 +15,6 @@ import Affjax.ResponseFormat (json)
 import Affjax.Web (get) as Affjax
 import Affjax.Web (post)
 import Api.Common (JsonResponse, jsonBody)
-import Calendar.Model (CalendarItem)
 import Data.Argonaut.Core (jsonEmptyObject)
 import Data.Argonaut.Encode (class EncodeJson, (:=), (~>))
 import Effect.Aff (Aff)
@@ -48,10 +47,10 @@ validatePath itemId = "/api/v1/calendar-items/" <> itemId <> "/validate"
 getItemsResponse :: Aff JsonResponse
 getItemsResponse = Affjax.get json listPath
 
-createItemResponse :: CalendarItem -> Aff JsonResponse
+createItemResponse :: forall payload. EncodeJson payload => payload -> Aff JsonResponse
 createItemResponse item = post json createPath (jsonBody item)
 
-updateItemResponse :: String -> CalendarItem -> Aff JsonResponse
+updateItemResponse :: forall payload. EncodeJson payload => String -> payload -> Aff JsonResponse
 updateItemResponse itemId item =
   post json (updatePath itemId)
     (jsonBody item)
