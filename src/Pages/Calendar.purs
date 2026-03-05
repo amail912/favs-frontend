@@ -235,7 +235,7 @@ renderConflictActionsPage = map toAction <<< renderConflictActions
 
 renderAgendaView
   :: forall w
-   . AgendaView
+   . CalendarView
   -> String
   -> Array String
   -> Array CalendarItem
@@ -437,24 +437,10 @@ _syncUpdateErrorState = _sync <<< _syncUpdateError
 _viewFocusDatePage :: Lens' State String
 _viewFocusDatePage = _view <<< _viewFocusDateState
 
-class HasStateLens s where
-  getLens :: Lens' State s
-
-instance hasStateLensSync :: HasStateLens SyncState where
-  getLens = _sync
-
-instance hasStateLensDrag :: HasStateLens DragState where
-  getLens = _drag
-
-instance hasStateLensView :: HasStateLens ViewState where
-  getLens = _view
-
-withSubState :: forall s a cmd. HasStateLens s => ToCommand cmd => StateT s (WriterT (Array cmd) Aff) a -> ErrorAgendaAppM a
-withSubState action = do
+withSubState :: forall s a cmd. ToCommand cmd => Lens' State s -> StateT s (WriterT (Array cmd) Aff) a -> ErrorAgendaAppM a
+withSubState lens action = do
   st <- get
-  let
-    lens = getLens
-    subState = st ^. lens
+  let subState = st ^. lens
   Tuple (Tuple result nextSubState) cmds <- liftAff $ runWriterT (runStateT action subState)
   modify_ (lens .~ nextSubState)
   traverse_ (runCommand <<< toCommand) cmds
@@ -517,7 +503,7 @@ runCommand = case _ of
 handleSyncActionFlow :: SyncAction -> ErrorAgendaAppM Unit
 handleSyncActionFlow syncAction = do
   st <- get
-  withSubState $ handleSyncAction (st ^. _calendarItems) syncAction
+  withSubState _sync $ handleSyncAction (st ^. _calendarItems) syncAction
 
 handleDragActionFlow :: DragAction -> ErrorAgendaAppM Unit
 handleDragActionFlow dragAction = do
@@ -528,11 +514,11 @@ handleDragActionFlow dragAction = do
       , focusDate: st ^. _viewFocusDatePage
       , offlineMode: st ^. _syncOfflineModeState
       }
-  withSubState $ handleDragAction ctx dragAction
+  withSubState _drag $ handleDragAction ctx dragAction
 
 handleViewActionFlow :: ViewAction -> ErrorAgendaAppM Unit
 handleViewActionFlow viewAction = do
-  withSubState $ handleViewAction viewAction
+  withSubState _view $ handleViewAction viewAction
   case viewAction of
     ViewOpenModal _ -> focusModal
     ViewOpenCreate -> do
@@ -581,20 +567,20 @@ handleAction action = handleError $
     GlobalKeyDown key ->
       if key == "Escape" then do
         st <- get
-        case st ^. (_view <<< _viewActiveModalS) of
-          Just ModalEditItem -> withSubState $ handleViewAction ViewEditCancel
+        case st ^. (_view <<< _viewActiveModal) of
+          Just ModalEditItem -> withSubState _view $ handleViewAction ViewEditCancel
           Just ModalCreateItem -> do
-            withSubState $ handleViewAction ViewCloseCreate
+            withSubState _view $ handleViewAction ViewCloseCreate
             st' <- get
             let
               lastType = st' ^. _calendarLastCreateType
             modify_ ((_calendarDraft .~ (emptyDraft { itemType = lastType })) <<< (_calendarValidationError .~ Nothing))
-          Just _ -> withSubState $ handleViewAction ViewCloseModal
+          Just _ -> withSubState _view $ handleViewAction ViewCloseModal
           Nothing -> pure unit
       else pure unit
     GlobalResize -> do
       viewport <- liftEffect $ window >>= Window.innerWidth
-      withSubState $ handleViewAction (ViewSetIsMobile (viewport <= 768))
+      withSubState _view $ handleViewAction (ViewSetIsMobile (viewport <= 768))
     TemplatesOutputAction output ->
       case output of
         Templates.TemplatesStateChanged nextState ->
@@ -611,7 +597,7 @@ handleAction action = handleError $
         )
     EditRecurrenceCmd (Recurrence.RecurrenceApplied draft) ->
       modify_
-        ((_view <<< _viewEditPanelS) %~ map (\panel -> panel { draft = panel.draft { recurrence = draft }, validationError = Nothing }))
+        ((_view <<< _viewEditPanel) %~ map (\panel -> panel { draft = panel.draft { recurrence = draft }, validationError = Nothing }))
     ImportApplyItems contents -> do
       st <- get
       let
@@ -629,7 +615,7 @@ initAction = do
   now <- liftEffect nowDateTime
   modify_ $ _viewFocusDatePage .~ formatDate now
   viewport <- liftEffect $ window >>= Window.innerWidth
-  withSubState $ handleViewAction (ViewSetIsMobile (viewport <= 768))
+  withSubState _view $ handleViewAction (ViewSetIsMobile (viewport <= 768))
   subscribeToGlobalKeyDown
   subscribeToGlobalResize
   refreshItems
@@ -688,14 +674,14 @@ submitIntention = do
                   <<< (_calendarDraft .~ emptyDraft)
                   <<< (_calendarValidationError .~ Nothing)
                   <<< (_pendingSync .~ result.pending)
-                  <<< ((_view <<< _viewActiveModalS) .~ Nothing)
+                  <<< ((_view <<< _viewActiveModal) .~ Nothing)
               )
           else do
             _ <- createItem item
             modify_
               ( (_calendarDraft .~ emptyDraft)
                   <<< (_calendarValidationError .~ Nothing)
-                  <<< ((_view <<< _viewActiveModalS) .~ Nothing)
+                  <<< ((_view <<< _viewActiveModal) .~ Nothing)
               )
             refreshItems
 
@@ -732,9 +718,9 @@ render :: State -> H.ComponentHTML Action Slots Aff
 render { calendar, sync, drag, templates, view } =
   let
     { items, showConflictsOnly, conflictResolution, sortMode } = calendar
-    SyncState { offlineMode, syncConflict, updateError } = sync
-    DragState { draggingId, dragHoverIndex } = drag
-    ViewState { viewMode, focusDate, validationPanel, isMobile } = view
+    { offlineMode, syncConflict, updateError } = sync
+    { draggingId, dragHoverIndex } = drag
+    { viewMode, focusDate, validationPanel, isMobile } = view
     agendaModalsInput = buildAgendaModalsInput { calendar, sync, drag, templates, view }
     { conflictGroups } = agendaModalsInput.filters
     conflictIds = detectConflictIds items
@@ -848,8 +834,8 @@ buildAgendaModalsInput :: State -> AgendaModalsInput
 buildAgendaModalsInput { calendar, sync, templates, view } =
   let
     { items, draft, validationError, showConflictsOnly, sortMode } = calendar
-    SyncState { offlineMode } = sync
-    ViewState { activeModal, editPanel } = view
+    { offlineMode } = sync
+    { activeModal, editPanel } = view
     conflictGroups = detectConflictGroups items
   in
     { activeModal
@@ -1744,8 +1730,8 @@ type ValidationPanel =
   , inputValue :: String
   }
 
-newtype ViewState = ViewState
-  { viewMode :: AgendaView
+type ViewState =
+  { viewMode :: CalendarView
   , focusDate :: String
   , activeModal :: Maybe AgendaModal
   , validationPanel :: Maybe ValidationPanel
@@ -1756,57 +1742,55 @@ newtype ViewState = ViewState
 
 viewInitialState :: ViewState
 viewInitialState =
-  ViewState
-    { viewMode: ViewDay
-    , focusDate: ""
-    , activeModal: Nothing
-    , validationPanel: Nothing
-    , editPanel: Nothing
-    , isMobile: false
-    , lastTapAt: Nothing
-    }
+  { viewMode: ViewDay
+  , focusDate: ""
+  , activeModal: Nothing
+  , validationPanel: Nothing
+  , editPanel: Nothing
+  , isMobile: false
+  , lastTapAt: Nothing
+  }
 
-_viewModeS :: Lens' ViewState AgendaView
-_viewModeS =
-  lens
-    (\(ViewState state) -> state.viewMode)
-    (\(ViewState state) viewMode -> ViewState (state { viewMode = viewMode }))
+_viewMode :: Lens' ViewState CalendarView
+_viewMode = lens
+  _.viewMode
+  (_ { viewMode = _ })
 
 _viewFocusDateState :: Lens' ViewState String
 _viewFocusDateState =
   lens
-    (\(ViewState state) -> state.focusDate)
-    (\(ViewState state) focusDate -> ViewState (state { focusDate = focusDate }))
+    _.focusDate
+    (_ { focusDate = _ })
 
-_viewActiveModalS :: Lens' ViewState (Maybe AgendaModal)
-_viewActiveModalS =
+_viewActiveModal :: Lens' ViewState (Maybe AgendaModal)
+_viewActiveModal =
   lens
-    (\(ViewState state) -> state.activeModal)
-    (\(ViewState state) activeModal -> ViewState (state { activeModal = activeModal }))
+    _.activeModal
+    (_ { activeModal = _ })
 
-_viewValidationPanelS :: Lens' ViewState (Maybe ValidationPanel)
-_viewValidationPanelS =
+_viewValidationPanel :: Lens' ViewState (Maybe ValidationPanel)
+_viewValidationPanel =
   lens
-    (\(ViewState state) -> state.validationPanel)
-    (\(ViewState state) validationPanel -> ViewState (state { validationPanel = validationPanel }))
+    _.validationPanel
+    (_ { validationPanel = _ })
 
-_viewEditPanelS :: Lens' ViewState (Maybe EditPanel)
-_viewEditPanelS =
+_viewEditPanel :: Lens' ViewState (Maybe EditPanel)
+_viewEditPanel =
   lens
-    (\(ViewState state) -> state.editPanel)
-    (\(ViewState state) editPanel -> ViewState (state { editPanel = editPanel }))
+    _.editPanel
+    (_ { editPanel = _ })
 
-_viewIsMobileS :: Lens' ViewState Boolean
-_viewIsMobileS =
+_viewIsMobile :: Lens' ViewState Boolean
+_viewIsMobile =
   lens
-    (\(ViewState state) -> state.isMobile)
-    (\(ViewState state) isMobile -> ViewState (state { isMobile = isMobile }))
+    _.isMobile
+    (_ { isMobile = _ })
 
-_viewLastTapAtS :: Lens' ViewState (Maybe Instant)
-_viewLastTapAtS =
+_viewLastTapAt :: Lens' ViewState (Maybe Instant)
+_viewLastTapAt =
   lens
-    (\(ViewState state) -> state.lastTapAt)
-    (\(ViewState state) lastTapAt -> ViewState (state { lastTapAt = lastTapAt }))
+    _.lastTapAt
+    (_ { lastTapAt = _ })
 
 type EditPanel =
   { item :: CalendarItem
@@ -1846,111 +1830,108 @@ handleViewAction :: ViewAction -> StateT ViewState (WriterT (Array ViewCommand) 
 handleViewAction = case _ of
   ViewOpenValidation itemId content -> do
     suggested <- liftEffect $ suggestDurationMinutes content.windowStart
-    modify_ (_viewValidationPanelS .~ Just { itemId, proposedMinutes: suggested, inputValue: "" })
+    modify_ (_viewValidationPanel .~ Just { itemId, proposedMinutes: suggested, inputValue: "" })
   ViewValidationMinutesChanged raw ->
-    modify_ (_viewValidationPanelS %~ map (_ { inputValue = raw }))
+    modify_ (_viewValidationPanel %~ map (_ { inputValue = raw }))
   ViewConfirmValidation -> do
     viewState <- get
-    case viewState ^. _viewValidationPanelS of
+    case viewState ^. _viewValidationPanel of
       Nothing -> pure unit
       Just panel -> do
         let duration = parsePositiveInt panel.inputValue <|> panel.proposedMinutes
         case duration of
           Nothing -> pure unit
           Just minutes -> do
-            modify_ (_viewValidationPanelS .~ Nothing)
+            modify_ (_viewValidationPanel .~ Nothing)
             tell [ ViewValidateItem panel.itemId minutes ]
   ViewCancelValidation ->
-    modify_ (_viewValidationPanelS .~ Nothing)
+    modify_ (_viewValidationPanel .~ Nothing)
   ViewChangedAction raw ->
-    modify_ (_viewModeS .~ parseAgendaView raw)
+    modify_ (_viewMode .~ parseAgendaView raw)
   ViewFocusDateChanged raw ->
     modify_ (_viewFocusDateState .~ raw)
   ViewOpenModal modal ->
-    modify_ (_viewActiveModalS .~ Just modal)
+    modify_ (_viewActiveModal .~ Just modal)
   ViewCloseModal ->
-    modify_ (_viewActiveModalS .~ Nothing)
+    modify_ (_viewActiveModal .~ Nothing)
   ViewOpenCreate ->
-    modify_ (_viewActiveModalS .~ Just ModalCreateItem)
+    modify_ (_viewActiveModal .~ Just ModalCreateItem)
   ViewCloseCreate ->
-    modify_ (_viewActiveModalS .~ Nothing)
+    modify_ (_viewActiveModal .~ Nothing)
   ViewOpenEdit item ->
     case buildEditDraft item of
       Nothing -> pure unit
-      Just draft ->
-        modify_
-          ( (_viewEditPanelS .~ Just { item, draft, validationError: Nothing })
-              <<< (_viewActiveModalS .~ Just ModalEditItem)
-              <<< (_viewLastTapAtS .~ Nothing)
-          )
+      Just draft -> modify_ $ (_viewEditPanel .~ Just { item, draft, validationError: Nothing })
+                                <<< (_viewActiveModal .~ Just ModalEditItem)
+                                <<< (_viewLastTapAt .~ Nothing)
   ViewOpenEditFromDoubleClick item -> do
     viewport <- liftEffect $ window >>= Window.innerWidth
     let isMobileNow = viewport <= 768
-    modify_ (_viewIsMobileS .~ isMobileNow)
+    modify_ (_viewIsMobile .~ isMobileNow)
     if isMobileNow then
       handleViewAction (ViewOpenEdit item)
     else
       pure unit
   ViewMobileTap item -> do
     viewState <- get
-    if viewState ^. _viewIsMobileS then do
+    if viewState ^. _viewIsMobile then do
       now <- liftEffect Now.now
-      case viewState ^. _viewLastTapAtS of
+      case viewState ^. _viewLastTapAt of
         Nothing ->
-          modify_ (_viewLastTapAtS .~ Just now)
+          modify_ (_viewLastTapAt .~ Just now)
         Just previous ->
           let
             elapsedMs = case Instant.diff now previous of Milliseconds ms -> ms
           in
             if elapsedMs <= 350.0 then
-              modify_ (_viewLastTapAtS .~ Nothing) *> handleViewAction (ViewOpenEdit item)
+              modify_ (_viewLastTapAt .~ Nothing) *> handleViewAction (ViewOpenEdit item)
             else
-              modify_ (_viewLastTapAtS .~ Just now)
+              modify_ (_viewLastTapAt .~ Just now)
     else
       pure unit
   ViewEditTitleChanged raw ->
-    modify_ (_viewEditPanelS %~ map (\panel -> panel { draft = panel.draft { title = raw }, validationError = Nothing }))
+    modify_ (_viewEditPanel %~ map (\panel -> panel { draft = panel.draft { title = raw }, validationError = Nothing }))
   ViewEditStartChanged raw ->
-    modify_ (_viewEditPanelS %~ map (\panel -> panel { draft = panel.draft { windowStart = raw }, validationError = Nothing }))
+    modify_ (_viewEditPanel %~ map (\panel -> panel { draft = panel.draft { windowStart = raw }, validationError = Nothing }))
   ViewEditEndChanged raw ->
-    modify_ (_viewEditPanelS %~ map (\panel -> panel { draft = panel.draft { windowEnd = raw }, validationError = Nothing }))
+    modify_ (_viewEditPanel %~ map (\panel -> panel { draft = panel.draft { windowEnd = raw }, validationError = Nothing }))
   ViewEditCategoryChanged raw ->
-    modify_ (_viewEditPanelS %~ map (\panel -> panel { draft = panel.draft { category = raw }, validationError = Nothing }))
+    modify_ (_viewEditPanel %~ map (\panel -> panel { draft = panel.draft { category = raw }, validationError = Nothing }))
   ViewEditStatusChanged raw ->
-    modify_ (_viewEditPanelS %~ map (\panel -> panel { draft = panel.draft { status = parseStatus raw }, validationError = Nothing }))
+    modify_ (_viewEditPanel %~ map (\panel -> panel { draft = panel.draft { status = parseStatus raw }, validationError = Nothing }))
   ViewEditDurationChanged raw ->
-    modify_ (_viewEditPanelS %~ map (\panel -> panel { draft = panel.draft { actualDurationMinutes = raw }, validationError = Nothing }))
+    modify_ (_viewEditPanel %~ map (\panel -> panel { draft = panel.draft { actualDurationMinutes = raw }, validationError = Nothing }))
   ViewEditSave -> do
     viewState <- get
-    case viewState ^. _viewEditPanelS of
+    case viewState ^. _viewEditPanel of
       Nothing -> pure unit
       Just panel ->
         case applyEditDraft panel.draft panel.item of
           Left err ->
-            modify_ (_viewEditPanelS .~ Just (panel { validationError = Just (editErrorMessage err) }))
+            modify_ (_viewEditPanel .~ Just (panel { validationError = Just (editErrorMessage err) }))
           Right updatedItem -> do
             tell [ ViewUpdateItem panel.draft.itemId updatedItem ]
-            modify_ ((_viewEditPanelS .~ Nothing) <<< (_viewActiveModalS .~ Nothing))
+            modify_ ((_viewEditPanel .~ Nothing) <<< (_viewActiveModal .~ Nothing))
   ViewEditCancel ->
-    modify_ ((_viewEditPanelS .~ Nothing) <<< (_viewActiveModalS .~ Nothing))
+    modify_ ((_viewEditPanel .~ Nothing) <<< (_viewActiveModal .~ Nothing))
   ViewSetIsMobile isMobile ->
-    modify_ (_viewIsMobileS .~ isMobile)
+    modify_ (_viewIsMobile .~ isMobile)
 
-viewTitle :: AgendaView -> String
+viewTitle :: CalendarView -> String
 viewTitle viewMode =
   case viewMode of
     ViewDay -> "Vue Jour"
     ViewWeek -> "Vue Semaine"
     ViewMonth -> "Vue Mois"
 
-parseAgendaView :: String -> AgendaView
+parseAgendaView :: String -> CalendarView
 parseAgendaView raw =
   case raw of
     "week" -> ViewWeek
     "month" -> ViewMonth
     _ -> ViewDay
 
-renderViewSelector :: forall w. AgendaView -> String -> HTML w ViewAction
+renderViewSelector :: forall w. CalendarView -> String -> HTML w ViewAction
 renderViewSelector viewMode focusDate =
   div [ class_ "calendar-view-selector" ]
     [ div [ class_ "calendar-view-buttons" ]
@@ -1982,7 +1963,7 @@ renderViewSelector viewMode focusDate =
         ]
     ]
 
-renderMobileTools :: forall w. AgendaView -> HTML w ViewAction
+renderMobileTools :: forall w. CalendarView -> HTML w ViewAction
 renderMobileTools _ =
   div [ class_ "calendar-mobile-tools" ]
     [ button [ class_ "btn btn-sm btn-outline-secondary", onClick (const (ViewOpenModal ModalFilters)) ] [ text "Filtres" ]
@@ -2134,7 +2115,7 @@ validationErrorMessage err =
 -- END src/Calendar/Display.purs
 
 -- BEGIN src/Calendar/Drag.purs
-newtype DragState = DragState
+type DragState =
   { draggingId :: Maybe String
   , dragHoverIndex :: Maybe Int
   , dragOffsetMinutes :: Maybe Int
@@ -2151,50 +2132,49 @@ type DragCtx =
 
 dragInitialState :: DragState
 dragInitialState =
-  DragState
-    { draggingId: Nothing
-    , dragHoverIndex: Nothing
-    , dragOffsetMinutes: Nothing
-    , touchStartItemId: Nothing
-    , touchStartAt: Nothing
-    , touchDragActive: false
-    }
+  { draggingId: Nothing
+  , dragHoverIndex: Nothing
+  , dragOffsetMinutes: Nothing
+  , touchStartItemId: Nothing
+  , touchStartAt: Nothing
+  , touchDragActive: false
+  }
 
 _draggingIdS :: Lens' DragState (Maybe String)
 _draggingIdS =
   lens
-    (\(DragState state) -> state.draggingId)
-    (\(DragState state) draggingId -> DragState (state { draggingId = draggingId }))
+    _.draggingId
+    (_ { draggingId = _ })
 
 _dragHoverIndexS :: Lens' DragState (Maybe Int)
 _dragHoverIndexS =
   lens
-    (\(DragState state) -> state.dragHoverIndex)
-    (\(DragState state) dragHoverIndex -> DragState (state { dragHoverIndex = dragHoverIndex }))
+    _.dragHoverIndex
+    (_ { dragHoverIndex = _ })
 
 _dragOffsetMinutesS :: Lens' DragState (Maybe Int)
 _dragOffsetMinutesS =
   lens
-    (\(DragState state) -> state.dragOffsetMinutes)
-    (\(DragState state) dragOffsetMinutes -> DragState (state { dragOffsetMinutes = dragOffsetMinutes }))
+    _.dragOffsetMinutes
+    (_ { dragOffsetMinutes = _ })
 
 _touchStartItemIdS :: Lens' DragState (Maybe String)
 _touchStartItemIdS =
   lens
-    (\(DragState state) -> state.touchStartItemId)
-    (\(DragState state) touchStartItemId -> DragState (state { touchStartItemId = touchStartItemId }))
+    _.touchStartItemId
+    (_ { touchStartItemId = _ })
 
 _touchStartAtS :: Lens' DragState (Maybe Instant)
 _touchStartAtS =
   lens
-    (\(DragState state) -> state.touchStartAt)
-    (\(DragState state) touchStartAt -> DragState (state { touchStartAt = touchStartAt }))
+    _.touchStartAt
+    (_ { touchStartAt = _ })
 
 _touchDragActiveS :: Lens' DragState Boolean
 _touchDragActiveS =
   lens
-    (\(DragState state) -> state.touchDragActive)
-    (\(DragState state) touchDragActive -> DragState (state { touchDragActive = touchDragActive }))
+    _.touchDragActive
+    (_ { touchDragActive = _ })
 
 data DragAction
   = DragStart String DragEvent
@@ -3041,14 +3021,14 @@ derive instance sortModeEq :: Eq SortMode
 instance sortModeShow :: Show SortMode where
   show = genericShow
 
-data AgendaView
+data CalendarView
   = ViewDay
   | ViewWeek
   | ViewMonth
 
-derive instance agendaViewGeneric :: Generic AgendaView _
-derive instance agendaViewEq :: Eq AgendaView
-instance agendaViewShow :: Show AgendaView where
+derive instance agendaViewGeneric :: Generic CalendarView _
+derive instance agendaViewEq :: Eq CalendarView
+instance agendaViewShow :: Show CalendarView where
   show = genericShow
 
 instance itemTypeEncodeJson :: EncodeJson ItemType where
@@ -3186,7 +3166,7 @@ upsertPendingItem item pending =
 -- END src/Calendar/Offline.purs
 
 -- BEGIN src/Calendar/purs
-newtype SyncState = SyncState
+type SyncState =
   { offlineMode :: Boolean
   , pendingSync :: Array CalendarItem
   , syncConflict :: Maybe (Array CalendarItem)
@@ -3195,36 +3175,35 @@ newtype SyncState = SyncState
 
 syncInitialState :: SyncState
 syncInitialState =
-  SyncState
-    { offlineMode: false
-    , pendingSync: []
-    , syncConflict: Nothing
-    , updateError: Nothing
-    }
+  { offlineMode: false
+  , pendingSync: []
+  , syncConflict: Nothing
+  , updateError: Nothing
+  }
 
 _syncOfflineMode :: Lens' SyncState Boolean
 _syncOfflineMode =
   lens
-    (\(SyncState state) -> state.offlineMode)
-    (\(SyncState state) offlineMode -> SyncState (state { offlineMode = offlineMode }))
+    _.offlineMode
+    (_ { offlineMode = _ })
 
 _syncPendingSync :: Lens' SyncState (Array CalendarItem)
 _syncPendingSync =
   lens
-    (\(SyncState state) -> state.pendingSync)
-    (\(SyncState state) pendingSync -> SyncState (state { pendingSync = pendingSync }))
+    _.pendingSync
+    (_ { pendingSync = _ })
 
 _syncConflict :: Lens' SyncState (Maybe (Array CalendarItem))
 _syncConflict =
   lens
-    (\(SyncState state) -> state.syncConflict)
-    (\(SyncState state) syncConflict -> SyncState (state { syncConflict = syncConflict }))
+    _.syncConflict
+    (_ { syncConflict = _ })
 
 _syncUpdateError :: Lens' SyncState (Maybe String)
 _syncUpdateError =
   lens
-    (\(SyncState state) -> state.updateError)
-    (\(SyncState state) updateError -> SyncState (state { updateError = updateError }))
+    _.updateError
+    (_ { updateError = _ })
 
 data SyncAction
   = SyncDraftTitleKeyDown String
