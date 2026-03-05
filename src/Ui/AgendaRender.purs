@@ -7,12 +7,16 @@ import Prelude hiding (div)
 import Halogen.HTML (HTML, div, text)
 import Ui.Utils (class_)
 
-renderPanelHeader :: forall w i. String -> String -> String -> Array (HTML w i) -> HTML w i
-renderPanelHeader baseClass title subtitle actions =
-  div [ class_ $ baseClass <> "-header" ]
+renderPanelHeader
+  :: forall w i
+   . { baseClass :: String, title :: String, subtitle :: String }
+  -> Array (HTML w i)
+  -> HTML w i
+renderPanelHeader config actions =
+  div [ class_ $ config.baseClass <> "-header" ]
     ( [ div []
-          [ div [ class_ $ baseClass <> "-title" ] [ text title ]
-          , div [ class_ $ baseClass <> "-subtitle" ] [ text subtitle ]
+          [ div [ class_ $ config.baseClass <> "-title" ] [ text config.title ]
+          , div [ class_ $ config.baseClass <> "-subtitle" ] [ text config.subtitle ]
           ]
       ] <> actions
     )

@@ -16,7 +16,7 @@ import Data.Newtype (wrap)
 
 renderModal
   :: forall w i
-  . String
+   . String
   -> Array (HTML w i)
   -> i
   -> i

@@ -6,10 +6,7 @@ module Pages.Calendar
   , IntentionDraft
   , ItemStatus(..)
   , ItemType(..)
-  , RoutineTemplate
-  , RoutineTemplateStep
   , SortMode(..)
-  , StepDependency(..)
   , ValidationError(..)
   , defaultNotificationDefaults
   , detectConflictGroups
@@ -33,11 +30,6 @@ module Pages.Calendar
   , reminderTimesForIntention
   , applyOfflineMutation
   , applyTemplateToDraft
-  , instantiateRoutine
-  , templateSummary
-  , addTemplate
-  , removeTemplate
-  , updateTemplate
   , computeDropMinuteIndex
   , indexToTimeLabel
   ) where
@@ -47,6 +39,7 @@ import Affjax.Web (Response)
 import Api.Calendar (ValidateItemPayload(..), createItemResponse, getItemsResponse, updateItemResponse, validateItemResponse)
 import Calendar.Recurrence (RecurrenceDraft, RecurrenceRule, defaultRecurrenceDraft, draftFromRecurrence, draftToRecurrence)
 import Calendar.Recurrence as Recurrence
+import Calendar.Templates as Templates
 import Control.Monad.Except (ExceptT(..), withExceptT)
 import Control.Monad.State.Trans (StateT, runStateT, get, modify_)
 import Control.Monad.Trans.Class (lift)
@@ -56,7 +49,7 @@ import Data.Argonaut.Decode (decodeJson, class DecodeJson, (.:), (.:?))
 import Data.Array (filter, foldM, null, length, mapWithIndex, findIndex, foldl, mapMaybe, sortBy, uncons, updateAt, elem, find, nub, index, last, catMaybes, any)
 import Data.Bifunctor (lmap)
 import Data.Either (Either(..), either)
-import Data.Foldable (traverse_, fold, all)
+import Data.Foldable (traverse_, fold)
 import Data.Lens (Lens', (.~), (%~), (^.), lens)
 import Data.Lens.Record (prop)
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
@@ -107,83 +100,18 @@ import Web.TouchEvent.Touch (clientY) as Touch
 import Web.TouchEvent.TouchList as TouchList
 import Ui.Vibration (vibrateIfAvailable)
 import Ui.AgendaRender (renderPanelHeader)
+import Helpers.DateTime as DateTime
 import Web.HTML.HTMLDocument as HTMLDocument
-import Data.Date (Date, canonicalDate, day, exactDate, month, year)
+import Data.Date (Date, canonicalDate, month, year)
 import Data.DateTime (DateTime(..), adjust, date, diff, time)
-import Data.Time (Time(..), hour, minute)
-import Data.Formatter.DateTime (unformatDateTime)
+import Data.Time (Time, hour, minute)
 import Data.String.Common as StringCommon
 import Data.String.Pattern (Pattern(..))
 import Data.Argonaut.Decode.Error (JsonDecodeError(..))
 import Data.Argonaut.Encode (class EncodeJson, encodeJson, (:=), (~>))
 import Data.Int as Int
 
-
-
 -- foldl comes from Data.Array in this module
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 -- BEGIN src/Pages/Calendar.purs
 type NoOutput = Void
@@ -195,7 +123,7 @@ type State =
   , sync :: SyncState
   , drag :: DragState
   , notifications :: NotificationState
-  , templates :: TemplateState
+  , templates :: Templates.TemplateState
   , imports :: ImportState
   , exports :: ExportState
   , view :: ViewState
@@ -212,7 +140,7 @@ data Action
   | GlobalKeyDown String
   | GlobalResize
   | NotificationAction NotificationAction
-  | TemplateAction TemplateAction
+  | TemplatesOutputAction Templates.TemplatesOutput
   | ImportAction ImportAction
   | ExportAction ExportAction
   | CreateRecurrenceCmd Recurrence.RecurrenceCommand
@@ -226,13 +154,19 @@ derive instance eqRecurrenceSlot :: Eq RecurrenceSlot
 derive instance ordRecurrenceSlot :: Ord RecurrenceSlot
 
 type RecurrenceSlotDef slot = forall query. H.Slot query Recurrence.RecurrenceCommand slot
-type Slots = (recurrence :: RecurrenceSlotDef RecurrenceSlot)
+type Slots = (recurrence :: RecurrenceSlotDef RecurrenceSlot, templates :: TemplatesSlotDef TemplatesSlot)
+
+data TemplatesSlot = TemplatesModal
+
+derive instance eqTemplatesSlot :: Eq TemplatesSlot
+derive instance ordTemplatesSlot :: Ord TemplatesSlot
+
+type TemplatesSlotDef slot = forall query. H.Slot query Templates.TemplatesOutput slot
 
 data Command
   = SyncCmd SyncCommand
   | DragCmd DragCommand
   | ViewCmd ViewCommand
-  | TemplateCmd TemplateCommand
   | ImportCmd ImportCommand
 
 class ToCommand cmd where
@@ -246,9 +180,6 @@ instance toCommandDragCommand :: ToCommand DragCommand where
 
 instance toCommandViewCommand :: ToCommand ViewCommand where
   toCommand = ViewCmd
-
-instance toCommandTemplateCommand :: ToCommand TemplateCommand where
-  toCommand = TemplateCmd
 
 instance toCommandImportCommand :: ToCommand ImportCommand where
   toCommand = ImportCmd
@@ -356,14 +287,21 @@ prefillCreateDraft itemType focusDate draft
           , windowEnd = end
           }
 
-renderTemplatesPanelPage
-  :: forall w
-   . Array TaskTemplate
-  -> TemplateDraft
-  -> Maybe String
-  -> HTML w Action
-renderTemplatesPanelPage templates draft editingId =
-  map TemplateAction (renderTemplatesPanel templates draft editingId)
+applyTemplateToDraft :: Templates.TaskTemplate -> String -> String -> IntentionDraft
+applyTemplateToDraft template windowStart windowEnd =
+  { itemType: Intention
+  , title: template.title
+  , windowStart
+  , windowEnd
+  , category: template.category
+  , status: Todo
+  , actualDurationMinutes: ""
+  , recurrence: defaultRecurrenceDraft
+  }
+
+renderTemplatesPanelPage :: Templates.TemplateState -> H.ComponentHTML Action Slots Aff
+renderTemplatesPanelPage templatesState =
+  slot (Proxy :: _ "templates") TemplatesModal Templates.component templatesState TemplatesOutputAction
 
 renderCsvImportPanelPage :: forall w. String -> Maybe CsvImportResult -> HTML w Action
 renderCsvImportPanelPage csvInput result =
@@ -403,7 +341,7 @@ initialState = const
   , sync: syncInitialState
   , drag: dragInitialState
   , notifications: notificationInitialState
-  , templates: templateInitialState
+  , templates: Templates.templateInitialState
   , imports: importInitialState
   , exports: exportInitialState
   , view: viewInitialState
@@ -421,7 +359,7 @@ _drag = prop (Proxy :: _ "drag")
 _notifications :: Lens' State NotificationState
 _notifications = prop (Proxy :: _ "notifications")
 
-_templates :: Lens' State TemplateState
+_templates :: Lens' State Templates.TemplateState
 _templates = prop (Proxy :: _ "templates")
 
 _imports :: Lens' State ImportState
@@ -471,9 +409,6 @@ instance hasStateLensDrag :: HasStateLens DragState where
 
 instance hasStateLensView :: HasStateLens ViewState where
   getLens = _view
-
-instance hasStateLensTemplates :: HasStateLens TemplateState where
-  getLens = _templates
 
 instance hasStateLensImports :: HasStateLens ImportState where
   getLens = _imports
@@ -543,9 +478,6 @@ runViewCommand = case _ of
       else modify_ (_syncUpdateErrorState .~ Just (updateErrorMessage (unwrap resp.status)))
       refreshItems
 
-runTemplateCommand :: TemplateCommand -> ErrorAgendaAppM Unit
-runTemplateCommand (TemplateSetDraft draft) = modify_ (_calendarDraft .~ draft)
-
 runImportCommand :: ImportCommand -> ErrorAgendaAppM Unit
 runImportCommand (ImportSetItems items) = modify_ (_calendarItems .~ items)
 runImportCommand (ImportSetPending pending) = modify_ (_pendingSync .~ pending)
@@ -555,7 +487,6 @@ runCommand = case _ of
   SyncCmd cmd -> runSyncCommand cmd
   DragCmd cmd -> runDragCommand cmd
   ViewCmd cmd -> runViewCommand cmd
-  TemplateCmd cmd -> runTemplateCommand cmd
   ImportCmd cmd -> runImportCommand cmd
 
 handleSyncActionFlow :: SyncAction -> ErrorAgendaAppM Unit
@@ -616,7 +547,12 @@ handleAction action = handleError $
       modify_ (_calendar %~ applyConflictAction conflictAction)
     SyncAction syncAction -> handleSyncActionFlow syncAction
     DragAction dragAction -> handleDragActionFlow dragAction
-    ViewAction viewAction -> handleViewActionFlow viewAction
+    ViewAction viewAction -> do
+      case viewAction of
+        ViewOpenModal ModalTemplates ->
+          modify_ (_templates %~ Templates.resetTemplateDraft)
+        _ -> pure unit
+      handleViewActionFlow viewAction
     GlobalKeyDown key ->
       if key == "Escape" then do
         st <- get
@@ -635,7 +571,15 @@ handleAction action = handleError $
       viewport <- liftEffect $ window >>= Window.innerWidth
       withSubState $ handleViewAction (ViewSetIsMobile (viewport <= 768))
     NotificationAction notificationAction -> withSubState $ handleNotificationAction notificationAction
-    TemplateAction templateAction -> withSubState $ handleTemplateAction templateAction
+    TemplatesOutputAction output ->
+      case output of
+        Templates.TemplatesStateChanged nextState ->
+          modify_ (_templates .~ nextState)
+        Templates.TemplatesUse template -> do
+          now <- liftEffect nowDateTime
+          let startStr = formatDateTimeLocal now
+          let endStr = fromMaybe startStr (shiftMinutes template.durationMinutes startStr)
+          modify_ (_calendarDraft .~ applyTemplateToDraft template startStr endStr)
     CreateRecurrenceCmd (Recurrence.RecurrenceApplied draft) ->
       modify_
         ( (_calendar <<< _draftRecurrenceS .~ draft)
@@ -768,7 +712,6 @@ render { calendar, sync, drag, notifications, templates, imports, exports, view 
     SyncState { offlineMode, syncConflict, updateError } = sync
     DragState { draggingId, dragHoverIndex } = drag
     NotificationState { notificationDefaults, notificationOverrides, notificationPanelOpen, notificationEditor } = notifications
-    TemplateState { templates: templateItems, templateDraft, editingTemplateId } = templates
     ImportState { csvInput, csvImportResult, icsInput, icsImportResult } = imports
     ExportState { exportFormat, exportTypeFilter, exportStatusFilter, exportCategoryFilter, exportStartDate, exportEndDate, exportOutput } = exports
     ViewState { viewMode, focusDate, validationPanel, isMobile } = view
@@ -812,7 +755,6 @@ render { calendar, sync, drag, notifications, templates, imports, exports, view 
                 ]
             , div [ class_ "calendar-side" ]
                 [ NotificationAction <$> renderNotificationsPanel notificationPanelOpen notificationDefaults notificationOverrides notificationEditor unplannedIntentions
-                , renderAccordion "Templates de tâches" "calendar-accordion templates" $ renderTemplatesPanelPage templateItems templateDraft editingTemplateId
                 , renderAccordion "Import CSV" "calendar-accordion import-csv" $ renderCsvImportPanelPage csvInput csvImportResult
                 , renderAccordion "Import ICS" "calendar-accordion import-ics" $ renderIcsImportPanelPage icsInput icsImportResult
                 , renderAccordion "Export" "calendar-accordion export" $ renderExportPanelPage exportFormat exportTypeFilter exportStatusFilter exportCategoryFilter exportStartDate exportEndDate exportOutput
@@ -821,7 +763,7 @@ render { calendar, sync, drag, notifications, templates, imports, exports, view 
         ]
           <> [ renderAgendaModals agendaModalsInput ]
           <>
-             [ renderCreateFab ]
+            [ renderCreateFab ]
       )
 
 renderFiltersContent :: forall w. Boolean -> Array (Array String) -> Boolean -> SortMode -> HTML w Action
@@ -851,11 +793,7 @@ type AgendaModalsInput =
       , editor :: Maybe NotificationEditor
       , intentions :: Array CalendarItem
       }
-  , templates ::
-      { items :: Array TaskTemplate
-      , draft :: TemplateDraft
-      , editingId :: Maybe String
-      }
+  , templates :: Templates.TemplateState
   , csvImport ::
       { input :: String
       , result :: Maybe CsvImportResult
@@ -880,27 +818,29 @@ type AgendaModalsInput =
 
 renderAgendaModals :: AgendaModalsInput -> H.ComponentHTML Action Slots Aff
 renderAgendaModals { activeModal, filters, notifications, templates, csvImport, icsImport, export, draft, validationError, editPanel } =
-  let renderModal title content = Modal.renderModal title content (ViewAction ViewCloseModal) (ViewAction ViewCloseModal)
-    in  maybe (div [] [])
-              case _ of
-                ModalFilters    -> renderModal "Filtres" [ renderFiltersContent filters.showConflictsOnly filters.conflictGroups filters.offlineMode filters.sortMode ]
-                ModalTools      -> renderModal "Outils" [ map toAction renderToolsContent ]
-                ModalCreateItem -> Modal.renderModal "Créer un item" [ renderCreateContent draft validationError ]
-                                                     (ViewAction ViewCloseCreate)
-                                                     (SyncAction SyncSubmitIntention)
-                ModalNotifications -> renderModal "Rappels" [ NotificationAction <$> renderNotificationsContent notifications.defaults notifications.overrides notifications.editor notifications.intentions ]
-                ModalTemplates -> renderModal "Templates de tâches" [ renderTemplatesPanelPage templates.items templates.draft templates.editingId ]
-                ModalImportCsv -> renderModal "Import CSV" [ renderCsvImportPanelPage csvImport.input csvImport.result ]
-                ModalImportIcs -> renderModal "Import ICS" [ renderIcsImportPanelPage icsImport.input icsImport.result ]
-                ModalExport -> renderModal "Export" [ renderExportPanelPage export.format export.typeFilter export.statusFilter export.categoryFilter export.startDate export.endDate export.output ]
-                ModalEditItem -> case editPanel of
-                             Nothing -> text ""
-                             Just panel ->
-                               Modal.renderModal "Modifier l'item"
-                                 [ renderEditContent panel ]
-                                 (ViewAction ViewEditCancel)
-                                 (ViewAction ViewEditSave)
-              activeModal
+  let
+    renderModal title content = Modal.renderModal title content (ViewAction ViewCloseModal) (ViewAction ViewCloseModal)
+  in
+    maybe (div [] [])
+      case _ of
+        ModalFilters -> renderModal "Filtres" [ renderFiltersContent filters.showConflictsOnly filters.conflictGroups filters.offlineMode filters.sortMode ]
+        ModalTools -> renderModal "Outils" [ map toAction renderToolsContent ]
+        ModalCreateItem -> Modal.renderModal "Créer un item" [ renderCreateContent draft validationError ]
+          (ViewAction ViewCloseCreate)
+          (SyncAction SyncSubmitIntention)
+        ModalNotifications -> renderModal "Rappels" [ NotificationAction <$> renderNotificationsContent notifications.defaults notifications.overrides notifications.editor notifications.intentions ]
+        ModalTemplates -> renderModal "Templates de tâches" [ renderTemplatesPanelPage templates ]
+        ModalImportCsv -> renderModal "Import CSV" [ renderCsvImportPanelPage csvImport.input csvImport.result ]
+        ModalImportIcs -> renderModal "Import ICS" [ renderIcsImportPanelPage icsImport.input icsImport.result ]
+        ModalExport -> renderModal "Export" [ renderExportPanelPage export.format export.typeFilter export.statusFilter export.categoryFilter export.startDate export.endDate export.output ]
+        ModalEditItem -> case editPanel of
+          Nothing -> text ""
+          Just panel ->
+            Modal.renderModal "Modifier l'item"
+              [ renderEditContent panel ]
+              (ViewAction ViewEditCancel)
+              (ViewAction ViewEditSave)
+      activeModal
 
 buildAgendaModalsInput :: State -> AgendaModalsInput
 buildAgendaModalsInput { calendar, sync, notifications, templates, imports, exports, view } =
@@ -908,7 +848,6 @@ buildAgendaModalsInput { calendar, sync, notifications, templates, imports, expo
     { items, draft, validationError, showConflictsOnly, sortMode } = calendar
     SyncState { offlineMode } = sync
     NotificationState { notificationDefaults, notificationOverrides, notificationEditor } = notifications
-    TemplateState { templates: templateItems, templateDraft, editingTemplateId } = templates
     ImportState { csvInput, csvImportResult, icsInput, icsImportResult } = imports
     ExportState { exportFormat, exportTypeFilter, exportStatusFilter, exportCategoryFilter, exportStartDate, exportEndDate, exportOutput } = exports
     ViewState { activeModal, editPanel } = view
@@ -927,11 +866,7 @@ buildAgendaModalsInput { calendar, sync, notifications, templates, imports, expo
         , editor: notificationEditor
         , intentions: filter (isUnplannedIntention items) items
         }
-    , templates:
-        { items: templateItems
-        , draft: templateDraft
-        , editingId: editingTemplateId
-        }
+    , templates
     , csvImport:
         { input: csvInput
         , result: csvImportResult
@@ -1020,7 +955,7 @@ renderDayCalendar focusDate conflictIds items isMobile draggingId dragHoverIndex
 
 renderHourLabel :: forall w action. Int -> HTML w action
 renderHourLabel h =
-  div [ class_ "calendar-calendar-hour" ] [ text $ pad2 h <> ":00" ]
+  div [ class_ "calendar-calendar-hour" ] [ text $ DateTime.formatLocalTimeParts h 0 ]
 
 renderHourLabelEnd :: forall w action. HTML w action
 renderHourLabelEnd =
@@ -2359,7 +2294,7 @@ handleDragAction ctx = case _ of
           totalMinutes = indexToMinutes adjustedIndex
           hour = Int.quot totalMinutes 60
           minute = Int.rem totalMinutes 60
-          newStart = combineDateWithTime baseDateTime (pad2 hour <> ":" <> pad2 minute)
+          newStart = combineDateWithTime baseDateTime (DateTime.formatLocalTimeParts hour minute)
           updated =
             newStart >>= \start ->
               find
@@ -2459,7 +2394,7 @@ handleDragAction ctx = case _ of
               totalMinutes = indexToMinutes adjustedIndex
               hour = Int.quot totalMinutes 60
               minute = Int.rem totalMinutes 60
-              newStart = combineDateWithTime baseDateTime (pad2 hour <> ":" <> pad2 minute)
+              newStart = combineDateWithTime baseDateTime (DateTime.formatLocalTimeParts hour minute)
               updated =
                 newStart >>= \start ->
                   find
@@ -2585,7 +2520,7 @@ indexToTimeLabel idx =
     hour = Int.quot totalMinutes 60
     minute = Int.rem totalMinutes 60
   in
-    pad2 hour <> ":" <> pad2 minute
+    DateTime.formatLocalTimeParts hour minute
 
 -- Internal helpers
 
@@ -2976,9 +2911,10 @@ renderExportPanel
 renderExportPanel format typeFilter statusFilter categoryFilter startDate endDate output =
   section [ class_ "calendar-export" ]
     [ renderPanelHeader
-        "calendar-export"
-        "Export"
-        "Filtres: type, catégorie, statut, période."
+        { baseClass: "calendar-export"
+        , title: "Export"
+        , subtitle: "Filtres: type, catégorie, statut, période."
+        }
         []
     , div [ class_ "calendar-export-controls" ]
         [ div [ class_ "calendar-export-control" ]
@@ -3205,54 +3141,16 @@ exportItemStatus Annule = "ANNULE"
 
 -- BEGIN src/Calendar/Helpers.purs
 isDateTimeLocal :: String -> Boolean
-isDateTimeLocal raw =
-  case unformatDateTime "YYYY-MM-DDTHH:mm" raw of
-    Right _ -> true
-    Left _ -> false
+isDateTimeLocal = DateTime.isLocalDateTime
 
 parseDateTimeLocal :: String -> Maybe DateTime
-parseDateTimeLocal raw = do
-  yearNum <- parseInt (slice 0 4)
-  monthNum <- parseInt (slice 5 7)
-  dayNum <- parseInt (slice 8 10)
-  hourNum <- parseInt (slice 11 13)
-  minuteNum <- parseInt (slice 14 16)
-  month <- toEnum monthNum
-  day <- toEnum dayNum
-  hour <- toEnum hourNum
-  minute <- toEnum minuteNum
-  yearEnum <- toEnum yearNum
-  date <- exactDate yearEnum month day
-  second <- toEnum 0
-  millisecond <- toEnum 0
-  pure $ DateTime date (Time hour minute second millisecond)
-  where
-  slice start end = String.slice start end raw
-  parseInt str = Int.fromString str
+parseDateTimeLocal = DateTime.parseLocalDateTime
 
 parseDateLocal :: String -> Maybe Date
-parseDateLocal raw = do
-  yearNum <- parseInt (String.slice 0 4 raw)
-  monthNum <- parseInt (String.slice 5 7 raw)
-  dayNum <- parseInt (String.slice 8 10 raw)
-  month' <- toEnum monthNum
-  day' <- toEnum dayNum
-  year' <- toEnum yearNum
-  exactDate year' month' day'
-  where
-  parseInt str = Int.fromString str
+parseDateLocal = DateTime.parseLocalDate
 
 parseTimeLocal :: String -> Maybe Time
-parseTimeLocal raw = do
-  hourNum <- parseInt (String.slice 0 2 raw)
-  minuteNum <- parseInt (String.slice 3 5 raw)
-  hour <- toEnum hourNum
-  minute <- toEnum minuteNum
-  second <- toEnum 0
-  millisecond <- toEnum 0
-  pure $ Time hour minute second millisecond
-  where
-  parseInt str = Int.fromString str
+parseTimeLocal = DateTime.parseLocalTime
 
 parsePositiveInt :: String -> Maybe Int
 parsePositiveInt raw =
@@ -3260,17 +3158,7 @@ parsePositiveInt raw =
     if val > 0 then Just val else Nothing
 
 isTimeLocal :: String -> Boolean
-isTimeLocal raw =
-  String.length raw == 5
-    && matchesAt 2 ':'
-    && allDigitsAt [ 0, 1, 3, 4 ]
-  where
-  matchesAt idx expected =
-    case String.charAt idx raw of
-      Just ch -> ch == expected
-      Nothing -> false
-  allDigitsAt = all (\idx -> maybe false isDigitChar (String.charAt idx raw))
-  isDigitChar ch = ch >= '0' && ch <= '9'
+isTimeLocal = DateTime.isLocalTime
 
 combineDateWithTime :: String -> String -> Maybe String
 combineDateWithTime dateTimeRaw timeRaw = do
@@ -3308,35 +3196,13 @@ suggestDurationMinutes start = do
 
 formatDate :: DateTime -> String
 formatDate dt =
-  formatDateOnly (date dt)
+  DateTime.formatLocalDate (date dt)
 
 formatDateOnly :: Date -> String
-formatDateOnly dt =
-  let
-    y = Int.toStringAs Int.decimal (fromEnum (year dt))
-    m = pad2 (fromEnum (month dt))
-    d = pad2 (fromEnum (day dt))
-  in
-    y <> "-" <> m <> "-" <> d
+formatDateOnly = DateTime.formatLocalDate
 
 formatDateTimeLocal :: DateTime -> String
-formatDateTimeLocal dt =
-  formatDate dt <> "T" <> formatTime (time dt)
-
-formatTime :: Time -> String
-formatTime t =
-  let
-    h = pad2 (fromEnum (hour t))
-    m = pad2 (fromEnum (minute t))
-  in
-    h <> ":" <> m
-
-pad2 :: Int -> String
-pad2 n =
-  let
-    raw = Int.toStringAs Int.decimal n
-  in
-    if String.length raw == 1 then "0" <> raw else raw
+formatDateTimeLocal = DateTime.formatLocalDateTime
 
 timeLabel :: String -> String
 timeLabel raw =
@@ -3598,9 +3464,10 @@ renderCsvImportPanel :: forall w. String -> Maybe CsvImportResult -> HTML w Impo
 renderCsvImportPanel csvInput result =
   section [ class_ "calendar-import" ]
     [ renderPanelHeader
-        "calendar-import"
-        "Import CSV"
-        "Colonnes minimales: type, titre, fenetre_debut, fenetre_fin."
+        { baseClass: "calendar-import"
+        , title: "Import CSV"
+        , subtitle: "Colonnes minimales: type, titre, fenetre_debut, fenetre_fin."
+        }
         []
     , textarea
         [ class_ "form-control calendar-import-textarea"
@@ -3642,9 +3509,10 @@ renderIcsImportPanel :: forall w. String -> Maybe IcsImportResult -> HTML w Impo
 renderIcsImportPanel icsInput result =
   section [ class_ "calendar-import" ]
     [ renderPanelHeader
-        "calendar-import"
-        "Import ICS"
-        "Support basique: SUMMARY, DTSTART, DTEND."
+        { baseClass: "calendar-import"
+        , title: "Import ICS"
+        , subtitle: "Support basique: SUMMARY, DTSTART, DTEND."
+        }
         []
     , textarea
         [ class_ "form-control calendar-import-textarea"
@@ -3961,42 +3829,6 @@ derive instance itemStatusEq :: Eq ItemStatus
 instance itemStatusShow :: Show ItemStatus where
   show = genericShow
 
-data StepDependency
-  = StartAfterEnd { stepId :: String, offsetMinutes :: Int }
-  | StartBeforeStart { stepId :: String, offsetMinutes :: Int }
-
-derive instance stepDependencyGeneric :: Generic StepDependency _
-derive instance stepDependencyEq :: Eq StepDependency
-instance stepDependencyShow :: Show StepDependency where
-  show = genericShow
-
-type RoutineTemplate =
-  { id :: String
-  , name :: String
-  , steps :: Array RoutineTemplateStep
-  }
-
-type RoutineTemplateStep =
-  { id :: String
-  , title :: String
-  , windowStart :: String
-  , windowEnd :: String
-  , dependsOn :: Maybe StepDependency
-  }
-
-type RoutineInstance =
-  { templateId :: String
-  , steps :: Array RoutineInstanceStep
-  }
-
-type RoutineInstanceStep =
-  { id :: String
-  , title :: String
-  , windowStart :: String
-  , windowEnd :: String
-  , sourceStepId :: String
-  }
-
 type CalendarItemContent =
   { itemType :: ItemType
   , title :: String
@@ -4030,26 +3862,6 @@ defaultNotificationDefaults :: NotificationDefaults
 defaultNotificationDefaults =
   { startDayTime: "06:00"
   , beforeEndHours: 24
-  }
-
-type TaskTemplate =
-  { id :: String
-  , title :: String
-  , durationMinutes :: Int
-  , category :: String
-  }
-
-type TemplateDraft =
-  { title :: String
-  , durationMinutes :: String
-  , category :: String
-  }
-
-emptyTemplateDraft :: TemplateDraft
-emptyTemplateDraft =
-  { title: ""
-  , durationMinutes: ""
-  , category: ""
   }
 
 type CsvImportError =
@@ -4355,9 +4167,10 @@ renderNotificationsPanel isOpen defaults overrides editor intentions =
   else
     section [ class_ "calendar-notifications" ]
       [ renderPanelHeader
-          "calendar-notifications"
-          "Rappels des intentions non planifiées"
-          "Les rappels par défaut s'appliquent aux intentions non planifiées."
+          { baseClass: "calendar-notifications"
+          , title: "Rappels des intentions non planifiées"
+          , subtitle: "Les rappels par défaut s'appliquent aux intentions non planifiées."
+          }
           [ button
               [ class_ $ "btn btn-sm calendar-notifications-toggle" <> if isOpen then " btn-outline-primary" else " btn-outline-secondary"
               , onClick (const NotificationTogglePanel)
@@ -4573,7 +4386,6 @@ upsertPendingItem item pending =
 
 -- END src/Calendar/Offline.purs
 
-
 -- BEGIN src/Calendar/purs
 newtype SyncState = SyncState
   { offlineMode :: Boolean
@@ -4740,295 +4552,3 @@ syncPending = do
     tell [ SyncRunPending (syncState ^. _syncPendingSync) ]
 
 -- END src/Calendar/purs
-
--- BEGIN src/Calendar/Templates.purs
-newtype TemplateState = TemplateState
-  { templates :: Array TaskTemplate
-  , templateDraft :: TemplateDraft
-  , editingTemplateId :: Maybe String
-  }
-
-templateInitialState :: TemplateState
-templateInitialState =
-  TemplateState
-    { templates: []
-    , templateDraft: emptyTemplateDraft
-    , editingTemplateId: Nothing
-    }
-
-_templatesS :: Lens' TemplateState (Array TaskTemplate)
-_templatesS =
-  lens
-    (\(TemplateState state) -> state.templates)
-    (\(TemplateState state) templates -> TemplateState (state { templates = templates }))
-
-_templateDraftS :: Lens' TemplateState TemplateDraft
-_templateDraftS =
-  lens
-    (\(TemplateState state) -> state.templateDraft)
-    (\(TemplateState state) templateDraft -> TemplateState (state { templateDraft = templateDraft }))
-
-_editingTemplateIdS :: Lens' TemplateState (Maybe String)
-_editingTemplateIdS =
-  lens
-    (\(TemplateState state) -> state.editingTemplateId)
-    (\(TemplateState state) editingTemplateId -> TemplateState (state { editingTemplateId = editingTemplateId }))
-
-_templateDraftTitleS :: Lens' TemplateDraft String
-_templateDraftTitleS = prop (Proxy :: _ "title")
-
-_templateDraftDurationS :: Lens' TemplateDraft String
-_templateDraftDurationS = prop (Proxy :: _ "durationMinutes")
-
-_templateDraftCategoryS :: Lens' TemplateDraft String
-_templateDraftCategoryS = prop (Proxy :: _ "category")
-
-data TemplateAction
-  = TemplateTitleChangedAction String
-  | TemplateDurationChangedAction String
-  | TemplateCategoryChangedAction String
-  | TemplateSubmit
-  | TemplateEdit String
-  | TemplateCancelEdit
-  | TemplateDelete String
-  | TemplateUse String
-
-data TemplateCommand = TemplateSetDraft IntentionDraft
-
-handleTemplateAction :: TemplateAction -> StateT TemplateState (WriterT (Array TemplateCommand) Aff) Unit
-handleTemplateAction = case _ of
-  TemplateTitleChangedAction title ->
-    modify_ (_templateDraftS <<< _templateDraftTitleS .~ title)
-  TemplateDurationChangedAction duration ->
-    modify_ (_templateDraftS <<< _templateDraftDurationS .~ duration)
-  TemplateCategoryChangedAction category ->
-    modify_ (_templateDraftS <<< _templateDraftCategoryS .~ category)
-  TemplateSubmit -> do
-    st <- get
-    let
-      draft = st ^. _templateDraftS
-      duration = parsePositiveInt draft.durationMinutes
-    case duration of
-      Nothing -> pure unit
-      Just minutes -> do
-        let
-          template =
-            { id: fromMaybe "" (st ^. _editingTemplateIdS)
-            , title: StringCommon.trim draft.title
-            , durationMinutes: minutes
-            , category: draft.category
-            }
-        if template.title == "" then pure unit
-        else do
-          let
-            nextTemplates =
-              case st ^. _editingTemplateIdS of
-                Nothing -> addTemplate template (st ^. _templatesS)
-                Just _ -> updateTemplate template (st ^. _templatesS)
-          modify_
-            ( (_templatesS .~ nextTemplates)
-                <<< (_templateDraftS .~ emptyTemplateDraft)
-                <<< (_editingTemplateIdS .~ Nothing)
-            )
-  TemplateEdit templateId -> do
-    st <- get
-    case find (\tpl -> tpl.id == templateId) (st ^. _templatesS) of
-      Nothing -> pure unit
-      Just template ->
-        modify_
-          ( (_templateDraftS <<< _templateDraftTitleS .~ template.title)
-              <<< (_templateDraftS <<< _templateDraftDurationS .~ show template.durationMinutes)
-              <<< (_templateDraftS <<< _templateDraftCategoryS .~ template.category)
-              <<< (_editingTemplateIdS .~ Just template.id)
-          )
-  TemplateCancelEdit ->
-    modify_ ((_templateDraftS .~ emptyTemplateDraft) <<< (_editingTemplateIdS .~ Nothing))
-  TemplateDelete templateId ->
-    modify_
-      ( (_templatesS %~ removeTemplate templateId)
-          <<< (_templateDraftS .~ emptyTemplateDraft)
-          <<< (_editingTemplateIdS .~ Nothing)
-      )
-  TemplateUse templateId -> do
-    st <- get
-    case find (\tpl -> tpl.id == templateId) (st ^. _templatesS) of
-      Nothing -> pure unit
-      Just template -> do
-        now <- liftEffect nowDateTime
-        let startStr = formatDateTimeLocal now
-        let endStr = fromMaybe startStr (shiftMinutes template.durationMinutes startStr)
-        tell [ TemplateSetDraft (applyTemplateToDraft template startStr endStr) ]
-
-renderTemplatesPanel
-  :: forall w
-   . Array TaskTemplate
-  -> TemplateDraft
-  -> Maybe String
-  -> HTML w TemplateAction
-renderTemplatesPanel templates draft editingId =
-  section [ class_ "calendar-templates" ]
-    [ renderPanelHeader
-        "calendar-templates"
-        "Templates de tâches"
-        "Créez des templates réutilisables pour accélérer la saisie."
-        []
-    , div [ class_ "calendar-templates-form" ]
-        [ input
-            [ class_ "form-control calendar-input"
-            , placeholder "Titre du template"
-            , value draft.title
-            , onValueChange TemplateTitleChangedAction
-            ]
-        , div [ class_ "calendar-templates-row" ]
-            [ input
-                [ class_ "form-control calendar-input"
-                , type_ InputNumber
-                , placeholder "Durée (minutes)"
-                , value draft.durationMinutes
-                , onValueChange TemplateDurationChangedAction
-                ]
-            , input
-                [ class_ "form-control calendar-input"
-                , placeholder "Catégorie (optionnelle)"
-                , value draft.category
-                , onValueChange TemplateCategoryChangedAction
-                ]
-            ]
-        , div [ class_ "calendar-templates-actions" ]
-            ( [ button
-                  [ class_ "btn btn-sm btn-primary"
-                  , onClick (const TemplateSubmit)
-                  ]
-                  [ text $ if editingId == Nothing then "Ajouter" else "Mettre à jour" ]
-              ] <>
-                if editingId == Nothing then []
-                else
-                  [ button
-                      [ class_ "btn btn-sm btn-outline-secondary"
-                      , onClick (const TemplateCancelEdit)
-                      ]
-                      [ text "Annuler" ]
-                  ]
-            )
-        ]
-    , renderTemplatesList templates
-    ]
-
-renderTemplatesList :: forall w. Array TaskTemplate -> HTML w TemplateAction
-renderTemplatesList templates =
-  if null templates then
-    div [ class_ "calendar-templates-empty" ] [ text "Aucun template pour l'instant." ]
-  else
-    div [ class_ "calendar-templates-list" ] (map renderTemplateCard templates)
-
-renderTemplateCard :: forall w. TaskTemplate -> HTML w TemplateAction
-renderTemplateCard template =
-  div [ class_ "calendar-template-card" ]
-    [ div [ class_ "calendar-template-main" ]
-        [ div [ class_ "calendar-template-title" ] [ text template.title ]
-        , div [ class_ "calendar-template-summary" ] [ text (templateSummary template) ]
-        ]
-    , div [ class_ "calendar-template-actions" ]
-        [ button [ class_ "btn btn-sm btn-outline-primary", onClick (const (TemplateUse template.id)) ] [ text "Utiliser" ]
-        , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const (TemplateEdit template.id)) ] [ text "Editer" ]
-        , button [ class_ "btn btn-sm btn-outline-danger", onClick (const (TemplateDelete template.id)) ] [ text "Supprimer" ]
-        ]
-    ]
-
-applyTemplateToDraft :: TaskTemplate -> String -> String -> IntentionDraft
-applyTemplateToDraft template windowStart windowEnd =
-  { itemType: Intention
-  , title: template.title
-  , windowStart
-  , windowEnd
-  , category: template.category
-  , status: Todo
-  , actualDurationMinutes: ""
-  , recurrence: defaultRecurrenceDraft
-  }
-
-addTemplate :: TaskTemplate -> Array TaskTemplate -> Array TaskTemplate
-addTemplate template templates =
-  let
-    nextId = if template.id == "" then nextTemplateId templates else template.id
-  in
-    templates <> [ template { id = nextId } ]
-
-updateTemplate :: TaskTemplate -> Array TaskTemplate -> Array TaskTemplate
-updateTemplate template templates =
-  map (\existing -> if existing.id == template.id then template else existing) templates
-
-removeTemplate :: String -> Array TaskTemplate -> Array TaskTemplate
-removeTemplate templateId templates =
-  filter (\template -> template.id /= templateId) templates
-
-templateSummary :: TaskTemplate -> String
-templateSummary template =
-  let
-    duration = show template.durationMinutes <> " min"
-    category = StringCommon.trim template.category
-  in
-    if category == "" then duration else duration <> " • " <> category
-
-nextTemplateId :: Array TaskTemplate -> String
-nextTemplateId templates =
-  let
-    existing = map _.id templates
-    findId n =
-      let
-        candidate = "tpl-" <> show n
-      in
-        if elem candidate existing then findId (n + 1) else candidate
-  in
-    findId 1
-
-instantiateRoutine :: RoutineTemplate -> RoutineInstance
-instantiateRoutine template =
-  let
-    steps = map toInstance template.steps
-    withDeps = applyDependencies template.steps steps
-  in
-    { templateId: template.id
-    , steps: withDeps
-    }
-  where
-  toInstance step =
-    { id: step.id
-    , title: step.title
-    , windowStart: step.windowStart
-    , windowEnd: step.windowEnd
-    , sourceStepId: step.id
-    }
-
-applyDependencies :: Array RoutineTemplateStep -> Array RoutineInstanceStep -> Array RoutineInstanceStep
-applyDependencies templateSteps instanceSteps =
-  map (applyDependency templateSteps instanceSteps) instanceSteps
-
-applyDependency :: Array RoutineTemplateStep -> Array RoutineInstanceStep -> RoutineInstanceStep -> RoutineInstanceStep
-applyDependency templateSteps instanceSteps step =
-  case find (\templateStep -> templateStep.id == step.sourceStepId) templateSteps of
-    Nothing -> step
-    Just templateStep ->
-      case templateStep.dependsOn of
-        Nothing -> step
-        Just dependency ->
-          case dependency of
-            StartAfterEnd { stepId, offsetMinutes } ->
-              updateFromBase stepId offsetMinutes _.windowEnd
-            StartBeforeStart { stepId, offsetMinutes } ->
-              updateFromBase stepId (-offsetMinutes) _.windowStart
-  where
-  updateFromBase baseId offset selectBase =
-    case find (\candidate -> candidate.id == baseId) instanceSteps of
-      Nothing -> step
-      Just base ->
-        let
-          duration = durationMinutesBetween step.windowStart step.windowEnd
-          newStart = shiftMinutes offset (selectBase base)
-          newEnd = newStart >>= \start -> duration >>= \mins -> shiftMinutes mins start
-        in
-          case { start: newStart, end: newEnd } of
-            { start: Just start, end: Just end } -> step { windowStart = start, windowEnd = end }
-            _ -> step
-
--- END src/Calendar/Templates.purs

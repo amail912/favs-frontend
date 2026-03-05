@@ -17,7 +17,7 @@ import Data.Argonaut.Decode (class DecodeJson, decodeJson, (.:))
 import Data.Argonaut.Decode.Error (JsonDecodeError(..))
 import Data.Argonaut.Encode (class EncodeJson, (:=), (~>))
 import Data.Array (delete, elem, filter)
-import Data.Date (Date, canonicalDate, exactDate, month, year, day)
+import Data.Date (canonicalDate, month, year, day)
 import Data.DateTime (DateTime(..), adjust, date)
 import Data.Either (Either(..))
 import Data.Enum (fromEnum, toEnum)
@@ -25,18 +25,16 @@ import Data.Generic.Rep (class Generic)
 import Data.Int as Int
 import Data.Maybe (Maybe(..))
 import Data.Show.Generic (genericShow)
-import Data.String.CodeUnits as String
 import Data.String.Common as StringCommon
-import Data.Time (Time(..))
 import Data.Time.Duration (Days(..))
 import Effect.Aff (Aff)
+import Helpers.DateTime as DateTime
 import Halogen (Component, ComponentHTML, HalogenM, defaultEval, get, mkComponent, mkEval, modify_, raise) as H
 import Halogen.HTML (button, div, input, option, select, text, ul, li)
 import Halogen.HTML.Core (AttrName(..))
 import Halogen.HTML.Events (onClick, onValueChange)
 import Halogen.HTML.Properties (attr, placeholder, type_, value)
 import Ui.Utils (class_)
-
 
 data RecurrenceRule
   = Daily
@@ -78,7 +76,6 @@ instance recurrenceRuleDecodeJson :: DecodeJson RecurrenceRule where
       "YEARLY" -> pure Yearly
       "EVERY_X_DAYS" -> EveryXDays <$> obj .: "interval_days"
       _ -> Left $ UnexpectedValue json
-
 
 type RecurrenceDraft =
   { ruleType :: String
@@ -139,13 +136,13 @@ draftToRecurrence draft =
   where
   filterValidExceptions = filter (\raw -> isValidDate raw)
   invalidExceptions = filter (\raw -> not (isValidDate raw))
-  isValidDate raw = case parseDateLocal raw of
+  isValidDate raw = case DateTime.parseLocalDate raw of
     Just _ -> true
     Nothing -> false
 
 generateOccurrencesForMonth :: RecurrenceRule -> Array String -> String -> Array String
 generateOccurrencesForMonth rule exceptions start =
-  case parseDateTimeLocal start of
+  case DateTime.parseLocalDateTime start of
     Nothing -> []
     Just startDt ->
       let
@@ -162,7 +159,7 @@ generateOccurrencesForMonth rule exceptions start =
         occurrences = collectOccurrences startDt []
       in
         occurrences
-          # map formatDate
+          # map (DateTime.formatLocalDate <<< date)
           # filter (\dateStr -> not (elem dateStr exceptions))
 
 nextOccurrence :: RecurrenceRule -> DateTime -> Maybe DateTime
@@ -173,38 +170,6 @@ nextOccurrence rule dt =
     EveryXDays interval -> addDays interval dt
     Monthly -> Just (addMonths 1 dt)
     Yearly -> Just (addMonths 12 dt)
-
-parseDateTimeLocal :: String -> Maybe DateTime
-parseDateTimeLocal raw = do
-  yearNum <- parseInt (slice 0 4)
-  monthNum <- parseInt (slice 5 7)
-  dayNum <- parseInt (slice 8 10)
-  hourNum <- parseInt (slice 11 13)
-  minuteNum <- parseInt (slice 14 16)
-  month' <- toEnum monthNum
-  day' <- toEnum dayNum
-  hour' <- toEnum hourNum
-  minute' <- toEnum minuteNum
-  year' <- toEnum yearNum
-  date' <- exactDate year' month' day'
-  second <- toEnum 0
-  millisecond <- toEnum 0
-  pure $ DateTime date' (Time hour' minute' second millisecond)
-  where
-  slice start end = String.slice start end raw
-  parseInt str = Int.fromString str
-
-parseDateLocal :: String -> Maybe Date
-parseDateLocal raw = do
-  yearNum <- parseInt (String.slice 0 4 raw)
-  monthNum <- parseInt (String.slice 5 7 raw)
-  dayNum <- parseInt (String.slice 8 10 raw)
-  month' <- toEnum monthNum
-  day' <- toEnum dayNum
-  year' <- toEnum yearNum
-  exactDate year' month' day'
-  where
-  parseInt str = Int.fromString str
 
 parsePositiveInt :: String -> Maybe Int
 parsePositiveInt raw =
@@ -229,23 +194,6 @@ addMonths n (DateTime d t) =
         _ -> d
   in
     DateTime newDate t
-
-formatDate :: DateTime -> String
-formatDate dt =
-  let
-    y = Int.toStringAs Int.decimal (fromEnum (year (date dt)))
-    m = pad2 (fromEnum (month (date dt)))
-    d = pad2 (fromEnum (day (date dt)))
-  in
-    y <> "-" <> m <> "-" <> d
-
-pad2 :: Int -> String
-pad2 n =
-  let
-    raw = Int.toStringAs Int.decimal n
-  in
-    if String.length raw == 1 then "0" <> raw else raw
-
 
 newtype RecurrenceCommand = RecurrenceApplied RecurrenceDraft
 type State = RecurrenceDraft

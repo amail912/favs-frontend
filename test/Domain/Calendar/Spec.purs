@@ -7,9 +7,7 @@ import Pages.Calendar
   , IntentionDraft
   , ItemStatus(..)
   , ItemType(..)
-  , RoutineTemplate
   , SortMode(..)
-  , StepDependency(..)
   , ValidationError(..)
   , defaultNotificationDefaults
   , detectConflictGroups
@@ -33,6 +31,10 @@ import Pages.Calendar
   , reminderTimesForIntention
   , applyOfflineMutation
   , applyTemplateToDraft
+  )
+import Calendar.Templates
+  ( RoutineTemplate
+  , StepDependency(..)
   , instantiateRoutine
   , templateSummary
   , addTemplate
