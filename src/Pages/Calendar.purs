@@ -22,8 +22,6 @@ module Pages.Calendar
   , durationMinutesBetween
   , sortItems
   , validateIntention
-  , parseCsvImport
-  , parseIcsImport
   , reminderTimesForIntention
   , applyOfflineMutation
   , applyTemplateToDraft
@@ -34,10 +32,11 @@ module Pages.Calendar
 import Prelude hiding (div)
 import Affjax.Web (Response)
 import Api.Calendar (ValidateItemPayload(..), createItemResponse, getItemsResponse, updateItemResponse, validateItemResponse)
-import Calendar.Recurrence (RecurrenceDraft, RecurrenceRule(..), defaultRecurrenceDraft, draftFromRecurrence, draftToRecurrence)
+import Calendar.Recurrence (RecurrenceDraft, RecurrenceRule, defaultRecurrenceDraft, draftFromRecurrence, draftToRecurrence)
 import Calendar.Recurrence as Recurrence
-import Calendar.Export (ExportInput(..), ExportItem(..))
-import Calendar.Export as Export
+import Calendar.ExImport.Export (ExportInput(..))
+import Calendar.ExImport.Export as Export
+import Calendar.ExImport.Import as Import
 import Calendar.Templates as Templates
 import Control.Monad.Except (ExceptT(..), withExceptT)
 import Control.Monad.State.Trans (StateT, runStateT, get, modify_)
@@ -46,7 +45,7 @@ import Control.Monad.Writer.Trans (WriterT, runWriterT)
 import Data.Argonaut.Core (Json, jsonEmptyObject)
 import Data.Argonaut.Decode (class DecodeJson, decodeJson, (.:), (.:?))
 import Data.Argonaut.Decode.Error (JsonDecodeError(..))
-import Data.Array (filter, foldM, null, length, mapWithIndex, findIndex, foldl, mapMaybe, sortBy, uncons, updateAt, elem, find, findMap, nub, index, last, catMaybes, any)
+import Data.Array (any, catMaybes, elem, filter, find, findIndex, foldM, foldl, index, length, mapMaybe, mapWithIndex, nub, null, sortBy, uncons, updateAt)
 import Data.Bifunctor (lmap)
 import Data.Either (Either(..), either)
 import Data.Foldable (traverse_, fold)
@@ -64,7 +63,7 @@ import Effect.Now (nowDateTime)
 import Effect.Now as Now
 import Halogen (Component, ComponentHTML, HalogenM, Slot, defaultEval, getRef, mkComponent, mkEval) as H
 import Halogen (subscribe)
-import Halogen.HTML (HTML, button, details, div, h2, i, section, slot, summary, text, li, span, ul, option, select, input, textarea)
+import Halogen.HTML (HTML, button, div, h2, i, input, li, option, section, select, slot, span, text, ul)
 import Halogen.HTML.Core (AttrName(..))
 import Halogen.HTML.Events (onClick, onDragOver, onDrop, onMouseDown, onTouchCancel, onTouchEnd, onTouchMove, onValueChange, onKeyDown, onDragEnd, onDragStart, onTouchStart)
 import Halogen.HTML.Properties (attr, style, IProp, value, placeholder, type_, draggable)
@@ -106,7 +105,6 @@ import Data.Date (Date, canonicalDate, month, year)
 import Data.DateTime (DateTime(..), adjust, date, diff, time)
 import Data.Time (Time, hour, minute)
 import Data.String.Common as StringCommon
-import Data.String.Pattern (Pattern(..))
 import Data.Argonaut.Encode (class EncodeJson, encodeJson, (:=), (~>))
 import Data.Int as Int
 
@@ -123,7 +121,6 @@ type State =
   , drag :: DragState
   , notifications :: NotificationState
   , templates :: Templates.TemplateState
-  , imports :: ImportState
   , view :: ViewState
   }
 
@@ -139,7 +136,7 @@ data Action
   | GlobalResize
   | NotificationAction NotificationAction
   | TemplatesOutputAction Templates.TemplatesOutput
-  | ImportAction ImportAction
+  | ImportApplyItems (Array CalendarItemContent)
   | CreateRecurrenceCmd Recurrence.RecurrenceCommand
   | EditRecurrenceCmd Recurrence.RecurrenceCommand
 
@@ -163,17 +160,26 @@ derive instance eqExportSlot :: Eq ExportSlot
 derive instance ordExportSlot :: Ord ExportSlot
 type ExportSlotDef slot = forall query. H.Slot query Void slot
 
+data ImportSlot
+  = ImportCsv
+  | ImportIcs
+
+derive instance eqImportSlot :: Eq ImportSlot
+derive instance ordImportSlot :: Ord ImportSlot
+type ImportSlotDef slot = forall query. H.Slot query Import.Output slot
+
 type Slots =
   ( recurrence :: RecurrenceSlotDef RecurrenceSlot
   , templates :: TemplatesSlotDef TemplatesSlot
   , export :: ExportSlotDef ExportSlot
+  , importCsv :: ImportSlotDef ImportSlot
+  , importIcs :: ImportSlotDef ImportSlot
   )
 
 data Command
   = SyncCmd SyncCommand
   | DragCmd DragCommand
   | ViewCmd ViewCommand
-  | ImportCmd ImportCommand
 
 class ToCommand cmd where
   toCommand :: cmd -> Command
@@ -186,9 +192,6 @@ instance toCommandDragCommand :: ToCommand DragCommand where
 
 instance toCommandViewCommand :: ToCommand ViewCommand where
   toCommand = ViewCmd
-
-instance toCommandImportCommand :: ToCommand ImportCommand where
-  toCommand = ImportCmd
 
 instance toCommandVoid :: ToCommand Void where
   toCommand = absurd
@@ -326,12 +329,42 @@ itemStatusIso = iso toExport fromExport
     Export.Fait -> Fait
     Export.Annule -> Annule
 
-toExportItem :: CalendarItem -> ExportItem
+fromExportItemType :: Export.ItemType -> ItemType
+fromExportItemType = case _ of
+  Export.Intention -> Intention
+  Export.ScheduledBlock -> ScheduledBlock
+
+fromExportItemStatus :: Export.ItemStatus -> ItemStatus
+fromExportItemStatus = case _ of
+  Export.Todo -> Todo
+  Export.EnCours -> EnCours
+  Export.Fait -> Fait
+  Export.Annule -> Annule
+
+toCalendarItemContent :: Export.Item -> CalendarItemContent
+toCalendarItemContent (Export.Item item) =
+  { itemType: fromExportItemType item.itemType
+  , title: item.title
+  , windowStart: item.windowStart
+  , windowEnd: item.windowEnd
+  , status: fromExportItemStatus item.status
+  , sourceItemId: item.sourceItemId
+  , actualDurationMinutes: item.actualDurationMinutes
+  , category: item.category
+  , recurrenceRule: item.recurrenceRule
+  , recurrenceExceptionDates: item.recurrenceExceptionDates
+  }
+
+toCalendarItem :: CalendarItemContent -> CalendarItem
+toCalendarItem content =
+  NewCalendarItem { content }
+
+toExportItem :: CalendarItem -> Export.Item
 toExportItem item =
   let
     content = calendarItemContent item
   in
-    ExportItem
+    Export.Item
       { itemType: view itemTypeIso content.itemType
       , title: content.title
       , windowStart: content.windowStart
@@ -347,14 +380,6 @@ toExportItem item =
 renderTemplatesPanelPage :: Templates.TemplateState -> H.ComponentHTML Action Slots Aff
 renderTemplatesPanelPage templatesState =
   slot (Proxy :: _ "templates") TemplatesModal Templates.component templatesState TemplatesOutputAction
-
-renderCsvImportPanelPage :: forall w. String -> Maybe CsvImportResult -> HTML w Action
-renderCsvImportPanelPage csvInput result =
-  map ImportAction (renderCsvImportPanel csvInput result)
-
-renderIcsImportPanelPage :: forall w. String -> Maybe IcsImportResult -> HTML w Action
-renderIcsImportPanelPage icsInput result =
-  map ImportAction (renderIcsImportPanel icsInput result)
 
 component :: forall q i. H.Component q i NoOutput Aff
 component =
@@ -374,7 +399,6 @@ initialState = const
   , drag: dragInitialState
   , notifications: notificationInitialState
   , templates: Templates.templateInitialState
-  , imports: importInitialState
   , view: viewInitialState
   }
 
@@ -392,9 +416,6 @@ _notifications = prop (Proxy :: _ "notifications")
 
 _templates :: Lens' State Templates.TemplateState
 _templates = prop (Proxy :: _ "templates")
-
-_imports :: Lens' State ImportState
-_imports = prop (Proxy :: _ "imports")
 
 _view :: Lens' State ViewState
 _view = prop (Proxy :: _ "view")
@@ -437,9 +458,6 @@ instance hasStateLensDrag :: HasStateLens DragState where
 
 instance hasStateLensView :: HasStateLens ViewState where
   getLens = _view
-
-instance hasStateLensImports :: HasStateLens ImportState where
-  getLens = _imports
 
 instance hasStateLensNotifications :: HasStateLens NotificationState where
   getLens = _notifications
@@ -503,16 +521,11 @@ runViewCommand = case _ of
       else modify_ (_syncUpdateErrorState .~ Just (updateErrorMessage (unwrap resp.status)))
       refreshItems
 
-runImportCommand :: ImportCommand -> ErrorAgendaAppM Unit
-runImportCommand (ImportSetItems items) = modify_ (_calendarItems .~ items)
-runImportCommand (ImportSetPending pending) = modify_ (_pendingSync .~ pending)
-
 runCommand :: Command -> ErrorAgendaAppM Unit
 runCommand = case _ of
   SyncCmd cmd -> runSyncCommand cmd
   DragCmd cmd -> runDragCommand cmd
   ViewCmd cmd -> runViewCommand cmd
-  ImportCmd cmd -> runImportCommand cmd
 
 handleSyncActionFlow :: SyncAction -> ErrorAgendaAppM Unit
 handleSyncActionFlow syncAction = do
@@ -613,15 +626,17 @@ handleAction action = handleError $
     EditRecurrenceCmd (Recurrence.RecurrenceApplied draft) ->
       modify_
         ((_view <<< _viewEditPanelS) %~ map (\panel -> panel { draft = panel.draft { recurrence = draft }, validationError = Nothing }))
-    ImportAction importAction -> do
+    ImportApplyItems contents -> do
       st <- get
       let
-        ctx =
-          { items: st ^. _calendarItems
-          , pending: st ^. _pendingSync
-          , offlineMode: st ^. _syncOfflineModeState
-          }
-      withSubState $ handleImportAction ctx importAction
+        imported = map toCalendarItem contents
+      if st ^. _syncOfflineModeState then do
+        let
+          initial = { items: st ^. _calendarItems, pending: st ^. _pendingSync }
+          final = foldl (\acc item -> applyOfflineMutation true item acc.items acc.pending) initial imported
+        modify_ ((_calendarItems .~ final.items) <<< (_pendingSync .~ final.pending))
+      else
+        modify_ (_calendarItems %~ (_ <> imported))
 
 initAction :: ErrorAgendaAppM Unit
 initAction = do
@@ -728,15 +743,14 @@ subscribeToGlobalResize = do
   pure unit
 
 render :: State -> H.ComponentHTML Action Slots Aff
-render { calendar, sync, drag, notifications, templates, imports, view } =
+render { calendar, sync, drag, notifications, templates, view } =
   let
     { items, showConflictsOnly, conflictResolution, sortMode } = calendar
     SyncState { offlineMode, syncConflict, updateError } = sync
     DragState { draggingId, dragHoverIndex } = drag
     NotificationState { notificationDefaults, notificationOverrides, notificationPanelOpen, notificationEditor } = notifications
-    ImportState { csvInput, csvImportResult, icsInput, icsImportResult } = imports
     ViewState { viewMode, focusDate, validationPanel, isMobile } = view
-    agendaModalsInput = buildAgendaModalsInput { calendar, sync, drag, notifications, templates, imports, view }
+    agendaModalsInput = buildAgendaModalsInput { calendar, sync, drag, notifications, templates, view }
     { conflictGroups } = agendaModalsInput.filters
     { intentions: unplannedIntentions } = agendaModalsInput.notifications
     conflictIds = detectConflictIds items
@@ -776,8 +790,6 @@ render { calendar, sync, drag, notifications, templates, imports, view } =
                 ]
             , div [ class_ "calendar-side" ]
                 [ NotificationAction <$> renderNotificationsPanel notificationPanelOpen notificationDefaults notificationOverrides notificationEditor unplannedIntentions
-                , renderAccordion "Import CSV" "calendar-accordion import-csv" $ renderCsvImportPanelPage csvInput csvImportResult
-                , renderAccordion "Import ICS" "calendar-accordion import-ics" $ renderIcsImportPanelPage icsInput icsImportResult
                 ]
             ]
         ]
@@ -814,22 +826,14 @@ type AgendaModalsInput =
       , intentions :: Array CalendarItem
       }
   , templates :: Templates.TemplateState
-  , csvImport ::
-      { input :: String
-      , result :: Maybe CsvImportResult
-      }
-  , icsImport ::
-      { input :: String
-      , result :: Maybe IcsImportResult
-      }
-  , exportItems :: Array ExportItem
+  , exportItems :: Array Export.Item
   , draft :: IntentionDraft
   , validationError :: Maybe String
   , editPanel :: Maybe EditPanel
   }
 
 renderAgendaModals :: AgendaModalsInput -> H.ComponentHTML Action Slots Aff
-renderAgendaModals { activeModal, filters, notifications, templates, csvImport, icsImport, exportItems, draft, validationError, editPanel } =
+renderAgendaModals { activeModal, filters, notifications, templates, exportItems, draft, validationError, editPanel } =
   let
     renderModal title content = Modal.renderModal title content (ViewAction ViewCloseModal) (ViewAction ViewCloseModal)
     renderExportModal items =
@@ -844,8 +848,16 @@ renderAgendaModals { activeModal, filters, notifications, templates, csvImport, 
           (SyncAction SyncSubmitIntention)
         ModalNotifications -> renderModal "Rappels" [ NotificationAction <$> renderNotificationsContent notifications.defaults notifications.overrides notifications.editor notifications.intentions ]
         ModalTemplates -> renderModal "Templates de tâches" [ renderTemplatesPanelPage templates ]
-        ModalImportCsv -> renderModal "Import CSV" [ renderCsvImportPanelPage csvImport.input csvImport.result ]
-        ModalImportIcs -> renderModal "Import ICS" [ renderIcsImportPanelPage icsImport.input icsImport.result ]
+        ModalImportCsv ->
+          renderModal "Import CSV"
+            [ slot (Proxy :: _ "importCsv") ImportCsv Import.component (Import.Input { mode: Import.Csv })
+                (\(Import.ApplyItems items) -> ImportApplyItems (map toCalendarItemContent items))
+            ]
+        ModalImportIcs ->
+          renderModal "Import ICS"
+            [ slot (Proxy :: _ "importIcs") ImportIcs Import.component (Import.Input { mode: Import.Ics })
+                (\(Import.ApplyItems items) -> ImportApplyItems (map toCalendarItemContent items))
+            ]
         ModalExport -> renderModal "Export" [ renderExportModal exportItems ]
         ModalEditItem -> case editPanel of
           Nothing -> text ""
@@ -857,12 +869,11 @@ renderAgendaModals { activeModal, filters, notifications, templates, csvImport, 
       activeModal
 
 buildAgendaModalsInput :: State -> AgendaModalsInput
-buildAgendaModalsInput { calendar, sync, notifications, templates, imports, view } =
+buildAgendaModalsInput { calendar, sync, notifications, templates, view } =
   let
     { items, draft, validationError, showConflictsOnly, sortMode } = calendar
     SyncState { offlineMode } = sync
     NotificationState { notificationDefaults, notificationOverrides, notificationEditor } = notifications
-    ImportState { csvInput, csvImportResult, icsInput, icsImportResult } = imports
     ViewState { activeModal, editPanel } = view
     conflictGroups = detectConflictGroups items
   in
@@ -880,28 +891,11 @@ buildAgendaModalsInput { calendar, sync, notifications, templates, imports, view
         , intentions: filter (isUnplannedIntention items) items
         }
     , templates
-    , csvImport:
-        { input: csvInput
-        , result: csvImportResult
-        }
-    , icsImport:
-        { input: icsInput
-        , result: icsImportResult
-        }
     , exportItems: map toExportItem items
     , draft
     , validationError
     , editPanel
     }
-
-renderAccordion :: forall w i. String -> String -> HTML w i -> HTML w i
-renderAccordion title extraClass content =
-  div [ class_ ("calendar-accordion-wrap " <> extraClass) ]
-    [ details [ class_ "calendar-accordion-details" ]
-        [ summary [ class_ "calendar-accordion-summary" ] [ text title ]
-        , div [ class_ "calendar-accordion-content" ] [ content ]
-        ]
-    ]
 
 -- END src/Pages/Calendar.purs
 
@@ -2818,6 +2812,14 @@ parseDateTimeLocal = DateTime.parseLocalDateTime
 parseDateLocal :: String -> Maybe Date
 parseDateLocal = DateTime.parseLocalDate
 
+parseExceptionDatesOrEmpty :: Array String -> Array Date
+parseExceptionDatesOrEmpty exceptions =
+  let
+    parsed = map DateTime.parseLocalDate exceptions
+  in
+    if any (_ == Nothing) parsed then []
+    else mapMaybe identity parsed
+
 parseTimeLocal :: String -> Maybe Time
 parseTimeLocal = DateTime.parseLocalTime
 
@@ -2879,9 +2881,6 @@ formatDateTimeLocal = DateTime.formatLocalDateTime
 timeLabel :: DateTime -> String
 timeLabel raw =
   DateTime.formatLocalTime (time raw)
-
-normalizeHeader :: String -> String
-normalizeHeader = StringCommon.trim >>> StringCommon.toLower
 
 toOptionalString :: String -> Maybe String
 toOptionalString raw =
@@ -3024,730 +3023,6 @@ minuteOfDay raw =
 
 -- END src/Calendar/Helpers.purs
 
--- BEGIN src/Calendar/Import.purs
-newtype ImportState = ImportState
-  { csvInput :: String
-  , csvImportResult :: Maybe CsvImportResult
-  , icsInput :: String
-  , icsImportResult :: Maybe IcsImportResult
-  }
-
-type ImportCtx =
-  { items :: Array CalendarItem
-  , pending :: Array CalendarItem
-  , offlineMode :: Boolean
-  }
-
-importInitialState :: ImportState
-importInitialState =
-  ImportState
-    { csvInput: ""
-    , csvImportResult: Nothing
-    , icsInput: ""
-    , icsImportResult: Nothing
-    }
-
-_csvInputS :: Lens' ImportState String
-_csvInputS =
-  lens
-    (\(ImportState state) -> state.csvInput)
-    (\(ImportState state) csvInput -> ImportState (state { csvInput = csvInput }))
-
-_csvImportResultS :: Lens' ImportState (Maybe CsvImportResult)
-_csvImportResultS =
-  lens
-    (\(ImportState state) -> state.csvImportResult)
-    (\(ImportState state) csvImportResult -> ImportState (state { csvImportResult = csvImportResult }))
-
-_icsInputS :: Lens' ImportState String
-_icsInputS =
-  lens
-    (\(ImportState state) -> state.icsInput)
-    (\(ImportState state) icsInput -> ImportState (state { icsInput = icsInput }))
-
-_icsImportResultS :: Lens' ImportState (Maybe IcsImportResult)
-_icsImportResultS =
-  lens
-    (\(ImportState state) -> state.icsImportResult)
-    (\(ImportState state) icsImportResult -> ImportState (state { icsImportResult = icsImportResult }))
-
-data ImportAction
-  = ImportCsvInputChanged String
-  | ImportParseCsvInput
-  | ImportApplyCsv
-  | ImportClearCsv
-  | ImportIcsInputChanged String
-  | ImportParseIcsInput
-  | ImportApplyIcs
-  | ImportClearIcs
-
-data ImportCommand
-  = ImportSetItems (Array CalendarItem)
-  | ImportSetPending (Array CalendarItem)
-
-handleImportAction :: ImportCtx -> ImportAction -> StateT ImportState (WriterT (Array ImportCommand) Aff) Unit
-handleImportAction ctx = case _ of
-  ImportCsvInputChanged raw ->
-    modify_ (_csvInputS .~ raw)
-  ImportParseCsvInput -> do
-    st <- get
-    let result = parseCsvImport (st ^. _csvInputS)
-    modify_ (_csvImportResultS .~ Just result)
-  ImportApplyCsv -> do
-    importState <- get
-    case importState ^. _csvImportResultS of
-      Nothing -> pure unit
-      Just result ->
-        if null result.items then pure unit
-        else do
-          if ctx.offlineMode then do
-            let
-              initial = { items: ctx.items, pending: ctx.pending }
-              final = foldl (\acc item -> applyOfflineMutation true item acc.items acc.pending) initial result.items
-            tell [ ImportSetItems final.items ]
-            tell [ ImportSetPending final.pending ]
-          else tell [ ImportSetItems (ctx.items <> result.items) ]
-          modify_ ((_csvInputS .~ "") <<< (_csvImportResultS .~ Nothing))
-  ImportClearCsv ->
-    modify_ ((_csvInputS .~ "") <<< (_csvImportResultS .~ Nothing))
-  ImportIcsInputChanged raw ->
-    modify_ (_icsInputS .~ raw)
-  ImportParseIcsInput -> do
-    st <- get
-    let result = parseIcsImport (st ^. _icsInputS)
-    modify_ (_icsImportResultS .~ Just result)
-  ImportApplyIcs -> do
-    importState <- get
-    case importState ^. _icsImportResultS of
-      Nothing -> pure unit
-      Just result ->
-        if null result.items then pure unit
-        else do
-          if ctx.offlineMode then do
-            let
-              initial = { items: ctx.items, pending: ctx.pending }
-              final = foldl (\acc item -> applyOfflineMutation true item acc.items acc.pending) initial result.items
-            tell [ ImportSetItems final.items ]
-            tell [ ImportSetPending final.pending ]
-          else tell [ ImportSetItems (ctx.items <> result.items) ]
-          modify_ ((_icsInputS .~ "") <<< (_icsImportResultS .~ Nothing))
-  ImportClearIcs ->
-    modify_ ((_icsInputS .~ "") <<< (_icsImportResultS .~ Nothing))
-
-renderCsvImportPanel :: forall w. String -> Maybe CsvImportResult -> HTML w ImportAction
-renderCsvImportPanel csvInput result =
-  section [ class_ "calendar-import" ]
-    [ renderPanelHeader
-        { baseClass: "calendar-import"
-        , title: "Import CSV"
-        , subtitle: "Colonnes minimales: type, titre, fenetre_debut, fenetre_fin."
-        }
-        []
-    , textarea
-        [ class_ "form-control calendar-import-textarea"
-        , placeholder "Collez votre CSV ici..."
-        , value csvInput
-        , onValueChange ImportCsvInputChanged
-        ]
-    , div [ class_ "calendar-import-actions" ]
-        [ button [ class_ "btn btn-sm btn-outline-primary", onClick (const ImportParseCsvInput) ] [ text "Analyser" ]
-        , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const ImportClearCsv) ] [ text "Effacer" ]
-        , button [ class_ "btn btn-sm btn-success", onClick (const ImportApplyCsv) ] [ text "Ajouter a la liste" ]
-        ]
-    , maybe (text "") renderCsvImportResult result
-    ]
-
-renderCsvImportResult :: forall w action. CsvImportResult -> HTML w action
-renderCsvImportResult result =
-  let
-    okCount = length result.items
-    errorCount = length result.errors
-  in
-    div [ class_ "calendar-import-result" ]
-      [ div [ class_ "calendar-import-summary" ]
-          [ text $ "Valides: " <> show okCount <> " • Erreurs: " <> show errorCount ]
-      , if null result.errors then text "" else renderCsvImportErrors result.errors
-      ]
-
-renderCsvImportErrors :: forall w action. Array CsvImportError -> HTML w action
-renderCsvImportErrors errors =
-  div [ class_ "calendar-import-errors" ]
-    (map renderCsvImportError errors)
-
-renderCsvImportError :: forall w action. CsvImportError -> HTML w action
-renderCsvImportError err =
-  div [ class_ "calendar-import-error" ]
-    [ text $ "Ligne " <> show err.rowNumber <> ": " <> err.message ]
-
-renderIcsImportPanel :: forall w. String -> Maybe IcsImportResult -> HTML w ImportAction
-renderIcsImportPanel icsInput result =
-  section [ class_ "calendar-import" ]
-    [ renderPanelHeader
-        { baseClass: "calendar-import"
-        , title: "Import ICS"
-        , subtitle: "Support basique: SUMMARY, DTSTART, DTEND."
-        }
-        []
-    , textarea
-        [ class_ "form-control calendar-import-textarea"
-        , placeholder "Collez votre fichier ICS ici..."
-        , value icsInput
-        , onValueChange ImportIcsInputChanged
-        ]
-    , div [ class_ "calendar-import-actions" ]
-        [ button [ class_ "btn btn-sm btn-outline-primary", onClick (const ImportParseIcsInput) ] [ text "Analyser" ]
-        , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const ImportClearIcs) ] [ text "Effacer" ]
-        , button [ class_ "btn btn-sm btn-success", onClick (const ImportApplyIcs) ] [ text "Ajouter a la liste" ]
-        ]
-    , maybe (text "") renderIcsImportResult result
-    ]
-
-renderIcsImportResult :: forall w action. IcsImportResult -> HTML w action
-renderIcsImportResult result =
-  let
-    okCount = length result.items
-    errorCount = length result.errors
-  in
-    div [ class_ "calendar-import-result" ]
-      [ div [ class_ "calendar-import-summary" ]
-          [ text $ "Valides: " <> show okCount <> " • Erreurs: " <> show errorCount ]
-      , if null result.errors then text "" else renderIcsImportErrors result.errors
-      ]
-
-renderIcsImportErrors :: forall w action. Array IcsImportError -> HTML w action
-renderIcsImportErrors errors =
-  div [ class_ "calendar-import-errors" ]
-    (map renderIcsImportError errors)
-
-renderIcsImportError :: forall w action. IcsImportError -> HTML w action
-renderIcsImportError err =
-  div [ class_ "calendar-import-error" ]
-    [ text $ "Evenement " <> show err.eventIndex <> ": " <> err.message ]
-
--- END src/Calendar/Import.purs
-
--- BEGIN src/Calendar/Imports.purs
-parseCsvImport :: String -> CsvImportResult
-parseCsvImport raw =
-  let
-    lines = map stripCR (StringCommon.split (Pattern "\n") raw)
-    indexed = mapWithIndex (\idx -> { row: idx + 1, raw: _ }) lines
-    nonEmpty = filter (\line -> StringCommon.trim line.raw /= "") indexed
-  in
-    case uncons nonEmpty of
-      Nothing -> { items: [], errors: [ { rowNumber: 1, message: "CSV vide." } ] }
-      Just { head: headerLine, tail: dataLines } ->
-        case resolveCsvHeader headerLine.raw of
-          Left err -> { items: [], errors: [ { rowNumber: headerLine.row, message: err } ] }
-          Right header -> parseCsvRows header dataLines
-
-resolveCsvHeader :: String -> Either String CsvHeader
-resolveCsvHeader rawHeader =
-  let
-    headers = map normalizeHeader (splitCsvLine rawHeader)
-    findFor names = findIndex (\name -> elem name names) headers
-    typeIdx = findFor [ "type" ]
-    titleIdx = findFor [ "titre", "title" ]
-    startIdx = findFor [ "fenetre_debut", "window_start", "start" ]
-    endIdx = findFor [ "fenetre_fin", "window_end", "end" ]
-    categoryIdx = findFor [ "categorie", "category" ]
-    statusIdx = findFor [ "statut", "status" ]
-    sourceItemIdIdx = findFor [ "source_item_id" ]
-    actualDurationIdx = findFor [ "actual_duration_minutes" ]
-    recurrenceRuleTypeIdx = findFor [ "recurrence_rule_type" ]
-    recurrenceRuleIntervalIdx = findFor [ "recurrence_rule_interval_days" ]
-    recurrenceExceptionIdx = findFor [ "recurrence_exception_dates" ]
-  in
-    case
-      { typeIdx
-      , titleIdx
-      , startIdx
-      , endIdx
-      , categoryIdx
-      , statusIdx
-      , sourceItemIdIdx
-      , actualDurationIdx
-      , recurrenceRuleTypeIdx
-      , recurrenceRuleIntervalIdx
-      , recurrenceExceptionIdx
-      }
-      of
-      { typeIdx: Just t
-      , titleIdx: Just ti
-      , startIdx: Just s
-      , endIdx: Just e
-      , categoryIdx: Just c
-      , statusIdx: Just st
-      , sourceItemIdIdx: Just source
-      , actualDurationIdx: Just duration
-      , recurrenceRuleTypeIdx: Just ruleType
-      , recurrenceRuleIntervalIdx: Just ruleInterval
-      , recurrenceExceptionIdx: Just exceptions
-      } ->
-        Right
-          { typeIdx: t
-          , titleIdx: ti
-          , startIdx: s
-          , endIdx: e
-          , categoryIdx: c
-          , statusIdx: st
-          , sourceItemIdIdx: source
-          , actualDurationIdx: duration
-          , recurrenceRuleTypeIdx: ruleType
-          , recurrenceRuleIntervalIdx: ruleInterval
-          , recurrenceExceptionIdx: exceptions
-          }
-      _ ->
-        Left
-          "Colonnes manquantes: type, titre, fenetre_debut, fenetre_fin, categorie, statut, source_item_id, actual_duration_minutes, recurrence_rule_type, recurrence_rule_interval_days, recurrence_exception_dates."
-
-type CsvHeader =
-  { typeIdx :: Int
-  , titleIdx :: Int
-  , startIdx :: Int
-  , endIdx :: Int
-  , categoryIdx :: Int
-  , statusIdx :: Int
-  , sourceItemIdIdx :: Int
-  , actualDurationIdx :: Int
-  , recurrenceRuleTypeIdx :: Int
-  , recurrenceRuleIntervalIdx :: Int
-  , recurrenceExceptionIdx :: Int
-  }
-
-parseCsvRows :: CsvHeader -> Array { row :: Int, raw :: String } -> CsvImportResult
-parseCsvRows header rows =
-  foldl parseRow { items: [], errors: [] } rows
-  where
-  parseRow acc row =
-    let
-      fields = splitCsvLine row.raw
-      fieldAt idx = index fields idx
-    in
-      case
-        { typeVal: fieldAt header.typeIdx
-        , titleVal: fieldAt header.titleIdx
-        , startVal: fieldAt header.startIdx
-        , endVal: fieldAt header.endIdx
-        }
-        of
-        { typeVal: Just typeVal
-        , titleVal: Just titleVal
-        , startVal: Just startVal
-        , endVal: Just endVal
-        } ->
-          case parseCsvItem header fields typeVal titleVal startVal endVal of
-            Left err -> acc { errors = acc.errors <> [ { rowNumber: row.row, message: err } ] }
-            Right item -> acc { items = acc.items <> [ item ] }
-        _ ->
-          acc { errors = acc.errors <> [ { rowNumber: row.row, message: "Colonnes manquantes pour cette ligne." } ] }
-
-parseCsvItem :: CsvHeader -> Array String -> String -> String -> String -> String -> Either String CalendarItem
-parseCsvItem header fields typeVal titleVal startVal endVal = do
-  itemType <- parseCsvItemType typeVal
-  status <- parseCsvStatus (lookupField header.statusIdx fields)
-  let
-    title = StringCommon.trim titleVal
-    windowStartRaw = StringCommon.trim startVal
-    windowEndRaw = StringCommon.trim endVal
-    category = lookupField header.categoryIdx fields >>= toOptionalString
-    sourceItemId = lookupField header.sourceItemIdIdx fields >>= toOptionalString
-    actualDurationRaw = lookupField header.actualDurationIdx fields >>= toOptionalString
-    ruleTypeRaw = lookupField header.recurrenceRuleTypeIdx fields >>= toOptionalString
-    ruleIntervalRaw = lookupField header.recurrenceRuleIntervalIdx fields >>= toOptionalString
-    exceptionRaw = lookupField header.recurrenceExceptionIdx fields >>= toOptionalString
-    exceptions = splitExceptions exceptionRaw
-  if title == "" then Left "Le titre est vide."
-  else
-    case parseDateTimeLocal windowStartRaw of
-      Nothing -> Left "Début invalide (format YYYY-MM-DDTHH:MM)."
-      Just windowStart ->
-        case parseDateTimeLocal windowEndRaw of
-          Nothing -> Left "Fin invalide (format YYYY-MM-DDTHH:MM)."
-          Just windowEnd ->
-            if windowEnd <= windowStart then Left "La fin doit être après le début."
-            else
-              case parseActualDuration actualDurationRaw of
-                Left err -> Left err
-                Right actualDurationMinutes ->
-                  case parseRecurrenceRule ruleTypeRaw ruleIntervalRaw of
-                    Left err -> Left err
-                    Right recurrenceRule ->
-                      case validateExceptions exceptions of
-                        Left err -> Left err
-                        Right validExceptions ->
-                          Right $ NewCalendarItem
-                            { content:
-                                { itemType
-                                , title
-                                , windowStart
-                                , windowEnd
-                                , status
-                                , sourceItemId
-                                , actualDurationMinutes
-                                , category
-                                , recurrenceRule
-                                , recurrenceExceptionDates: validExceptions
-                                }
-                            }
-
-lookupField :: Int -> Array String -> Maybe String
-lookupField idx fields = index fields idx
-
-parseCsvItemType :: String -> Either String ItemType
-parseCsvItemType raw =
-  case normalizeHeader raw of
-    "intention" -> Right Intention
-    "bloc_planifie" -> Right ScheduledBlock
-    "scheduled_block" -> Right ScheduledBlock
-    _ -> Left "Type invalide (INTENTION ou BLOC_PLANIFIE)."
-
-parseCsvStatus :: Maybe String -> Either String ItemStatus
-parseCsvStatus raw =
-  case raw of
-    Nothing -> Right Todo
-    Just value | StringCommon.trim value == "" -> Right Todo
-    Just value ->
-      case normalizeHeader value of
-        "todo" -> Right Todo
-        "en_cours" -> Right EnCours
-        "fait" -> Right Fait
-        "annule" -> Right Annule
-        _ -> Left "Statut invalide (TODO, EN_COURS, FAIT, ANNULE)."
-
-parseActualDuration :: Maybe String -> Either String (Maybe Int)
-parseActualDuration raw =
-  case raw of
-    Nothing -> Right Nothing
-    Just value ->
-      case Int.fromString value of
-        Nothing -> Left "Durée réelle invalide."
-        Just minutes | minutes <= 0 -> Left "Durée réelle invalide."
-        Just minutes -> Right (Just minutes)
-
-parseRecurrenceRule :: Maybe String -> Maybe String -> Either String (Maybe RecurrenceRule)
-parseRecurrenceRule rawType rawInterval =
-  case rawType of
-    Nothing ->
-      case rawInterval of
-        Nothing -> Right Nothing
-        Just _ -> Left "Intervalle de récurrence sans type."
-    Just ruleType ->
-      case normalizeHeader ruleType of
-        "daily" ->
-          if rawInterval == Nothing then Right (Just Daily)
-          else Left "Intervalle invalide pour daily."
-        "weekly" ->
-          if rawInterval == Nothing then Right (Just Weekly)
-          else Left "Intervalle invalide pour weekly."
-        "monthly" ->
-          if rawInterval == Nothing then Right (Just Monthly)
-          else Left "Intervalle invalide pour monthly."
-        "yearly" ->
-          if rawInterval == Nothing then Right (Just Yearly)
-          else Left "Intervalle invalide pour yearly."
-        "every" ->
-          case rawInterval >>= Int.fromString of
-            Nothing -> Left "Intervalle requis pour every."
-            Just days | days <= 0 -> Left "Intervalle requis pour every."
-            Just days -> Right (Just (EveryXDays days))
-        _ -> Left "Type de récurrence invalide (daily, weekly, monthly, yearly, every)."
-
-splitExceptions :: Maybe String -> Array String
-splitExceptions raw =
-  case raw of
-    Nothing -> []
-    Just value ->
-      StringCommon.split (Pattern ";") value
-        # map StringCommon.trim
-        # filter (\entry -> entry /= "")
-
-validateExceptions :: Array String -> Either String (Array Date)
-validateExceptions exceptions = parseExceptionDates exceptions
-
-parseExceptionDates :: Array String -> Either String (Array Date)
-parseExceptionDates exceptions =
-  let
-    parsed = map DateTime.parseLocalDate exceptions
-  in
-    if any (_ == Nothing) parsed then Left "Exception invalide (format YYYY-MM-DD)."
-    else Right (mapMaybe identity parsed)
-
-parseExceptionDatesOrEmpty :: Array String -> Array Date
-parseExceptionDatesOrEmpty exceptions =
-  case parseExceptionDates exceptions of
-    Left _ -> []
-    Right dates -> dates
-
-splitCsvLine :: String -> Array String
-splitCsvLine raw =
-  parseChars (String.toCharArray raw) { field: "", fields: [], inQuote: false }
-  where
-  parseChars chars state =
-    case uncons chars of
-      Nothing -> state.fields <> [ state.field ]
-      Just { head, tail } ->
-        if head == '"' then
-          case uncons tail of
-            Just { head: next, tail: rest } | state.inQuote && next == '"' ->
-              parseChars rest state { field = state.field <> String.singleton '"' }
-            _ ->
-              parseChars tail state { inQuote = not state.inQuote }
-        else if head == ',' && not state.inQuote then
-          parseChars tail state { fields = state.fields <> [ state.field ], field = "" }
-        else
-          parseChars tail state { field = state.field <> String.singleton head }
-
-stripCR :: String -> String
-stripCR line =
-  let
-    len = String.length line
-  in
-    if len > 0 && String.charAt (len - 1) line == Just '\r' then String.slice 0 (len - 1) line
-    else line
-
-type IcsEventDraft =
-  { summary :: Maybe String
-  , dtStart :: Maybe String
-  , dtEnd :: Maybe String
-  , itemType :: Maybe String
-  , status :: Maybe String
-  , sourceItemId :: Maybe String
-  , actualDurationMinutes :: Maybe String
-  , category :: Maybe String
-  , rrule :: Maybe String
-  , exdates :: Array String
-  }
-
-parseIcsImport :: String -> IcsImportResult
-parseIcsImport raw =
-  let
-    lines = map stripCR (StringCommon.split (Pattern "\n") raw)
-    initial =
-      { current: Nothing
-      , items: []
-      , errors: []
-      , index: 0
-      }
-    final = foldl parseIcsLine initial lines
-  in
-    { items: final.items, errors: final.errors }
-  where
-  parseIcsLine state line =
-    case StringCommon.trim line of
-      "BEGIN:VEVENT" ->
-        state
-          { current =
-              Just
-                { summary: Nothing
-                , dtStart: Nothing
-                , dtEnd: Nothing
-                , itemType: Nothing
-                , status: Nothing
-                , sourceItemId: Nothing
-                , actualDurationMinutes: Nothing
-                , category: Nothing
-                , rrule: Nothing
-                , exdates: []
-                }
-          }
-      "END:VEVENT" ->
-        case state.current of
-          Nothing -> state
-          Just event ->
-            let
-              nextIndex = state.index + 1
-            in
-              case buildIcsItem nextIndex event of
-                Left err -> state { errors = state.errors <> [ err ], current = Nothing, index = nextIndex }
-                Right item -> state { items = state.items <> [ item ], current = Nothing, index = nextIndex }
-      _ ->
-        case state.current of
-          Nothing -> state
-          Just event ->
-            let
-              key = extractIcsKey line
-              value = extractIcsValue line
-              trimmed = StringCommon.trim value
-              updated =
-                case key of
-                  "SUMMARY" -> event { summary = toOptionalString value }
-                  "DTSTART" -> event { dtStart = Just value }
-                  "DTEND" -> event { dtEnd = Just value }
-                  "X-FAVS-TYPE" -> event { itemType = toOptionalString value }
-                  "X-FAVS-STATUS" -> event { status = toOptionalString value }
-                  "X-FAVS-SOURCE-ITEM-ID" -> event { sourceItemId = Just trimmed }
-                  "X-FAVS-ACTUAL-DURATION-MINUTES" -> event { actualDurationMinutes = Just trimmed }
-                  "CATEGORIES" -> event { category = toOptionalString value }
-                  "RRULE" -> event { rrule = toOptionalString value }
-                  "EXDATE" -> event { exdates = event.exdates <> splitIcsExdates trimmed }
-                  _ -> event
-            in
-              state { current = Just updated }
-
-buildIcsItem :: Int -> IcsEventDraft -> Either IcsImportError CalendarItem
-buildIcsItem index event = do
-  title <- maybe (Left { eventIndex: index, message: "SUMMARY manquant." }) Right event.summary
-  startRaw <- maybe (Left { eventIndex: index, message: "DTSTART manquant." }) Right event.dtStart
-  endRaw <- maybe (Left { eventIndex: index, message: "DTEND manquant." }) Right event.dtEnd
-  typeRaw <- maybe (Left { eventIndex: index, message: "X-FAVS-TYPE manquant." }) Right event.itemType
-  statusRaw <- maybe (Left { eventIndex: index, message: "X-FAVS-STATUS manquant." }) Right event.status
-  sourceRaw <- maybe (Left { eventIndex: index, message: "X-FAVS-SOURCE-ITEM-ID manquant." }) Right event.sourceItemId
-  durationRaw <- maybe (Left { eventIndex: index, message: "X-FAVS-ACTUAL-DURATION-MINUTES manquant." }) Right event.actualDurationMinutes
-  windowStart <- maybe (Left { eventIndex: index, message: "DTSTART invalide." }) Right (parseIcsDateTime startRaw)
-  windowEnd <- maybe (Left { eventIndex: index, message: "DTEND invalide." }) Right (parseIcsDateTime endRaw)
-  itemType <- lmap ({ eventIndex: index, message: _ }) (parseIcsItemType typeRaw)
-  status <- lmap ({ eventIndex: index, message: _ }) (parseIcsStatus statusRaw)
-  sourceItemId <- lmap ({ eventIndex: index, message: _ }) (parseIcsSourceItemId sourceRaw)
-  actualDurationMinutes <- lmap ({ eventIndex: index, message: _ }) (parseIcsActualDuration durationRaw)
-  recurrenceRule <- lmap ({ eventIndex: index, message: _ }) (parseIcsRrule event.rrule)
-  recurrenceExceptionDates <- lmap ({ eventIndex: index, message: _ }) (parseIcsExceptions event.exdates)
-  if windowEnd <= windowStart then Left { eventIndex: index, message: "La fin doit être après le début." }
-  else
-    Right $ NewCalendarItem
-      { content:
-          { itemType
-          , title
-          , windowStart
-          , windowEnd
-          , status
-          , sourceItemId
-          , actualDurationMinutes
-          , category: event.category
-          , recurrenceRule
-          , recurrenceExceptionDates
-          }
-      }
-
-extractIcsKey :: String -> String
-extractIcsKey line =
-  case uncons (StringCommon.split (Pattern ":") line) of
-    Nothing -> ""
-    Just { head: first } ->
-      case uncons (StringCommon.split (Pattern ";") first) of
-        Nothing -> ""
-        Just { head: key } -> StringCommon.trim key
-
-extractIcsValue :: String -> String
-extractIcsValue line =
-  fromMaybe "" (last (StringCommon.split (Pattern ":") line))
-
-parseIcsDateTime :: String -> Maybe DateTime
-parseIcsDateTime raw =
-  let
-    trimmed = StringCommon.trim raw
-    cleaned = if endsWithChar 'Z' trimmed then String.slice 0 (String.length trimmed - 1) trimmed else trimmed
-  in
-    if String.length cleaned < 13 then Nothing
-    else if String.charAt 8 cleaned /= Just 'T' then Nothing
-    else
-      let
-        y = String.slice 0 4 cleaned
-        m = String.slice 4 6 cleaned
-        d = String.slice 6 8 cleaned
-        hh = String.slice 9 11 cleaned
-        mm = String.slice 11 13 cleaned
-        formatted = StringCommon.joinWith "" [ y, "-", m, "-", d, "T", hh, ":", mm ]
-      in
-        DateTime.parseLocalDateTime formatted
-
-endsWithChar :: Char -> String -> Boolean
-endsWithChar ch str =
-  let
-    len = String.length str
-  in
-    len > 0 && String.charAt (len - 1) str == Just ch
-
-splitIcsExdates :: String -> Array String
-splitIcsExdates raw =
-  if raw == "" then []
-  else StringCommon.split (Pattern ",") raw
-
-parseIcsItemType :: String -> Either String ItemType
-parseIcsItemType raw =
-  case normalizeHeader raw of
-    "intention" -> Right Intention
-    "bloc_planifie" -> Right ScheduledBlock
-    _ -> Left "X-FAVS-TYPE invalide (INTENTION ou BLOC_PLANIFIE)."
-
-parseIcsStatus :: String -> Either String ItemStatus
-parseIcsStatus raw =
-  case normalizeHeader raw of
-    "todo" -> Right Todo
-    "en_cours" -> Right EnCours
-    "fait" -> Right Fait
-    "annule" -> Right Annule
-    _ -> Left "X-FAVS-STATUS invalide (TODO, EN_COURS, FAIT, ANNULE)."
-
-parseIcsSourceItemId :: String -> Either String (Maybe String)
-parseIcsSourceItemId raw =
-  Right (toOptionalString raw)
-
-parseIcsActualDuration :: String -> Either String (Maybe Int)
-parseIcsActualDuration raw =
-  case toOptionalString raw of
-    Nothing -> Right Nothing
-    Just trimmed ->
-      case Int.fromString trimmed of
-        Nothing -> Left "X-FAVS-ACTUAL-DURATION-MINUTES invalide."
-        Just minutes | minutes <= 0 -> Left "X-FAVS-ACTUAL-DURATION-MINUTES invalide."
-        Just minutes -> Right (Just minutes)
-
-parseIcsRrule :: Maybe String -> Either String (Maybe RecurrenceRule)
-parseIcsRrule Nothing = Right Nothing
-parseIcsRrule (Just raw) =
-  let
-    parts = StringCommon.split (Pattern ";") raw
-    freq = findMap (stripPrefix "FREQ=") parts
-    interval = findMap (stripPrefix "INTERVAL=") parts
-  in
-    case map StringCommon.toUpper freq of
-      Nothing -> Left "RRULE invalide."
-      Just "DAILY" ->
-        case interval >>= Int.fromString of
-          Nothing -> Right (Just Daily)
-          Just value | value <= 0 -> Left "RRULE invalide."
-          Just value | value == 1 -> Right (Just Daily)
-          Just value -> Right (Just (EveryXDays value))
-      Just "WEEKLY" -> if interval == Nothing then Right (Just Weekly) else Left "RRULE invalide."
-      Just "MONTHLY" -> if interval == Nothing then Right (Just Monthly) else Left "RRULE invalide."
-      Just "YEARLY" -> if interval == Nothing then Right (Just Yearly) else Left "RRULE invalide."
-      _ -> Left "RRULE invalide."
-  where
-  stripPrefix prefix value =
-    if String.slice 0 (String.length prefix) value == prefix then
-      Just (String.slice (String.length prefix) (String.length value) value)
-    else
-      Nothing
-
-parseIcsExceptions :: Array String -> Either String (Array Date)
-parseIcsExceptions raw =
-  let
-    parsed = map parseIcsDate raw
-  in
-    if any (_ == Nothing) parsed then Left "EXDATE invalide."
-    else Right (mapMaybe identity parsed)
-
-parseIcsDate :: String -> Maybe Date
-parseIcsDate raw =
-  let
-    trimmed = StringCommon.trim raw
-    cleaned = if endsWithChar 'Z' trimmed then String.slice 0 (String.length trimmed - 1) trimmed else trimmed
-    base =
-      if String.length cleaned >= 8 then
-        if String.charAt 8 cleaned == Just 'T' then String.slice 0 8 cleaned else String.slice 0 8 cleaned
-      else
-        ""
-    formatted =
-      if String.length base == 8 then
-        String.slice 0 4 base <> "-" <> String.slice 4 6 base <> "-" <> String.slice 6 8 base
-      else ""
-  in
-    if formatted == "" then Nothing
-    else DateTime.parseLocalDate formatted
-
--- END src/Calendar/Imports.purs
-
 data ItemType = Intention | ScheduledBlock
 
 derive instance itemTypeGeneric :: Generic ItemType _
@@ -3795,26 +3070,6 @@ defaultNotificationDefaults :: NotificationDefaults
 defaultNotificationDefaults =
   { startDayTime: "06:00"
   , beforeEndHours: 24
-  }
-
-type CsvImportError =
-  { rowNumber :: Int
-  , message :: String
-  }
-
-type CsvImportResult =
-  { items :: Array CalendarItem
-  , errors :: Array CsvImportError
-  }
-
-type IcsImportError =
-  { eventIndex :: Int
-  , message :: String
-  }
-
-type IcsImportResult =
-  { items :: Array CalendarItem
-  , errors :: Array IcsImportError
   }
 
 data CalendarItem

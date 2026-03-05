@@ -2,7 +2,8 @@ module Test.Domain.Calendar.Spec (spec) where
 
 import Prelude
 
-import Calendar.Export as Export
+import Calendar.ExImport.Export as Export
+import Calendar.ExImport.Import (parseCsv, parseIcs)
 import Pages.Calendar
   ( CalendarItem(..)
   , IntentionDraft
@@ -24,8 +25,6 @@ import Pages.Calendar
   , durationMinutesBetween
   , sortItems
   , validateIntention
-  , parseCsvImport
-  , parseIcsImport
   , reminderTimesForIntention
   , applyOfflineMutation
   , applyTemplateToDraft
@@ -346,25 +345,25 @@ spec = do
       templateSummary template `shouldEqual` "90 min • Focus"
 
   describe "Calendar imports" do
-    it "parseCsvImport returns one item and no errors for valid input" do
+    it "parseCsv returns one item and no errors for valid input" do
       let
         csv =
           "type,titre,fenetre_debut,fenetre_fin,categorie,statut,source_item_id,actual_duration_minutes,recurrence_rule_type,recurrence_rule_interval_days,recurrence_exception_dates\n" <>
             "INTENTION,Focus,2026-02-19T09:00,2026-02-19T10:00,Deep,TODO,,,,,"
-        result = parseCsvImport csv
+        result = parseCsv csv
       length result.items `shouldEqual` 1
       length result.errors `shouldEqual` 0
 
-    it "parseCsvImport reports errors for invalid rows" do
+    it "parseCsv reports errors for invalid rows" do
       let
         csv =
           "type,titre,fenetre_debut,fenetre_fin\n" <>
             "INTENTION,,2026-02-19T09:00,2026-02-19T08:00"
-        result = parseCsvImport csv
+        result = parseCsv csv
       length result.items `shouldEqual` 0
       length result.errors `shouldEqual` 1
 
-    it "parseIcsImport returns one item and no errors for valid input" do
+    it "parseIcs returns one item and no errors for valid input" do
       let
         ics =
           "BEGIN:VCALENDAR\n"
@@ -379,11 +378,11 @@ spec = do
             <> "END:VEVENT\n"
             <>
               "END:VCALENDAR"
-        result = parseIcsImport ics
+        result = parseIcs ics
       length result.items `shouldEqual` 1
       length result.errors `shouldEqual` 0
 
-    it "parseIcsImport reports errors for invalid events" do
+    it "parseIcs reports errors for invalid events" do
       let
         ics =
           "BEGIN:VCALENDAR\n"
@@ -397,7 +396,7 @@ spec = do
             <> "END:VEVENT\n"
             <>
               "END:VCALENDAR"
-        result = parseIcsImport ics
+        result = parseIcs ics
       length result.items `shouldEqual` 0
       length result.errors `shouldEqual` 1
 
@@ -405,7 +404,7 @@ spec = do
     it "filterItemsForExport keeps only items matching the filter" do
       let
         itemA =
-          Export.ExportItem
+          Export.Item
             { itemType: Export.Intention
             , title: "A"
             , windowStart: unsafeDateTime "2026-02-19T09:00"
@@ -418,7 +417,7 @@ spec = do
             , recurrenceExceptionDates: []
             }
         itemB =
-          Export.ExportItem
+          Export.Item
             { itemType: Export.ScheduledBlock
             , title: "B"
             , windowStart: unsafeDateTime "2026-02-20T11:00"
@@ -443,7 +442,7 @@ spec = do
     it "exportItemsToCsv/ToIcs include expected markers" do
       let
         item =
-          Export.ExportItem
+          Export.Item
             { itemType: Export.Intention
             , title: "A"
             , windowStart: unsafeDateTime "2026-02-19T09:00"

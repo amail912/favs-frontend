@@ -1,6 +1,8 @@
-module Calendar.Export
-  ( module Calendar.Export.Types
+module Calendar.ExImport.Export
+  ( module Calendar.ExImport.Model
   , ExportInput(..)
+  , ExportFilter(..)
+  , ExportFormat(..)
   , component
   , filterItemsForExport
   , exportItemsToCsv
@@ -9,17 +11,19 @@ module Calendar.Export
 
 import Prelude hiding (div)
 
-import Calendar.Export.Types (ExportFilter(..), ExportFormat(..), ExportItem(..), ItemStatus(..), ItemType(..))
+import Calendar.ExImport.Model (Item(..), ItemStatus(..), ItemType(..))
 import Calendar.Recurrence (RecurrenceRule(..))
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Data.Array (filter, null)
 import Data.Date (Date)
 import Data.DateTime (DateTime, date)
 import Data.Foldable (foldl, foldMap)
+import Data.Generic.Rep (class Generic)
 import Data.Lens (Lens', (.~), (^.), lens)
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.String.CodeUnits as String
 import Data.String.Common as StringCommon
+import Data.Show.Generic (genericShow)
 import Effect.Aff (Aff)
 import Halogen (Component, ComponentHTML, HalogenM, defaultEval, get, mkComponent, mkEval, modify_) as H
 import Halogen.HTML (button, div, input, option, section, select, text, textarea)
@@ -30,7 +34,22 @@ import Ui.AgendaRender (renderPanelHeader)
 import Ui.Utils (class_)
 
 newtype ExportInput = ExportInput
-  { items :: Array ExportItem }
+  { items :: Array Item }
+
+data ExportFormat = ExportCSV | ExportICS
+
+derive instance exportFormatEq :: Eq ExportFormat
+derive instance exportFormatGeneric :: Generic ExportFormat _
+instance exportFormatShow :: Show ExportFormat where
+  show = genericShow
+
+newtype ExportFilter = ExportFilter
+  { itemType :: Maybe ItemType
+  , status :: Maybe ItemStatus
+  , category :: Maybe String
+  , startDate :: Maybe Date
+  , endDate :: Maybe Date
+  }
 
 newtype ExportState = ExportState
   { format :: ExportFormat
@@ -112,7 +131,7 @@ component =
     , eval: H.mkEval $ H.defaultEval { handleAction = handleAction, receive = Just <<< Receive }
     }
 
-handleAction :: Action -> H.HalogenM { export :: ExportState, items :: Array ExportItem } Action () Void Aff Unit
+handleAction :: Action -> H.HalogenM { export :: ExportState, items :: Array Item } Action () Void Aff Unit
 handleAction = case _ of
   Receive (ExportInput input) -> H.modify_ (_ { items = input.items })
   FormatChanged raw -> H.modify_ $ updateExport (\st -> st # _exportFormat .~ parseExportFormat raw)
@@ -142,7 +161,7 @@ handleAction = case _ of
     in
       st { export = (exportState # _exportForm .~ nextForm) # _exportFilter .~ nextFilter }
 
-render :: forall m. { export :: ExportState, items :: Array ExportItem } -> H.ComponentHTML Action () m
+render :: forall m. { export :: ExportState, items :: Array Item } -> H.ComponentHTML Action () m
 render
   { export: ExportState
       { format
@@ -253,11 +272,11 @@ buildFilter form =
     , endDate: form.endDate
     }
 
-filterItemsForExport :: ExportFilter -> Array ExportItem -> Array ExportItem
+filterItemsForExport :: ExportFilter -> Array Item -> Array Item
 filterItemsForExport (ExportFilter criteria) items = filter (matchesFilter criteria) items
 
-matchesFilter :: { itemType :: Maybe ItemType, status :: Maybe ItemStatus, category :: Maybe String, startDate :: Maybe Date, endDate :: Maybe Date } -> ExportItem -> Boolean
-matchesFilter criteria (ExportItem item) =
+matchesFilter :: { itemType :: Maybe ItemType, status :: Maybe ItemStatus, category :: Maybe String, startDate :: Maybe Date, endDate :: Maybe Date } -> Item -> Boolean
+matchesFilter criteria (Item item) =
   matchesType && matchesStatus && matchesCategory && matchesStart && matchesEnd
   where
   matchesType = maybe true (\target -> item.itemType == target) criteria.itemType
@@ -271,7 +290,7 @@ matchesFilter criteria (ExportItem item) =
 normalizeHeader :: String -> String
 normalizeHeader = StringCommon.trim >>> StringCommon.toLower
 
-exportItemsToCsv :: Array ExportItem -> String
+exportItemsToCsv :: Array Item -> String
 exportItemsToCsv items =
   StringCommon.joinWith "\n" ([ header ] <> rows)
   where
@@ -279,8 +298,8 @@ exportItemsToCsv items =
     "type,titre,fenetre_debut,fenetre_fin,statut,categorie,source_item_id,actual_duration_minutes,recurrence_rule_type,recurrence_rule_interval_days,recurrence_exception_dates"
   rows = map exportCsvRow items
 
-exportCsvRow :: ExportItem -> String
-exportCsvRow (ExportItem item) =
+exportCsvRow :: Item -> String
+exportCsvRow (Item item) =
   let
     category = fromMaybe "" item.category
     sourceItemId = foldMap identity item.sourceItemId
@@ -307,7 +326,7 @@ exportCsvRow (ExportItem item) =
 csvEscape :: String -> String
 csvEscape value = "\"" <> escapeQuotes value <> "\""
 
-exportItemsToIcs :: Array ExportItem -> String
+exportItemsToIcs :: Array Item -> String
 exportItemsToIcs items =
   let
     header = [ "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//FAVS//EN" ]
@@ -315,8 +334,8 @@ exportItemsToIcs items =
   in
     StringCommon.joinWith "\n" (header <> events <> [ "END:VCALENDAR" ])
 
-exportIcsEvent :: ExportItem -> Array String
-exportIcsEvent (ExportItem item) =
+exportIcsEvent :: Item -> Array String
+exportIcsEvent (Item item) =
   let
     start = toIcsDateTime item.windowStart
     end = toIcsDateTime item.windowEnd
