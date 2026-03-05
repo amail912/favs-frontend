@@ -19,9 +19,6 @@ module Pages.Calendar
   , EditError(..)
   , applyEditDraft
   , buildEditDraft
-  , exportItemsToCsv
-  , exportItemsToIcs
-  , filterItemsForExport
   , durationMinutesBetween
   , sortItems
   , validateIntention
@@ -37,20 +34,23 @@ module Pages.Calendar
 import Prelude hiding (div)
 import Affjax.Web (Response)
 import Api.Calendar (ValidateItemPayload(..), createItemResponse, getItemsResponse, updateItemResponse, validateItemResponse)
-import Calendar.Recurrence (RecurrenceDraft, RecurrenceRule, defaultRecurrenceDraft, draftFromRecurrence, draftToRecurrence)
+import Calendar.Recurrence (RecurrenceDraft, RecurrenceRule(..), defaultRecurrenceDraft, draftFromRecurrence, draftToRecurrence)
 import Calendar.Recurrence as Recurrence
+import Calendar.Export (ExportInput(..), ExportItem(..))
+import Calendar.Export as Export
 import Calendar.Templates as Templates
 import Control.Monad.Except (ExceptT(..), withExceptT)
 import Control.Monad.State.Trans (StateT, runStateT, get, modify_)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Writer.Trans (WriterT, runWriterT)
 import Data.Argonaut.Core (Json, jsonEmptyObject)
-import Data.Argonaut.Decode (decodeJson, class DecodeJson, (.:), (.:?))
-import Data.Array (filter, foldM, null, length, mapWithIndex, findIndex, foldl, mapMaybe, sortBy, uncons, updateAt, elem, find, nub, index, last, catMaybes, any)
+import Data.Argonaut.Decode (class DecodeJson, decodeJson, (.:), (.:?))
+import Data.Argonaut.Decode.Error (JsonDecodeError(..))
+import Data.Array (filter, foldM, null, length, mapWithIndex, findIndex, foldl, mapMaybe, sortBy, uncons, updateAt, elem, find, findMap, nub, index, last, catMaybes, any)
 import Data.Bifunctor (lmap)
 import Data.Either (Either(..), either)
 import Data.Foldable (traverse_, fold)
-import Data.Lens (Lens', (.~), (%~), (^.), lens)
+import Data.Lens (Iso', Lens', iso, view, (.~), (%~), (^.), lens)
 import Data.Lens.Record (prop)
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.Monoid (guard)
@@ -107,7 +107,6 @@ import Data.DateTime (DateTime(..), adjust, date, diff, time)
 import Data.Time (Time, hour, minute)
 import Data.String.Common as StringCommon
 import Data.String.Pattern (Pattern(..))
-import Data.Argonaut.Decode.Error (JsonDecodeError(..))
 import Data.Argonaut.Encode (class EncodeJson, encodeJson, (:=), (~>))
 import Data.Int as Int
 
@@ -125,7 +124,6 @@ type State =
   , notifications :: NotificationState
   , templates :: Templates.TemplateState
   , imports :: ImportState
-  , exports :: ExportState
   , view :: ViewState
   }
 
@@ -142,7 +140,6 @@ data Action
   | NotificationAction NotificationAction
   | TemplatesOutputAction Templates.TemplatesOutput
   | ImportAction ImportAction
-  | ExportAction ExportAction
   | CreateRecurrenceCmd Recurrence.RecurrenceCommand
   | EditRecurrenceCmd Recurrence.RecurrenceCommand
 
@@ -152,16 +149,25 @@ data RecurrenceSlot
 
 derive instance eqRecurrenceSlot :: Eq RecurrenceSlot
 derive instance ordRecurrenceSlot :: Ord RecurrenceSlot
-
 type RecurrenceSlotDef slot = forall query. H.Slot query Recurrence.RecurrenceCommand slot
-type Slots = (recurrence :: RecurrenceSlotDef RecurrenceSlot, templates :: TemplatesSlotDef TemplatesSlot)
 
 data TemplatesSlot = TemplatesModal
 
 derive instance eqTemplatesSlot :: Eq TemplatesSlot
 derive instance ordTemplatesSlot :: Ord TemplatesSlot
-
 type TemplatesSlotDef slot = forall query. H.Slot query Templates.TemplatesOutput slot
+
+data ExportSlot = ExportModal
+
+derive instance eqExportSlot :: Eq ExportSlot
+derive instance ordExportSlot :: Ord ExportSlot
+type ExportSlotDef slot = forall query. H.Slot query Void slot
+
+type Slots =
+  ( recurrence :: RecurrenceSlotDef RecurrenceSlot
+  , templates :: TemplatesSlotDef TemplatesSlot
+  , export :: ExportSlotDef ExportSlot
+  )
 
 data Command
   = SyncCmd SyncCommand
@@ -207,9 +213,6 @@ instance toActionDragAction :: ToAction DragAction where
 
 instance toActionViewAction :: ToAction ViewAction where
   toAction = ViewAction
-
-instance toActionExportAction :: ToAction ExportAction where
-  toAction = ExportAction
 
 instance toActionListAction :: ToAction ListAction where
   toAction (ListViewAction viewAction) = ViewAction viewAction
@@ -280,7 +283,7 @@ prefillCreateDraft itemType focusDate draft
   | otherwise =
       let
         start = defaultStartDateTime focusDate
-        end = if draft.windowEnd == "" then fromMaybe start (shiftMinutes 30 start) else draft.windowEnd
+        end = if draft.windowEnd == "" then fromMaybe start (shiftMinutesRaw 30 start) else draft.windowEnd
       in
         draft
           { windowStart = start
@@ -299,6 +302,48 @@ applyTemplateToDraft template windowStart windowEnd =
   , recurrence: defaultRecurrenceDraft
   }
 
+itemTypeIso :: Iso' ItemType Export.ItemType
+itemTypeIso = iso toExport fromExport
+  where
+  toExport = case _ of
+    Intention -> Export.Intention
+    ScheduledBlock -> Export.ScheduledBlock
+  fromExport = case _ of
+    Export.Intention -> Intention
+    Export.ScheduledBlock -> ScheduledBlock
+
+itemStatusIso :: Iso' ItemStatus Export.ItemStatus
+itemStatusIso = iso toExport fromExport
+  where
+  toExport = case _ of
+    Todo -> Export.Todo
+    EnCours -> Export.EnCours
+    Fait -> Export.Fait
+    Annule -> Export.Annule
+  fromExport = case _ of
+    Export.Todo -> Todo
+    Export.EnCours -> EnCours
+    Export.Fait -> Fait
+    Export.Annule -> Annule
+
+toExportItem :: CalendarItem -> ExportItem
+toExportItem item =
+  let
+    content = calendarItemContent item
+  in
+    ExportItem
+      { itemType: view itemTypeIso content.itemType
+      , title: content.title
+      , windowStart: content.windowStart
+      , windowEnd: content.windowEnd
+      , status: view itemStatusIso content.status
+      , category: content.category
+      , sourceItemId: content.sourceItemId
+      , actualDurationMinutes: content.actualDurationMinutes
+      , recurrenceRule: content.recurrenceRule
+      , recurrenceExceptionDates: content.recurrenceExceptionDates
+      }
+
 renderTemplatesPanelPage :: Templates.TemplateState -> H.ComponentHTML Action Slots Aff
 renderTemplatesPanelPage templatesState =
   slot (Proxy :: _ "templates") TemplatesModal Templates.component templatesState TemplatesOutputAction
@@ -310,19 +355,6 @@ renderCsvImportPanelPage csvInput result =
 renderIcsImportPanelPage :: forall w. String -> Maybe IcsImportResult -> HTML w Action
 renderIcsImportPanelPage icsInput result =
   map ImportAction (renderIcsImportPanel icsInput result)
-
-renderExportPanelPage
-  :: forall w
-   . ExportFormat
-  -> String
-  -> String
-  -> String
-  -> String
-  -> String
-  -> String
-  -> HTML w Action
-renderExportPanelPage format typeFilter statusFilter categoryFilter startDate endDate output =
-  map toAction (renderExportPanel format typeFilter statusFilter categoryFilter startDate endDate output)
 
 component :: forall q i. H.Component q i NoOutput Aff
 component =
@@ -343,7 +375,6 @@ initialState = const
   , notifications: notificationInitialState
   , templates: Templates.templateInitialState
   , imports: importInitialState
-  , exports: exportInitialState
   , view: viewInitialState
   }
 
@@ -364,9 +395,6 @@ _templates = prop (Proxy :: _ "templates")
 
 _imports :: Lens' State ImportState
 _imports = prop (Proxy :: _ "imports")
-
-_exports :: Lens' State ExportState
-_exports = prop (Proxy :: _ "exports")
 
 _view :: Lens' State ViewState
 _view = prop (Proxy :: _ "view")
@@ -412,9 +440,6 @@ instance hasStateLensView :: HasStateLens ViewState where
 
 instance hasStateLensImports :: HasStateLens ImportState where
   getLens = _imports
-
-instance hasStateLensExports :: HasStateLens ExportState where
-  getLens = _exports
 
 instance hasStateLensNotifications :: HasStateLens NotificationState where
   getLens = _notifications
@@ -578,7 +603,7 @@ handleAction action = handleError $
         Templates.TemplatesUse template -> do
           now <- liftEffect nowDateTime
           let startStr = formatDateTimeLocal now
-          let endStr = fromMaybe startStr (shiftMinutes template.durationMinutes startStr)
+          let endStr = fromMaybe startStr (shiftMinutesRaw template.durationMinutes startStr)
           modify_ (_calendarDraft .~ applyTemplateToDraft template startStr endStr)
     CreateRecurrenceCmd (Recurrence.RecurrenceApplied draft) ->
       modify_
@@ -597,9 +622,6 @@ handleAction action = handleError $
           , offlineMode: st ^. _syncOfflineModeState
           }
       withSubState $ handleImportAction ctx importAction
-    ExportAction exportAction -> do
-      st <- get
-      withSubState $ handleExportAction (st ^. _calendarItems) exportAction
 
 initAction :: ErrorAgendaAppM Unit
 initAction = do
@@ -706,16 +728,15 @@ subscribeToGlobalResize = do
   pure unit
 
 render :: State -> H.ComponentHTML Action Slots Aff
-render { calendar, sync, drag, notifications, templates, imports, exports, view } =
+render { calendar, sync, drag, notifications, templates, imports, view } =
   let
     { items, showConflictsOnly, conflictResolution, sortMode } = calendar
     SyncState { offlineMode, syncConflict, updateError } = sync
     DragState { draggingId, dragHoverIndex } = drag
     NotificationState { notificationDefaults, notificationOverrides, notificationPanelOpen, notificationEditor } = notifications
     ImportState { csvInput, csvImportResult, icsInput, icsImportResult } = imports
-    ExportState { exportFormat, exportTypeFilter, exportStatusFilter, exportCategoryFilter, exportStartDate, exportEndDate, exportOutput } = exports
     ViewState { viewMode, focusDate, validationPanel, isMobile } = view
-    agendaModalsInput = buildAgendaModalsInput { calendar, sync, drag, notifications, templates, imports, exports, view }
+    agendaModalsInput = buildAgendaModalsInput { calendar, sync, drag, notifications, templates, imports, view }
     { conflictGroups } = agendaModalsInput.filters
     { intentions: unplannedIntentions } = agendaModalsInput.notifications
     conflictIds = detectConflictIds items
@@ -757,7 +778,6 @@ render { calendar, sync, drag, notifications, templates, imports, exports, view 
                 [ NotificationAction <$> renderNotificationsPanel notificationPanelOpen notificationDefaults notificationOverrides notificationEditor unplannedIntentions
                 , renderAccordion "Import CSV" "calendar-accordion import-csv" $ renderCsvImportPanelPage csvInput csvImportResult
                 , renderAccordion "Import ICS" "calendar-accordion import-ics" $ renderIcsImportPanelPage icsInput icsImportResult
-                , renderAccordion "Export" "calendar-accordion export" $ renderExportPanelPage exportFormat exportTypeFilter exportStatusFilter exportCategoryFilter exportStartDate exportEndDate exportOutput
                 ]
             ]
         ]
@@ -802,24 +822,18 @@ type AgendaModalsInput =
       { input :: String
       , result :: Maybe IcsImportResult
       }
-  , export ::
-      { format :: ExportFormat
-      , typeFilter :: String
-      , statusFilter :: String
-      , categoryFilter :: String
-      , startDate :: String
-      , endDate :: String
-      , output :: String
-      }
+  , exportItems :: Array ExportItem
   , draft :: IntentionDraft
   , validationError :: Maybe String
   , editPanel :: Maybe EditPanel
   }
 
 renderAgendaModals :: AgendaModalsInput -> H.ComponentHTML Action Slots Aff
-renderAgendaModals { activeModal, filters, notifications, templates, csvImport, icsImport, export, draft, validationError, editPanel } =
+renderAgendaModals { activeModal, filters, notifications, templates, csvImport, icsImport, exportItems, draft, validationError, editPanel } =
   let
     renderModal title content = Modal.renderModal title content (ViewAction ViewCloseModal) (ViewAction ViewCloseModal)
+    renderExportModal items =
+      slot (Proxy :: _ "export") ExportModal Export.component (ExportInput { items }) absurd
   in
     maybe (div [] [])
       case _ of
@@ -832,7 +846,7 @@ renderAgendaModals { activeModal, filters, notifications, templates, csvImport, 
         ModalTemplates -> renderModal "Templates de tâches" [ renderTemplatesPanelPage templates ]
         ModalImportCsv -> renderModal "Import CSV" [ renderCsvImportPanelPage csvImport.input csvImport.result ]
         ModalImportIcs -> renderModal "Import ICS" [ renderIcsImportPanelPage icsImport.input icsImport.result ]
-        ModalExport -> renderModal "Export" [ renderExportPanelPage export.format export.typeFilter export.statusFilter export.categoryFilter export.startDate export.endDate export.output ]
+        ModalExport -> renderModal "Export" [ renderExportModal exportItems ]
         ModalEditItem -> case editPanel of
           Nothing -> text ""
           Just panel ->
@@ -843,13 +857,12 @@ renderAgendaModals { activeModal, filters, notifications, templates, csvImport, 
       activeModal
 
 buildAgendaModalsInput :: State -> AgendaModalsInput
-buildAgendaModalsInput { calendar, sync, notifications, templates, imports, exports, view } =
+buildAgendaModalsInput { calendar, sync, notifications, templates, imports, view } =
   let
     { items, draft, validationError, showConflictsOnly, sortMode } = calendar
     SyncState { offlineMode } = sync
     NotificationState { notificationDefaults, notificationOverrides, notificationEditor } = notifications
     ImportState { csvInput, csvImportResult, icsInput, icsImportResult } = imports
-    ExportState { exportFormat, exportTypeFilter, exportStatusFilter, exportCategoryFilter, exportStartDate, exportEndDate, exportOutput } = exports
     ViewState { activeModal, editPanel } = view
     conflictGroups = detectConflictGroups items
   in
@@ -875,15 +888,7 @@ buildAgendaModalsInput { calendar, sync, notifications, templates, imports, expo
         { input: icsInput
         , result: icsImportResult
         }
-    , export:
-        { format: exportFormat
-        , typeFilter: exportTypeFilter
-        , statusFilter: exportStatusFilter
-        , categoryFilter: exportCategoryFilter
-        , startDate: exportStartDate
-        , endDate: exportEndDate
-        , output: exportOutput
-        }
+    , exportItems: map toExportItem items
     , draft
     , validationError
     , editPanel
@@ -1077,7 +1082,7 @@ renderItem conflictIds isMobile _ item =
           [ div [ class_ "calendar-card-time" ] [ text (timeLabel content.windowStart) ]
           , div [ class_ "calendar-card-title" ] [ text content.title ]
           , div [ class_ "calendar-card-window" ]
-              [ text $ content.windowStart <> " → " <> content.windowEnd ]
+              [ text $ formatDateTimeLocal content.windowStart <> " → " <> formatDateTimeLocal content.windowEnd ]
           , renderCategory content.category
           , renderPrimaryAction item content
           ]
@@ -1354,22 +1359,26 @@ toNewIntention draft = do
     Left err -> Left err
     Right ok -> Right ok
   actualDuration <- parseDuration draft.actualDurationMinutes
-  Right
-    ( NewCalendarItem
-        { content:
-            { itemType: draft.itemType
-            , title: draft.title
-            , windowStart: draft.windowStart
-            , windowEnd: draft.windowEnd
-            , status: draft.status
-            , sourceItemId: Nothing
-            , actualDurationMinutes: actualDuration
-            , category: toOptionalString draft.category
-            , recurrenceRule: recurrence.rule
-            , recurrenceExceptionDates: recurrence.exceptions
-            }
-        }
-    )
+  windowStart <- maybe (Left "Début invalide (format YYYY-MM-DDTHH:MM).") Right (parseDateTimeLocal draft.windowStart)
+  windowEnd <- maybe (Left "Fin invalide (format YYYY-MM-DDTHH:MM).") Right (parseDateTimeLocal draft.windowEnd)
+  if windowEnd <= windowStart then Left "La fin doit être après le début."
+  else
+    Right
+      ( NewCalendarItem
+          { content:
+              { itemType: draft.itemType
+              , title: draft.title
+              , windowStart
+              , windowEnd
+              , status: draft.status
+              , sourceItemId: Nothing
+              , actualDurationMinutes: actualDuration
+              , category: toOptionalString draft.category
+              , recurrenceRule: recurrence.rule
+              , recurrenceExceptionDates: parseExceptionDatesOrEmpty recurrence.exceptions
+              }
+          }
+      )
   where
   parseDuration raw =
     if StringCommon.trim raw == "" then
@@ -1545,16 +1554,17 @@ assignColumns group =
       result.placements
 
 toTimelineBlock :: CalendarItem -> Maybe TimelineBlock
-toTimelineBlock item = do
-  let content = calendarItemContent item
-  startMin <- minuteOfDay content.windowStart
-  endMinRaw <- minuteOfDay content.windowEnd
+toTimelineBlock item =
   let
+    content = calendarItemContent item
+    startMin = minuteOfDay content.windowStart
+    endMinRaw = minuteOfDay content.windowEnd
     startClamped = clamp 0 1439 startMin
     endAdjusted = if endMinRaw <= startMin then 1440 else endMinRaw
     endClamped = clamp (startClamped + 1) 1440 endAdjusted
-  if endClamped <= 0 || startClamped >= 1440 then Nothing
-  else Just { item, startMin: startClamped, endMin: endClamped }
+  in
+    if endClamped <= 0 || startClamped >= 1440 then Nothing
+    else Just { item, startMin: startClamped, endMin: endClamped }
 
 -- END src/Calendar/Calendar/Timeline.purs
 
@@ -1588,8 +1598,8 @@ instance showPrimaryAction :: Show PrimaryAction where
 -- BEGIN src/Calendar/Conflict.purs
 type ConflictBlock =
   { id :: String
-  , start :: String
-  , end :: String
+  , start :: DateTime
+  , end :: DateTime
   }
 
 detectConflictIds :: Array CalendarItem -> Array String
@@ -1729,7 +1739,7 @@ renderConflictItem items itemId =
         li [ class_ "calendar-conflict-item" ]
           [ div [ class_ "calendar-conflict-item-title" ] [ text content.title ]
           , div [ class_ "calendar-conflict-item-window" ]
-              [ text $ content.windowStart <> " → " <> content.windowEnd ]
+              [ text $ formatDateTimeLocal content.windowStart <> " → " <> formatDateTimeLocal content.windowEnd ]
           ]
     Nothing -> text ""
   where
@@ -2255,7 +2265,7 @@ handleDragAction ctx = case _ of
               ServerCalendarItem { id } -> id == itemId
               _ -> false
           )
-          ctx.items >>= \item ->
+          ctx.items <#> \item ->
           durationMinutesBetween (calendarItemContent item).windowStart (calendarItemContent item).windowEnd
     offset <- liftEffect $ dragOffsetFromEvent ev duration
     modify_ ((_draggingIdS .~ Just itemId) <<< (_dragOffsetMinutesS .~ offset))
@@ -2287,25 +2297,28 @@ handleDragAction ctx = case _ of
       Nothing -> pure unit
       Just draggingId -> do
         let
-          baseDateTime = ctx.focusDate <> "T00:00"
           offset = fromMaybe 0 (dragState ^. _dragOffsetMinutesS)
           minuteIndex = fromMaybe 0 idx
           adjustedIndex = computeDropMinuteIndex minuteIndex offset
           totalMinutes = indexToMinutes adjustedIndex
           hour = Int.quot totalMinutes 60
           minute = Int.rem totalMinutes 60
-          newStart = combineDateWithTime baseDateTime (DateTime.formatLocalTimeParts hour minute)
-          updated =
-            newStart >>= \start ->
+          newStart =
+            parseDateLocal ctx.focusDate >>= \dateValue ->
+              DateTime.timeFromParts hour minute <#> \timeValue ->
+                combineDateWithTime dateValue timeValue
+          updated = do
+            start <- newStart
+            item <-
               find
                 ( \item -> case item of
                     ServerCalendarItem { id } -> id == draggingId
                     _ -> false
                 )
-                ctx.items >>= \item ->
-                durationMinutesBetween (calendarItemContent item).windowStart (calendarItemContent item).windowEnd >>= \mins ->
-                  shiftMinutes mins start >>= \end ->
-                    Just { start, end }
+                ctx.items
+            let mins = durationMinutesBetween (calendarItemContent item).windowStart (calendarItemContent item).windowEnd
+            end <- shiftMinutes mins start
+            pure { start, end }
           resetDragState =
             (_draggingIdS .~ Nothing)
               <<< (_dragHoverIndexS .~ Nothing)
@@ -2338,7 +2351,7 @@ handleDragAction ctx = case _ of
               ServerCalendarItem { id } -> id == itemId
               _ -> false
           )
-          ctx.items >>= \item ->
+          ctx.items <#> \item ->
           durationMinutesBetween (calendarItemContent item).windowStart (calendarItemContent item).windowEnd
     offset <- liftEffect $ dragOffsetFromTouch ev duration
     modify_
@@ -2388,24 +2401,27 @@ handleDragAction ctx = case _ of
           Nothing -> modify_ resetTouchState
           Just minuteIndex -> do
             let
-              baseDateTime = ctx.focusDate <> "T00:00"
               offset = fromMaybe 0 (dragState ^. _dragOffsetMinutesS)
               adjustedIndex = computeDropMinuteIndex minuteIndex offset
               totalMinutes = indexToMinutes adjustedIndex
               hour = Int.quot totalMinutes 60
               minute = Int.rem totalMinutes 60
-              newStart = combineDateWithTime baseDateTime (DateTime.formatLocalTimeParts hour minute)
-              updated =
-                newStart >>= \start ->
+              newStart =
+                parseDateLocal ctx.focusDate >>= \dateValue ->
+                  DateTime.timeFromParts hour minute <#> \timeValue ->
+                    combineDateWithTime dateValue timeValue
+              updated = do
+                start <- newStart
+                item <-
                   find
                     ( \item -> case item of
                         ServerCalendarItem { id } -> id == draggingId
                         _ -> false
                     )
-                    ctx.items >>= \item ->
-                    durationMinutesBetween (calendarItemContent item).windowStart (calendarItemContent item).windowEnd >>= \mins ->
-                      shiftMinutes mins start >>= \end ->
-                        Just { start, end }
+                    ctx.items
+                let mins = durationMinutesBetween (calendarItemContent item).windowStart (calendarItemContent item).windowEnd
+                end <- shiftMinutes mins start
+                pure { start, end }
             case updated of
               Nothing ->
                 modify_ resetTouchState
@@ -2668,8 +2684,8 @@ moveItemBefore dragId targetId items =
 
 updateItemWindowById
   :: String
-  -> String
-  -> String
+  -> DateTime
+  -> DateTime
   -> Array CalendarItem
   -> { items :: Array CalendarItem, updated :: Maybe CalendarItem }
 updateItemWindowById targetId newStart newEnd items =
@@ -2726,8 +2742,8 @@ buildEditDraft item =
         { itemId: id
         , itemType: content.itemType
         , title: content.title
-        , windowStart: content.windowStart
-        , windowEnd: content.windowEnd
+        , windowStart: formatDateTimeLocal content.windowStart
+        , windowEnd: formatDateTimeLocal content.windowEnd
         , category: case content.category of
             Nothing -> ""
             Just value -> value
@@ -2735,7 +2751,7 @@ buildEditDraft item =
         , actualDurationMinutes: case content.actualDurationMinutes of
             Nothing -> ""
             Just minutes -> show minutes
-        , recurrence: draftFromRecurrence content.recurrenceRule content.recurrenceExceptionDates
+        , recurrence: draftFromRecurrence content.recurrenceRule (map DateTime.formatLocalDate content.recurrenceExceptionDates)
         }
     _ -> Nothing
 
@@ -2760,6 +2776,8 @@ applyEditDraft draft item = do
         Left err -> Left (EditRecurrence err)
         Right ok -> Right ok
       actualDuration <- parseDuration draft.actualDurationMinutes
+      windowStart <- maybe (Left (EditValidation WindowStartInvalid)) Right (parseDateTimeLocal draft.windowStart)
+      windowEnd <- maybe (Left (EditValidation WindowEndInvalid)) Right (parseDateTimeLocal draft.windowEnd)
       case item of
         ServerCalendarItem payload ->
           Right
@@ -2768,13 +2786,13 @@ applyEditDraft draft item = do
                   { content =
                       payload.content
                         { title = draft.title
-                        , windowStart = draft.windowStart
-                        , windowEnd = draft.windowEnd
+                        , windowStart = windowStart
+                        , windowEnd = windowEnd
                         , category = toOptionalString draft.category
                         , status = draft.status
                         , actualDurationMinutes = actualDuration
                         , recurrenceRule = recurrence.rule
-                        , recurrenceExceptionDates = recurrence.exceptions
+                        , recurrenceExceptionDates = parseExceptionDatesOrEmpty recurrence.exceptions
                         }
                   }
             )
@@ -2789,355 +2807,6 @@ applyEditDraft draft item = do
         Nothing -> Left (EditDuration "Durée réelle invalide.")
 
 -- END src/Calendar/Edit.purs
-
--- BEGIN src/Calendar/Export.purs
-newtype ExportState = ExportState
-  { exportFormat :: ExportFormat
-  , exportTypeFilter :: String
-  , exportStatusFilter :: String
-  , exportCategoryFilter :: String
-  , exportStartDate :: String
-  , exportEndDate :: String
-  , exportOutput :: String
-  }
-
-exportInitialState :: ExportState
-exportInitialState =
-  ExportState
-    { exportFormat: ExportCSV
-    , exportTypeFilter: ""
-    , exportStatusFilter: ""
-    , exportCategoryFilter: ""
-    , exportStartDate: ""
-    , exportEndDate: ""
-    , exportOutput: ""
-    }
-
-_exportFormatS :: Lens' ExportState ExportFormat
-_exportFormatS =
-  lens
-    (\(ExportState state) -> state.exportFormat)
-    (\(ExportState state) exportFormat -> ExportState (state { exportFormat = exportFormat }))
-
-_exportTypeFilterS :: Lens' ExportState String
-_exportTypeFilterS =
-  lens
-    (\(ExportState state) -> state.exportTypeFilter)
-    (\(ExportState state) exportTypeFilter -> ExportState (state { exportTypeFilter = exportTypeFilter }))
-
-_exportStatusFilterS :: Lens' ExportState String
-_exportStatusFilterS =
-  lens
-    (\(ExportState state) -> state.exportStatusFilter)
-    (\(ExportState state) exportStatusFilter -> ExportState (state { exportStatusFilter = exportStatusFilter }))
-
-_exportCategoryFilterS :: Lens' ExportState String
-_exportCategoryFilterS =
-  lens
-    (\(ExportState state) -> state.exportCategoryFilter)
-    (\(ExportState state) exportCategoryFilter -> ExportState (state { exportCategoryFilter = exportCategoryFilter }))
-
-_exportStartDateS :: Lens' ExportState String
-_exportStartDateS =
-  lens
-    (\(ExportState state) -> state.exportStartDate)
-    (\(ExportState state) exportStartDate -> ExportState (state { exportStartDate = exportStartDate }))
-
-_exportEndDateS :: Lens' ExportState String
-_exportEndDateS =
-  lens
-    (\(ExportState state) -> state.exportEndDate)
-    (\(ExportState state) exportEndDate -> ExportState (state { exportEndDate = exportEndDate }))
-
-_exportOutputS :: Lens' ExportState String
-_exportOutputS =
-  lens
-    (\(ExportState state) -> state.exportOutput)
-    (\(ExportState state) exportOutput -> ExportState (state { exportOutput = exportOutput }))
-
-data ExportAction
-  = ExportFormatChangedAction String
-  | ExportTypeFilterChangedAction String
-  | ExportStatusFilterChangedAction String
-  | ExportCategoryFilterChangedAction String
-  | ExportStartDateChangedAction String
-  | ExportEndDateChangedAction String
-  | ExportGenerate
-  | ExportClearOutput
-
-handleExportAction :: Array CalendarItem -> ExportAction -> StateT ExportState (WriterT (Array Void) Aff) Unit
-handleExportAction items = case _ of
-  ExportFormatChangedAction raw ->
-    modify_ (_exportFormatS .~ parseExportFormat raw)
-  ExportTypeFilterChangedAction raw ->
-    modify_ (_exportTypeFilterS .~ raw)
-  ExportStatusFilterChangedAction raw ->
-    modify_ (_exportStatusFilterS .~ raw)
-  ExportCategoryFilterChangedAction raw ->
-    modify_ (_exportCategoryFilterS .~ raw)
-  ExportStartDateChangedAction raw ->
-    modify_ (_exportStartDateS .~ raw)
-  ExportEndDateChangedAction raw ->
-    modify_ (_exportEndDateS .~ raw)
-  ExportGenerate -> do
-    exportState <- get
-    let
-      filter =
-        { itemType: parseExportItemType (exportState ^. _exportTypeFilterS)
-        , status: parseExportStatus (exportState ^. _exportStatusFilterS)
-        , category: toOptionalString (exportState ^. _exportCategoryFilterS)
-        , startDate: toOptionalString (exportState ^. _exportStartDateS)
-        , endDate: toOptionalString (exportState ^. _exportEndDateS)
-        }
-      filtered = filterItemsForExport filter items
-      output =
-        case exportState ^. _exportFormatS of
-          ExportCSV -> exportItemsToCsv filtered
-          ExportICS -> exportItemsToIcs filtered
-    modify_ (_exportOutputS .~ output)
-  ExportClearOutput ->
-    modify_ (_exportOutputS .~ "")
-
-renderExportPanel
-  :: forall w
-   . ExportFormat
-  -> String
-  -> String
-  -> String
-  -> String
-  -> String
-  -> String
-  -> HTML w ExportAction
-renderExportPanel format typeFilter statusFilter categoryFilter startDate endDate output =
-  section [ class_ "calendar-export" ]
-    [ renderPanelHeader
-        { baseClass: "calendar-export"
-        , title: "Export"
-        , subtitle: "Filtres: type, catégorie, statut, période."
-        }
-        []
-    , div [ class_ "calendar-export-controls" ]
-        [ div [ class_ "calendar-export-control" ]
-            [ div [ class_ "calendar-notifications-label" ] [ text "Format" ]
-            , select
-                [ class_ "form-select calendar-sort-select"
-                , onValueChange ExportFormatChangedAction
-                , value (exportFormatValue format)
-                ]
-                [ option [ value "csv" ] [ text "CSV" ]
-                , option [ value "ics" ] [ text "ICS" ]
-                ]
-            ]
-        , div [ class_ "calendar-export-control" ]
-            [ div [ class_ "calendar-notifications-label" ] [ text "Type" ]
-            , select
-                [ class_ "form-select calendar-sort-select"
-                , onValueChange ExportTypeFilterChangedAction
-                , value typeFilter
-                ]
-                [ option [ value "" ] [ text "Tous" ]
-                , option [ value "INTENTION" ] [ text "Intention" ]
-                , option [ value "BLOC_PLANIFIE" ] [ text "Bloc planifié" ]
-                ]
-            ]
-        , div [ class_ "calendar-export-control" ]
-            [ div [ class_ "calendar-notifications-label" ] [ text "Statut" ]
-            , select
-                [ class_ "form-select calendar-sort-select"
-                , onValueChange ExportStatusFilterChangedAction
-                , value statusFilter
-                ]
-                [ option [ value "" ] [ text "Tous" ]
-                , option [ value "TODO" ] [ text "TODO" ]
-                , option [ value "EN_COURS" ] [ text "EN_COURS" ]
-                , option [ value "FAIT" ] [ text "FAIT" ]
-                , option [ value "ANNULE" ] [ text "ANNULE" ]
-                ]
-            ]
-        , div [ class_ "calendar-export-control" ]
-            [ div [ class_ "calendar-notifications-label" ] [ text "Catégorie" ]
-            , input
-                [ class_ "form-control calendar-input"
-                , placeholder "Ex: Sport"
-                , value categoryFilter
-                , onValueChange ExportCategoryFilterChangedAction
-                ]
-            ]
-        , div [ class_ "calendar-export-control" ]
-            [ div [ class_ "calendar-notifications-label" ] [ text "Début" ]
-            , input
-                [ class_ "form-control calendar-input"
-                , type_ InputDate
-                , value startDate
-                , onValueChange ExportStartDateChangedAction
-                ]
-            ]
-        , div [ class_ "calendar-export-control" ]
-            [ div [ class_ "calendar-notifications-label" ] [ text "Fin" ]
-            , input
-                [ class_ "form-control calendar-input"
-                , type_ InputDate
-                , value endDate
-                , onValueChange ExportEndDateChangedAction
-                ]
-            ]
-        ]
-    , div [ class_ "calendar-export-actions" ]
-        [ button [ class_ "btn btn-sm btn-primary", onClick (const ExportGenerate) ] [ text "Générer" ]
-        , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const ExportClearOutput) ] [ text "Effacer" ]
-        ]
-    , if output == "" then text ""
-      else
-        textarea
-          [ class_ "form-control calendar-export-textarea"
-          , value output
-          ]
-    ]
-
--- END src/Calendar/Export.purs
-
--- BEGIN src/Calendar/Exports.purs
-exportFormatValue :: ExportFormat -> String
-exportFormatValue ExportCSV = "csv"
-exportFormatValue ExportICS = "ics"
-
-parseExportFormat :: String -> ExportFormat
-parseExportFormat raw =
-  if raw == "ics" then ExportICS else ExportCSV
-
-parseExportItemType :: String -> Maybe ItemType
-parseExportItemType raw =
-  case raw of
-    "INTENTION" -> Just Intention
-    "BLOC_PLANIFIE" -> Just ScheduledBlock
-    _ -> Nothing
-
-parseExportStatus :: String -> Maybe ItemStatus
-parseExportStatus raw =
-  case raw of
-    "TODO" -> Just Todo
-    "EN_COURS" -> Just EnCours
-    "FAIT" -> Just Fait
-    "ANNULE" -> Just Annule
-    _ -> Nothing
-
-filterItemsForExport :: ExportFilter -> Array CalendarItem -> Array CalendarItem
-filterItemsForExport criteria items =
-  filter (matchesFilter criteria) items
-
-matchesFilter :: ExportFilter -> CalendarItem -> Boolean
-matchesFilter criteria item =
-  let
-    content = calendarItemContent item
-    matchesType = maybe true (\target -> content.itemType == target) criteria.itemType
-    matchesStatus = maybe true (\target -> content.status == target) criteria.status
-    matchesCategory =
-      case criteria.category of
-        Nothing -> true
-        Just target ->
-          case content.category of
-            Nothing -> false
-            Just value -> normalizeHeader value == normalizeHeader target
-    dateKey = datePart content.windowStart
-    matchesStart =
-      case criteria.startDate of
-        Nothing -> true
-        Just start -> dateKey >= start
-    matchesEnd =
-      case criteria.endDate of
-        Nothing -> true
-        Just end -> dateKey <= end
-  in
-    matchesType && matchesStatus && matchesCategory && matchesStart && matchesEnd
-
-normalizeHeader :: String -> String
-normalizeHeader = StringCommon.trim >>> StringCommon.toLower
-
-exportItemsToCsv :: Array CalendarItem -> String
-exportItemsToCsv items =
-  let
-    header = "type,titre,fenetre_debut,fenetre_fin,statut,categorie"
-    rows = map exportCsvRow items
-  in
-    StringCommon.joinWith "\n" ([ header ] <> rows)
-
-exportCsvRow :: CalendarItem -> String
-exportCsvRow item =
-  let
-    content = calendarItemContent item
-    category = fromMaybe "" content.category
-  in
-    StringCommon.joinWith "," $
-      map csvEscape
-        [ exportItemType content.itemType
-        , content.title
-        , content.windowStart
-        , content.windowEnd
-        , exportItemStatus content.status
-        , category
-        ]
-
-csvEscape :: String -> String
-csvEscape value =
-  "\"" <> escapeQuotes value <> "\""
-
-escapeQuotes :: String -> String
-escapeQuotes raw =
-  foldl
-    (\acc ch -> if ch == '"' then acc <> "\"\"" else acc <> String.singleton ch)
-    ""
-    (String.toCharArray raw)
-
-exportItemsToIcs :: Array CalendarItem -> String
-exportItemsToIcs items =
-  let
-    header = [ "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//FAVS//EN" ]
-    events = items >>= exportIcsEvent
-  in
-    StringCommon.joinWith "\n" (header <> events <> [ "END:VCALENDAR" ])
-
-exportIcsEvent :: CalendarItem -> Array String
-exportIcsEvent item =
-  let
-    content = calendarItemContent item
-    start = toIcsDateTime content.windowStart
-    end = toIcsDateTime content.windowEnd
-    categoryLine =
-      case content.category of
-        Nothing -> []
-        Just value -> [ "CATEGORIES:" <> value ]
-  in
-    [ "BEGIN:VEVENT"
-    , "SUMMARY:" <> content.title
-    , "DTSTART:" <> start
-    , "DTEND:" <> end
-    ]
-      <> categoryLine
-      <> [ "END:VEVENT" ]
-
-toIcsDateTime :: String -> String
-toIcsDateTime raw =
-  if String.length raw >= 16 then
-    String.slice 0 4 raw
-      <> String.slice 5 7 raw
-      <> String.slice 8 10 raw
-      <> "T"
-      <> String.slice 11 13 raw
-      <>
-        String.slice 14 16 raw
-  else raw
-
-exportItemType :: ItemType -> String
-exportItemType Intention = "INTENTION"
-exportItemType ScheduledBlock = "BLOC_PLANIFIE"
-
-exportItemStatus :: ItemStatus -> String
-exportItemStatus Todo = "TODO"
-exportItemStatus EnCours = "EN_COURS"
-exportItemStatus Fait = "FAIT"
-exportItemStatus Annule = "ANNULE"
-
--- END src/Calendar/Exports.purs
 
 -- BEGIN src/Calendar/Helpers.purs
 isDateTimeLocal :: String -> Boolean
@@ -3160,39 +2829,42 @@ parsePositiveInt raw =
 isTimeLocal :: String -> Boolean
 isTimeLocal = DateTime.isLocalTime
 
-combineDateWithTime :: String -> String -> Maybe String
-combineDateWithTime dateTimeRaw timeRaw = do
-  dt <- parseDateTimeLocal dateTimeRaw
-  t <- parseTimeLocal timeRaw
-  pure $ formatDateTimeLocal (DateTime (date dt) t)
+combineDateWithTime :: Date -> Time -> DateTime
+combineDateWithTime dateValue timeValue =
+  DateTime dateValue timeValue
 
-shiftMinutes :: Int -> String -> Maybe String
-shiftMinutes offset start = do
+shiftMinutes :: Int -> DateTime -> Maybe DateTime
+shiftMinutes offset start =
+  adjust (Minutes (Int.toNumber offset)) start
+
+shiftMinutesRaw :: Int -> String -> Maybe String
+shiftMinutesRaw offset start = do
   dt <- parseDateTimeLocal start
-  newDt <- adjust (Minutes (Int.toNumber offset)) dt
+  newDt <- shiftMinutes offset dt
   pure $ formatDateTimeLocal newDt
 
-durationMinutesBetween :: String -> String -> Maybe Int
-durationMinutesBetween start end = do
+durationMinutesBetween :: DateTime -> DateTime -> Int
+durationMinutesBetween start end =
+  let
+    Minutes n = diff end start
+    minutes = Int.floor n
+  in
+    max 1 minutes
+
+durationMinutesBetweenRaw :: String -> String -> Maybe Int
+durationMinutesBetweenRaw start end = do
   startDt <- parseDateTimeLocal start
   endDt <- parseDateTimeLocal end
-  let
-    Minutes n = diff endDt startDt
-    minutes = Int.floor n
-  pure $ max 1 minutes
+  pure $ durationMinutesBetween startDt endDt
 
-durationMinutesBetweenDateTime :: String -> DateTime -> Maybe Int
-durationMinutesBetweenDateTime start now = do
-  startDt <- parseDateTimeLocal start
-  let
-    Minutes n = diff now startDt
-    minutes = Int.floor n
-  pure $ max 1 minutes
+durationMinutesBetweenDateTime :: DateTime -> DateTime -> Int
+durationMinutesBetweenDateTime start now =
+  durationMinutesBetween start now
 
-suggestDurationMinutes :: String -> Effect (Maybe Int)
+suggestDurationMinutes :: DateTime -> Effect (Maybe Int)
 suggestDurationMinutes start = do
   now <- nowDateTime
-  pure $ durationMinutesBetweenDateTime start now
+  pure $ Just (durationMinutesBetweenDateTime start now)
 
 formatDate :: DateTime -> String
 formatDate dt =
@@ -3204,13 +2876,12 @@ formatDateOnly = DateTime.formatLocalDate
 formatDateTimeLocal :: DateTime -> String
 formatDateTimeLocal = DateTime.formatLocalDateTime
 
-timeLabel :: String -> String
+timeLabel :: DateTime -> String
 timeLabel raw =
-  if String.length raw >= 16 then String.slice 11 16 raw else raw
+  DateTime.formatLocalTime (time raw)
 
-datePart :: String -> String
-datePart raw =
-  if String.length raw >= 10 then String.slice 0 10 raw else raw
+normalizeHeader :: String -> String
+normalizeHeader = StringCommon.trim >>> StringCommon.toLower
 
 toOptionalString :: String -> Maybe String
 toOptionalString raw =
@@ -3226,7 +2897,7 @@ validateIntention draft =
     _ | not (isDateTimeLocal draft.windowStart) -> Left WindowStartInvalid
     _ | not (isDateTimeLocal draft.windowEnd) -> Left WindowEndInvalid
     _ | draft.windowEnd <= draft.windowStart -> Left WindowOrderInvalid
-    _ | maybe true (_ <= 5) (durationMinutesBetween draft.windowStart draft.windowEnd) -> Left WindowTooShort
+    _ | maybe true (_ <= 5) (durationMinutesBetweenRaw draft.windowStart draft.windowEnd) -> Left WindowTooShort
     _ -> Right draft
 
 calendarItemContent :: CalendarItem -> CalendarItemContent
@@ -3235,7 +2906,9 @@ calendarItemContent (ServerCalendarItem { content }) = content
 
 isItemOnDate :: String -> CalendarItem -> Boolean
 isItemOnDate dateStr item =
-  datePart (calendarItemContent item).windowStart == dateStr
+  case parseDateLocal dateStr of
+    Nothing -> false
+    Just dateValue -> date (calendarItemContent item).windowStart == dateValue
 
 generateDateRange :: String -> Int -> Array String
 generateDateRange start count =
@@ -3342,11 +3015,12 @@ parseSortMode raw =
     "conflict" -> SortByConflict
     _ -> SortByTime
 
-minuteOfDay :: String -> Maybe Int
-minuteOfDay raw = do
-  dt <- parseDateTimeLocal raw
-  let t = time dt
-  pure $ (fromEnum (hour t) * 60) + fromEnum (minute t)
+minuteOfDay :: DateTime -> Int
+minuteOfDay raw =
+  let
+    t = time raw
+  in
+    (fromEnum (hour t) * 60) + fromEnum (minute t)
 
 -- END src/Calendar/Helpers.purs
 
@@ -3578,20 +3252,67 @@ resolveCsvHeader rawHeader =
     endIdx = findFor [ "fenetre_fin", "window_end", "end" ]
     categoryIdx = findFor [ "categorie", "category" ]
     statusIdx = findFor [ "statut", "status" ]
+    sourceItemIdIdx = findFor [ "source_item_id" ]
+    actualDurationIdx = findFor [ "actual_duration_minutes" ]
+    recurrenceRuleTypeIdx = findFor [ "recurrence_rule_type" ]
+    recurrenceRuleIntervalIdx = findFor [ "recurrence_rule_interval_days" ]
+    recurrenceExceptionIdx = findFor [ "recurrence_exception_dates" ]
   in
-    case { typeIdx, titleIdx, startIdx, endIdx } of
-      { typeIdx: Just t, titleIdx: Just ti, startIdx: Just s, endIdx: Just e } ->
-        Right { typeIdx: t, titleIdx: ti, startIdx: s, endIdx: e, categoryIdx, statusIdx }
+    case
+      { typeIdx
+      , titleIdx
+      , startIdx
+      , endIdx
+      , categoryIdx
+      , statusIdx
+      , sourceItemIdIdx
+      , actualDurationIdx
+      , recurrenceRuleTypeIdx
+      , recurrenceRuleIntervalIdx
+      , recurrenceExceptionIdx
+      }
+      of
+      { typeIdx: Just t
+      , titleIdx: Just ti
+      , startIdx: Just s
+      , endIdx: Just e
+      , categoryIdx: Just c
+      , statusIdx: Just st
+      , sourceItemIdIdx: Just source
+      , actualDurationIdx: Just duration
+      , recurrenceRuleTypeIdx: Just ruleType
+      , recurrenceRuleIntervalIdx: Just ruleInterval
+      , recurrenceExceptionIdx: Just exceptions
+      } ->
+        Right
+          { typeIdx: t
+          , titleIdx: ti
+          , startIdx: s
+          , endIdx: e
+          , categoryIdx: c
+          , statusIdx: st
+          , sourceItemIdIdx: source
+          , actualDurationIdx: duration
+          , recurrenceRuleTypeIdx: ruleType
+          , recurrenceRuleIntervalIdx: ruleInterval
+          , recurrenceExceptionIdx: exceptions
+          }
       _ ->
-        Left "Colonnes minimales manquantes: type, titre, fenetre_debut, fenetre_fin."
+        Left
+          "Colonnes manquantes: type, titre, fenetre_debut, fenetre_fin, categorie, statut, source_item_id, actual_duration_minutes, recurrence_rule_type, recurrence_rule_interval_days, recurrence_exception_dates."
 
 type CsvHeader =
   { typeIdx :: Int
   , titleIdx :: Int
   , startIdx :: Int
   , endIdx :: Int
-  , categoryIdx :: Maybe Int
-  , statusIdx :: Maybe Int
+  , categoryIdx :: Int
+  , statusIdx :: Int
+  , sourceItemIdIdx :: Int
+  , actualDurationIdx :: Int
+  , recurrenceRuleTypeIdx :: Int
+  , recurrenceRuleIntervalIdx :: Int
+  , recurrenceExceptionIdx :: Int
   }
 
 parseCsvRows :: CsvHeader -> Array { row :: Int, raw :: String } -> CsvImportResult
@@ -3627,31 +3348,51 @@ parseCsvItem header fields typeVal titleVal startVal endVal = do
   status <- parseCsvStatus (lookupField header.statusIdx fields)
   let
     title = StringCommon.trim titleVal
-    windowStart = StringCommon.trim startVal
-    windowEnd = StringCommon.trim endVal
+    windowStartRaw = StringCommon.trim startVal
+    windowEndRaw = StringCommon.trim endVal
     category = lookupField header.categoryIdx fields >>= toOptionalString
+    sourceItemId = lookupField header.sourceItemIdIdx fields >>= toOptionalString
+    actualDurationRaw = lookupField header.actualDurationIdx fields >>= toOptionalString
+    ruleTypeRaw = lookupField header.recurrenceRuleTypeIdx fields >>= toOptionalString
+    ruleIntervalRaw = lookupField header.recurrenceRuleIntervalIdx fields >>= toOptionalString
+    exceptionRaw = lookupField header.recurrenceExceptionIdx fields >>= toOptionalString
+    exceptions = splitExceptions exceptionRaw
   if title == "" then Left "Le titre est vide."
-  else if not (isDateTimeLocal windowStart) then Left "Début invalide (format YYYY-MM-DDTHH:MM)."
-  else if not (isDateTimeLocal windowEnd) then Left "Fin invalide (format YYYY-MM-DDTHH:MM)."
-  else if windowEnd <= windowStart then Left "La fin doit être après le début."
   else
-    Right $ NewCalendarItem
-      { content:
-          { itemType
-          , title
-          , windowStart
-          , windowEnd
-          , status
-          , sourceItemId: Nothing
-          , actualDurationMinutes: Nothing
-          , category
-          , recurrenceRule: Nothing
-          , recurrenceExceptionDates: []
-          }
-      }
+    case parseDateTimeLocal windowStartRaw of
+      Nothing -> Left "Début invalide (format YYYY-MM-DDTHH:MM)."
+      Just windowStart ->
+        case parseDateTimeLocal windowEndRaw of
+          Nothing -> Left "Fin invalide (format YYYY-MM-DDTHH:MM)."
+          Just windowEnd ->
+            if windowEnd <= windowStart then Left "La fin doit être après le début."
+            else
+              case parseActualDuration actualDurationRaw of
+                Left err -> Left err
+                Right actualDurationMinutes ->
+                  case parseRecurrenceRule ruleTypeRaw ruleIntervalRaw of
+                    Left err -> Left err
+                    Right recurrenceRule ->
+                      case validateExceptions exceptions of
+                        Left err -> Left err
+                        Right validExceptions ->
+                          Right $ NewCalendarItem
+                            { content:
+                                { itemType
+                                , title
+                                , windowStart
+                                , windowEnd
+                                , status
+                                , sourceItemId
+                                , actualDurationMinutes
+                                , category
+                                , recurrenceRule
+                                , recurrenceExceptionDates: validExceptions
+                                }
+                            }
 
-lookupField :: Maybe Int -> Array String -> Maybe String
-lookupField idx fields = idx >>= \i -> index fields i
+lookupField :: Int -> Array String -> Maybe String
+lookupField idx fields = index fields idx
 
 parseCsvItemType :: String -> Either String ItemType
 parseCsvItemType raw =
@@ -3673,6 +3414,70 @@ parseCsvStatus raw =
         "fait" -> Right Fait
         "annule" -> Right Annule
         _ -> Left "Statut invalide (TODO, EN_COURS, FAIT, ANNULE)."
+
+parseActualDuration :: Maybe String -> Either String (Maybe Int)
+parseActualDuration raw =
+  case raw of
+    Nothing -> Right Nothing
+    Just value ->
+      case Int.fromString value of
+        Nothing -> Left "Durée réelle invalide."
+        Just minutes | minutes <= 0 -> Left "Durée réelle invalide."
+        Just minutes -> Right (Just minutes)
+
+parseRecurrenceRule :: Maybe String -> Maybe String -> Either String (Maybe RecurrenceRule)
+parseRecurrenceRule rawType rawInterval =
+  case rawType of
+    Nothing ->
+      case rawInterval of
+        Nothing -> Right Nothing
+        Just _ -> Left "Intervalle de récurrence sans type."
+    Just ruleType ->
+      case normalizeHeader ruleType of
+        "daily" ->
+          if rawInterval == Nothing then Right (Just Daily)
+          else Left "Intervalle invalide pour daily."
+        "weekly" ->
+          if rawInterval == Nothing then Right (Just Weekly)
+          else Left "Intervalle invalide pour weekly."
+        "monthly" ->
+          if rawInterval == Nothing then Right (Just Monthly)
+          else Left "Intervalle invalide pour monthly."
+        "yearly" ->
+          if rawInterval == Nothing then Right (Just Yearly)
+          else Left "Intervalle invalide pour yearly."
+        "every" ->
+          case rawInterval >>= Int.fromString of
+            Nothing -> Left "Intervalle requis pour every."
+            Just days | days <= 0 -> Left "Intervalle requis pour every."
+            Just days -> Right (Just (EveryXDays days))
+        _ -> Left "Type de récurrence invalide (daily, weekly, monthly, yearly, every)."
+
+splitExceptions :: Maybe String -> Array String
+splitExceptions raw =
+  case raw of
+    Nothing -> []
+    Just value ->
+      StringCommon.split (Pattern ";") value
+        # map StringCommon.trim
+        # filter (\entry -> entry /= "")
+
+validateExceptions :: Array String -> Either String (Array Date)
+validateExceptions exceptions = parseExceptionDates exceptions
+
+parseExceptionDates :: Array String -> Either String (Array Date)
+parseExceptionDates exceptions =
+  let
+    parsed = map DateTime.parseLocalDate exceptions
+  in
+    if any (_ == Nothing) parsed then Left "Exception invalide (format YYYY-MM-DD)."
+    else Right (mapMaybe identity parsed)
+
+parseExceptionDatesOrEmpty :: Array String -> Array Date
+parseExceptionDatesOrEmpty exceptions =
+  case parseExceptionDates exceptions of
+    Left _ -> []
+    Right dates -> dates
 
 splitCsvLine :: String -> Array String
 splitCsvLine raw =
@@ -3705,6 +3510,13 @@ type IcsEventDraft =
   { summary :: Maybe String
   , dtStart :: Maybe String
   , dtEnd :: Maybe String
+  , itemType :: Maybe String
+  , status :: Maybe String
+  , sourceItemId :: Maybe String
+  , actualDurationMinutes :: Maybe String
+  , category :: Maybe String
+  , rrule :: Maybe String
+  , exdates :: Array String
   }
 
 parseIcsImport :: String -> IcsImportResult
@@ -3724,7 +3536,21 @@ parseIcsImport raw =
   parseIcsLine state line =
     case StringCommon.trim line of
       "BEGIN:VEVENT" ->
-        state { current = Just { summary: Nothing, dtStart: Nothing, dtEnd: Nothing } }
+        state
+          { current =
+              Just
+                { summary: Nothing
+                , dtStart: Nothing
+                , dtEnd: Nothing
+                , itemType: Nothing
+                , status: Nothing
+                , sourceItemId: Nothing
+                , actualDurationMinutes: Nothing
+                , category: Nothing
+                , rrule: Nothing
+                , exdates: []
+                }
+          }
       "END:VEVENT" ->
         case state.current of
           Nothing -> state
@@ -3742,11 +3568,19 @@ parseIcsImport raw =
             let
               key = extractIcsKey line
               value = extractIcsValue line
+              trimmed = StringCommon.trim value
               updated =
                 case key of
                   "SUMMARY" -> event { summary = toOptionalString value }
                   "DTSTART" -> event { dtStart = Just value }
                   "DTEND" -> event { dtEnd = Just value }
+                  "X-FAVS-TYPE" -> event { itemType = toOptionalString value }
+                  "X-FAVS-STATUS" -> event { status = toOptionalString value }
+                  "X-FAVS-SOURCE-ITEM-ID" -> event { sourceItemId = Just trimmed }
+                  "X-FAVS-ACTUAL-DURATION-MINUTES" -> event { actualDurationMinutes = Just trimmed }
+                  "CATEGORIES" -> event { category = toOptionalString value }
+                  "RRULE" -> event { rrule = toOptionalString value }
+                  "EXDATE" -> event { exdates = event.exdates <> splitIcsExdates trimmed }
                   _ -> event
             in
               state { current = Just updated }
@@ -3756,22 +3590,32 @@ buildIcsItem index event = do
   title <- maybe (Left { eventIndex: index, message: "SUMMARY manquant." }) Right event.summary
   startRaw <- maybe (Left { eventIndex: index, message: "DTSTART manquant." }) Right event.dtStart
   endRaw <- maybe (Left { eventIndex: index, message: "DTEND manquant." }) Right event.dtEnd
+  typeRaw <- maybe (Left { eventIndex: index, message: "X-FAVS-TYPE manquant." }) Right event.itemType
+  statusRaw <- maybe (Left { eventIndex: index, message: "X-FAVS-STATUS manquant." }) Right event.status
+  sourceRaw <- maybe (Left { eventIndex: index, message: "X-FAVS-SOURCE-ITEM-ID manquant." }) Right event.sourceItemId
+  durationRaw <- maybe (Left { eventIndex: index, message: "X-FAVS-ACTUAL-DURATION-MINUTES manquant." }) Right event.actualDurationMinutes
   windowStart <- maybe (Left { eventIndex: index, message: "DTSTART invalide." }) Right (parseIcsDateTime startRaw)
   windowEnd <- maybe (Left { eventIndex: index, message: "DTEND invalide." }) Right (parseIcsDateTime endRaw)
+  itemType <- lmap ({ eventIndex: index, message: _ }) (parseIcsItemType typeRaw)
+  status <- lmap ({ eventIndex: index, message: _ }) (parseIcsStatus statusRaw)
+  sourceItemId <- lmap ({ eventIndex: index, message: _ }) (parseIcsSourceItemId sourceRaw)
+  actualDurationMinutes <- lmap ({ eventIndex: index, message: _ }) (parseIcsActualDuration durationRaw)
+  recurrenceRule <- lmap ({ eventIndex: index, message: _ }) (parseIcsRrule event.rrule)
+  recurrenceExceptionDates <- lmap ({ eventIndex: index, message: _ }) (parseIcsExceptions event.exdates)
   if windowEnd <= windowStart then Left { eventIndex: index, message: "La fin doit être après le début." }
   else
     Right $ NewCalendarItem
       { content:
-          { itemType: ScheduledBlock
+          { itemType
           , title
           , windowStart
           , windowEnd
-          , status: Todo
-          , sourceItemId: Nothing
-          , actualDurationMinutes: Nothing
-          , category: Nothing
-          , recurrenceRule: Nothing
-          , recurrenceExceptionDates: []
+          , status
+          , sourceItemId
+          , actualDurationMinutes
+          , category: event.category
+          , recurrenceRule
+          , recurrenceExceptionDates
           }
       }
 
@@ -3788,7 +3632,7 @@ extractIcsValue :: String -> String
 extractIcsValue line =
   fromMaybe "" (last (StringCommon.split (Pattern ":") line))
 
-parseIcsDateTime :: String -> Maybe String
+parseIcsDateTime :: String -> Maybe DateTime
 parseIcsDateTime raw =
   let
     trimmed = StringCommon.trim raw
@@ -3803,18 +3647,107 @@ parseIcsDateTime raw =
         d = String.slice 6 8 cleaned
         hh = String.slice 9 11 cleaned
         mm = String.slice 11 13 cleaned
+        formatted = StringCommon.joinWith "" [ y, "-", m, "-", d, "T", hh, ":", mm ]
       in
-        Just $ y <> "-" <> m <> "-" <> d <> "T" <> hh <> ":" <> mm
+        DateTime.parseLocalDateTime formatted
+
+endsWithChar :: Char -> String -> Boolean
+endsWithChar ch str =
+  let
+    len = String.length str
+  in
+    len > 0 && String.charAt (len - 1) str == Just ch
+
+splitIcsExdates :: String -> Array String
+splitIcsExdates raw =
+  if raw == "" then []
+  else StringCommon.split (Pattern ",") raw
+
+parseIcsItemType :: String -> Either String ItemType
+parseIcsItemType raw =
+  case normalizeHeader raw of
+    "intention" -> Right Intention
+    "bloc_planifie" -> Right ScheduledBlock
+    _ -> Left "X-FAVS-TYPE invalide (INTENTION ou BLOC_PLANIFIE)."
+
+parseIcsStatus :: String -> Either String ItemStatus
+parseIcsStatus raw =
+  case normalizeHeader raw of
+    "todo" -> Right Todo
+    "en_cours" -> Right EnCours
+    "fait" -> Right Fait
+    "annule" -> Right Annule
+    _ -> Left "X-FAVS-STATUS invalide (TODO, EN_COURS, FAIT, ANNULE)."
+
+parseIcsSourceItemId :: String -> Either String (Maybe String)
+parseIcsSourceItemId raw =
+  Right (toOptionalString raw)
+
+parseIcsActualDuration :: String -> Either String (Maybe Int)
+parseIcsActualDuration raw =
+  case toOptionalString raw of
+    Nothing -> Right Nothing
+    Just trimmed ->
+      case Int.fromString trimmed of
+        Nothing -> Left "X-FAVS-ACTUAL-DURATION-MINUTES invalide."
+        Just minutes | minutes <= 0 -> Left "X-FAVS-ACTUAL-DURATION-MINUTES invalide."
+        Just minutes -> Right (Just minutes)
+
+parseIcsRrule :: Maybe String -> Either String (Maybe RecurrenceRule)
+parseIcsRrule Nothing = Right Nothing
+parseIcsRrule (Just raw) =
+  let
+    parts = StringCommon.split (Pattern ";") raw
+    freq = findMap (stripPrefix "FREQ=") parts
+    interval = findMap (stripPrefix "INTERVAL=") parts
+  in
+    case map StringCommon.toUpper freq of
+      Nothing -> Left "RRULE invalide."
+      Just "DAILY" ->
+        case interval >>= Int.fromString of
+          Nothing -> Right (Just Daily)
+          Just value | value <= 0 -> Left "RRULE invalide."
+          Just value | value == 1 -> Right (Just Daily)
+          Just value -> Right (Just (EveryXDays value))
+      Just "WEEKLY" -> if interval == Nothing then Right (Just Weekly) else Left "RRULE invalide."
+      Just "MONTHLY" -> if interval == Nothing then Right (Just Monthly) else Left "RRULE invalide."
+      Just "YEARLY" -> if interval == Nothing then Right (Just Yearly) else Left "RRULE invalide."
+      _ -> Left "RRULE invalide."
   where
-  endsWithChar ch str =
-    let
-      len = String.length str
-    in
-      len > 0 && String.charAt (len - 1) str == Just ch
+  stripPrefix prefix value =
+    if String.slice 0 (String.length prefix) value == prefix then
+      Just (String.slice (String.length prefix) (String.length value) value)
+    else
+      Nothing
+
+parseIcsExceptions :: Array String -> Either String (Array Date)
+parseIcsExceptions raw =
+  let
+    parsed = map parseIcsDate raw
+  in
+    if any (_ == Nothing) parsed then Left "EXDATE invalide."
+    else Right (mapMaybe identity parsed)
+
+parseIcsDate :: String -> Maybe Date
+parseIcsDate raw =
+  let
+    trimmed = StringCommon.trim raw
+    cleaned = if endsWithChar 'Z' trimmed then String.slice 0 (String.length trimmed - 1) trimmed else trimmed
+    base =
+      if String.length cleaned >= 8 then
+        if String.charAt 8 cleaned == Just 'T' then String.slice 0 8 cleaned else String.slice 0 8 cleaned
+      else
+        ""
+    formatted =
+      if String.length base == 8 then
+        String.slice 0 4 base <> "-" <> String.slice 4 6 base <> "-" <> String.slice 6 8 base
+      else ""
+  in
+    if formatted == "" then Nothing
+    else DateTime.parseLocalDate formatted
 
 -- END src/Calendar/Imports.purs
 
--- BEGIN src/Calendar/Model.purs
 data ItemType = Intention | ScheduledBlock
 
 derive instance itemTypeGeneric :: Generic ItemType _
@@ -3832,14 +3765,14 @@ instance itemStatusShow :: Show ItemStatus where
 type CalendarItemContent =
   { itemType :: ItemType
   , title :: String
-  , windowStart :: String
-  , windowEnd :: String
+  , windowStart :: DateTime
+  , windowEnd :: DateTime
   , status :: ItemStatus
   , sourceItemId :: Maybe String
   , actualDurationMinutes :: Maybe Int
   , category :: Maybe String
   , recurrenceRule :: Maybe RecurrenceRule
-  , recurrenceExceptionDates :: Array String
+  , recurrenceExceptionDates :: Array Date
   }
 
 type NotificationDefaults =
@@ -3882,21 +3815,6 @@ type IcsImportError =
 type IcsImportResult =
   { items :: Array CalendarItem
   , errors :: Array IcsImportError
-  }
-
-data ExportFormat = ExportCSV | ExportICS
-
-derive instance exportFormatGeneric :: Generic ExportFormat _
-derive instance exportFormatEq :: Eq ExportFormat
-instance exportFormatShow :: Show ExportFormat where
-  show = genericShow
-
-type ExportFilter =
-  { itemType :: Maybe ItemType
-  , status :: Maybe ItemStatus
-  , category :: Maybe String
-  , startDate :: Maybe String
-  , endDate :: Maybe String
   }
 
 data CalendarItem
@@ -3985,14 +3903,16 @@ instance calendarItemDecodeJson :: DecodeJson CalendarItem where
     obj <- decodeJson json
     itemType <- obj .: "type"
     title <- obj .: "titre"
-    windowStart <- obj .: "fenetre_debut"
-    windowEnd <- obj .: "fenetre_fin"
+    windowStartRaw <- obj .: "fenetre_debut"
+    windowEndRaw <- obj .: "fenetre_fin"
+    windowStart <- maybe (Left $ UnexpectedValue (encodeJson windowStartRaw)) Right (DateTime.parseLocalDateTime windowStartRaw)
+    windowEnd <- maybe (Left $ UnexpectedValue (encodeJson windowEndRaw)) Right (DateTime.parseLocalDateTime windowEndRaw)
     status <- obj .: "statut"
     sourceItemId <- obj .:? "source_item_id"
     actualDurationMinutes <- obj .:? "duree_reelle_minutes"
     category <- obj .:? "categorie"
     recurrenceRule <- obj .:? "recurrence_rule"
-    recurrenceExceptionDates <- obj .:? "recurrence_exception_dates"
+    recurrenceExceptionDatesRaw <- obj .:? "recurrence_exception_dates"
     let
       content =
         { itemType
@@ -4004,7 +3924,7 @@ instance calendarItemDecodeJson :: DecodeJson CalendarItem where
         , actualDurationMinutes
         , category
         , recurrenceRule
-        , recurrenceExceptionDates: fromMaybe [] recurrenceExceptionDates
+        , recurrenceExceptionDates: parseExceptionDatesOrEmpty (fromMaybe [] recurrenceExceptionDatesRaw)
         }
     either (const $ pure $ NewCalendarItem { content })
       (\id -> pure $ ServerCalendarItem { content, id })
@@ -4022,8 +3942,8 @@ encodeCalendarContent { itemType, title, windowStart, windowEnd, status, sourceI
   withRecurrence $ withCategory $ withDuration $ withSourceItem $
     "type" := itemType
       ~> "titre" := title
-      ~> "fenetre_debut" := windowStart
-      ~> "fenetre_fin" := windowEnd
+      ~> "fenetre_debut" := formatDateTimeLocal windowStart
+      ~> "fenetre_fin" := formatDateTimeLocal windowEnd
       ~> "statut" := status
       ~> jsonEmptyObject
   where
@@ -4043,7 +3963,7 @@ encodeCalendarContent { itemType, title, windowStart, windowEnd, status, sourceI
     case recurrenceRule of
       Just rule ->
         "recurrence_rule" := encodeJson rule
-          ~> "recurrence_exception_dates" := recurrenceExceptionDates
+          ~> "recurrence_exception_dates" := map DateTime.formatLocalDate recurrenceExceptionDates
           ~> base
       Nothing -> base
 
@@ -4257,7 +4177,7 @@ renderNotificationItem defaults overrides editor item =
           [ div [ class_ "calendar-notification-header" ]
               [ div []
                   [ div [ class_ "calendar-notification-title" ] [ text content.title ]
-                  , div [ class_ "calendar-notification-window" ] [ text $ content.windowStart <> " → " <> content.windowEnd ]
+                  , div [ class_ "calendar-notification-window" ] [ text $ formatDateTimeLocal content.windowStart <> " → " <> formatDateTimeLocal content.windowEnd ]
                   ]
               , div [ class_ "calendar-notification-actions" ]
                   [ div [ class_ $ "calendar-notification-badge" <> guard hasOverride " calendar-notification-badge--custom" ]
@@ -4317,8 +4237,12 @@ reminderTimesForIntention defaults override content =
     let
       startTime = fromMaybe defaults.startDayTime (override >>= _.startDayTime)
       beforeEndHours = fromMaybe defaults.beforeEndHours (override >>= _.beforeEndHours)
-      startReminder = combineDateWithTime content.windowStart startTime <#> mkReminder "Jour de début"
-      beforeEndReminder = shiftMinutes (negate (beforeEndHours * 60)) content.windowEnd <#> mkReminder (show beforeEndHours <> "h avant fin")
+      startReminder =
+        parseTimeLocal startTime <#> \timeValue ->
+          mkReminder "Jour de début" (formatDateTimeLocal (combineDateWithTime (date content.windowStart) timeValue))
+      beforeEndReminder =
+        shiftMinutes (negate (beforeEndHours * 60)) content.windowEnd <#> \dateTimeValue ->
+          mkReminder (show beforeEndHours <> "h avant fin") (formatDateTimeLocal dateTimeValue)
     in
       catMaybes [ startReminder, beforeEndReminder ]
   where
@@ -4536,7 +4460,7 @@ renderSyncConflictItem items itemId =
         li [ class_ "calendar-conflict-item" ]
           [ div [ class_ "calendar-conflict-item-title" ] [ text content.title ]
           , div [ class_ "calendar-conflict-item-window" ]
-              [ text $ content.windowStart <> " → " <> content.windowEnd ]
+              [ text $ formatDateTimeLocal content.windowStart <> " → " <> formatDateTimeLocal content.windowEnd ]
           ]
     Nothing -> text ""
   where

@@ -2,6 +2,7 @@ module Test.Domain.Calendar.Spec (spec) where
 
 import Prelude
 
+import Calendar.Export as Export
 import Pages.Calendar
   ( CalendarItem(..)
   , IntentionDraft
@@ -20,9 +21,6 @@ import Pages.Calendar
   , EditError(..)
   , applyEditDraft
   , buildEditDraft
-  , exportItemsToCsv
-  , exportItemsToIcs
-  , filterItemsForExport
   , durationMinutesBetween
   , sortItems
   , validateIntention
@@ -51,7 +49,7 @@ import Data.String.Common as StringCommon
 import Data.String.Pattern (Pattern(..))
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (fail, shouldEqual)
-import Test.Support.Builders (calendarContent, serverCalendarItem)
+import Test.Support.Builders (calendarContent, serverCalendarItem, unsafeDate, unsafeDateTime)
 
 spec :: Spec Unit
 spec = do
@@ -101,8 +99,8 @@ spec = do
             { content:
                 { itemType: ScheduledBlock
                 , title: "Planifie"
-                , windowStart: "2026-02-19T11:00"
-                , windowEnd: "2026-02-19T12:00"
+                , windowStart: unsafeDateTime "2026-02-19T11:00"
+                , windowEnd: unsafeDateTime "2026-02-19T12:00"
                 , status: Todo
                 , sourceItemId: Just "source-1"
                 , actualDurationMinutes: Nothing
@@ -183,7 +181,7 @@ spec = do
           (calendarContent Intention "Intention" "2026-02-19T09:00" "2026-02-19T10:00")
             { actualDurationMinutes = Just 25
             , recurrenceRule = Just Weekly
-            , recurrenceExceptionDates = [ "2026-02-26" ]
+            , recurrenceExceptionDates = [ unsafeDate "2026-02-26" ]
             }
         item = serverCalendarItem "edit-1" content
       case buildEditDraft item of
@@ -201,7 +199,7 @@ spec = do
               updated.title `shouldEqual` "Mise a jour"
               updated.actualDurationMinutes `shouldEqual` Just 40
               updated.recurrenceRule `shouldEqual` Just Weekly
-              updated.recurrenceExceptionDates `shouldEqual` [ "2026-02-26" ]
+              updated.recurrenceExceptionDates `shouldEqual` [ unsafeDate "2026-02-26" ]
             Right _ -> fail "Expected server item"
 
     it "applyEditDraft rejects non-positive actual duration" do
@@ -276,7 +274,7 @@ spec = do
 
   describe "Calendar time helpers" do
     it "durationMinutesBetween returns minutes between start and end" do
-      durationMinutesBetween "2026-02-19T09:00" "2026-02-19T10:30" `shouldEqual` Just 90
+      durationMinutesBetween (unsafeDateTime "2026-02-19T09:00") (unsafeDateTime "2026-02-19T10:30") `shouldEqual` 90
 
   describe "Calendar notifications" do
     it "reminderTimesForIntention uses default notification settings" do
@@ -351,8 +349,8 @@ spec = do
     it "parseCsvImport returns one item and no errors for valid input" do
       let
         csv =
-          "type,titre,fenetre_debut,fenetre_fin,categorie,statut\n" <>
-            "INTENTION,Focus,2026-02-19T09:00,2026-02-19T10:00,Deep,TODO"
+          "type,titre,fenetre_debut,fenetre_fin,categorie,statut,source_item_id,actual_duration_minutes,recurrence_rule_type,recurrence_rule_interval_days,recurrence_exception_dates\n" <>
+            "INTENTION,Focus,2026-02-19T09:00,2026-02-19T10:00,Deep,TODO,,,,,"
         result = parseCsvImport csv
       length result.items `shouldEqual` 1
       length result.errors `shouldEqual` 0
@@ -374,6 +372,10 @@ spec = do
             <> "SUMMARY:Meeting\n"
             <> "DTSTART:20260219T090000\n"
             <> "DTEND:20260219T100000\n"
+            <> "X-FAVS-TYPE:INTENTION\n"
+            <> "X-FAVS-STATUS:TODO\n"
+            <> "X-FAVS-SOURCE-ITEM-ID:\n"
+            <> "X-FAVS-ACTUAL-DURATION-MINUTES:\n"
             <> "END:VEVENT\n"
             <>
               "END:VCALENDAR"
@@ -388,6 +390,10 @@ spec = do
             <> "BEGIN:VEVENT\n"
             <> "DTSTART:20260219T090000\n"
             <> "DTEND:20260219T100000\n"
+            <> "X-FAVS-TYPE:INTENTION\n"
+            <> "X-FAVS-STATUS:TODO\n"
+            <> "X-FAVS-SOURCE-ITEM-ID:\n"
+            <> "X-FAVS-ACTUAL-DURATION-MINUTES:\n"
             <> "END:VEVENT\n"
             <>
               "END:VCALENDAR"
@@ -398,24 +404,61 @@ spec = do
   describe "Calendar exports" do
     it "filterItemsForExport keeps only items matching the filter" do
       let
-        itemA = serverCalendarItem "a" (calendarContent Intention "A" "2026-02-19T09:00" "2026-02-19T10:00")
-        itemB = serverCalendarItem "b" (calendarContent ScheduledBlock "B" "2026-02-20T11:00" "2026-02-20T12:00")
+        itemA =
+          Export.ExportItem
+            { itemType: Export.Intention
+            , title: "A"
+            , windowStart: unsafeDateTime "2026-02-19T09:00"
+            , windowEnd: unsafeDateTime "2026-02-19T10:00"
+            , status: Export.Todo
+            , category: Nothing
+            , sourceItemId: Nothing
+            , actualDurationMinutes: Nothing
+            , recurrenceRule: Nothing
+            , recurrenceExceptionDates: []
+            }
+        itemB =
+          Export.ExportItem
+            { itemType: Export.ScheduledBlock
+            , title: "B"
+            , windowStart: unsafeDateTime "2026-02-20T11:00"
+            , windowEnd: unsafeDateTime "2026-02-20T12:00"
+            , status: Export.Todo
+            , category: Nothing
+            , sourceItemId: Nothing
+            , actualDurationMinutes: Nothing
+            , recurrenceRule: Nothing
+            , recurrenceExceptionDates: []
+            }
         filter =
-          { itemType: Just Intention
-          , status: Just Todo
-          , category: Nothing
-          , startDate: Nothing
-          , endDate: Nothing
-          }
-      filterItemsForExport filter [ itemA, itemB ] `shouldEqual` [ itemA ]
+          Export.ExportFilter
+            { itemType: Just Export.Intention
+            , status: Just Export.Todo
+            , category: Nothing
+            , startDate: Nothing
+            , endDate: Nothing
+            }
+      Export.filterItemsForExport filter [ itemA, itemB ] `shouldEqual` [ itemA ]
 
     it "exportItemsToCsv/ToIcs include expected markers" do
       let
-        item = serverCalendarItem "a" (calendarContent Intention "A" "2026-02-19T09:00" "2026-02-19T10:00")
-        csv = exportItemsToCsv [ item ]
-        ics = exportItemsToIcs [ item ]
-      (length (StringCommon.split (Pattern "type,titre") csv) > 1) `shouldEqual` true
-      (length (StringCommon.split (Pattern "BEGIN:VEVENT") ics) > 1) `shouldEqual` true
+        item =
+          Export.ExportItem
+            { itemType: Export.Intention
+            , title: "A"
+            , windowStart: unsafeDateTime "2026-02-19T09:00"
+            , windowEnd: unsafeDateTime "2026-02-19T10:00"
+            , status: Export.Todo
+            , category: Nothing
+            , sourceItemId: Nothing
+            , actualDurationMinutes: Nothing
+            , recurrenceRule: Nothing
+            , recurrenceExceptionDates: []
+            }
+        csv = Export.exportItemsToCsv [ item ]
+        ics = Export.exportItemsToIcs [ item ]
+      (length (StringCommon.split (Pattern "source_item_id") csv) > 1) `shouldEqual` true
+      (length (StringCommon.split (Pattern "X-FAVS-TYPE") ics) > 1) `shouldEqual` true
 
   describe "Calendar sorting" do
     it "sortItems SortByStatus orders Todo before Done" do

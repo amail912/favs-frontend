@@ -16,8 +16,7 @@ Frontend pour gérer le quotidien avec un focus sur la gestion d’un calendrier
 - Tu proposeras de réaliser des tests dès que cela te semble nécessaire
 - Utilise la compilation comme une grande aide au développement. PureScript est un language fortement typé qui permet d'avoir beaucoup de garanties avec un système de types adapté.
 - On veillera à ne laisser aucun warning de compilation.
-- Le lint doit passer (`npm run lint`) et les violations doivent être corrigées même hors du scope initial si nécessaire.
-- Avant chaque commit, run tous les tests.
+- Avant chaque commit, run tous les tests. Une fois que les tests passent, run le lint et le format puis commit.
 - Les modules `Api.*` sont strictement techniques : aucune décision métier.
 - Les objets de payload sont construits par l’appelant, mais leurs types et `EncodeJson` vivent dans `Api.*`.
 - La logique et les vues de chaque domaine restent dans leur module de domaine, sans fichier centralisateur.
