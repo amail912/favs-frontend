@@ -224,7 +224,7 @@ spec = do
 
     it "primaryActionFor returns None for done scheduled blocks" do
       let
-        content = (calendarContent ScheduledBlock "Bloc" "2026-02-19T09:00" "2026-02-19T10:00") { status = Fait }
+        content = (calendarContent ScheduledBlock "Bloc" "2026-02-19T09:00" "2026-02-19T10:00") { status = Done }
         item = serverCalendarItem "c" content
       primaryActionFor item `shouldEqual` PrimaryNone
 
@@ -468,7 +468,7 @@ spec = do
             { id: "done"
             , content:
                 (calendarContent ScheduledBlock "Done" "2026-02-19T11:00" "2026-02-19T12:00")
-                  { status = Fait }
+                  { status = Done }
             }
       sortItems SortByStatus [] [ itemDone, itemTodo ] `shouldEqual` [ itemTodo, itemDone ]
 

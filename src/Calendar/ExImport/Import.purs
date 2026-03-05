@@ -52,14 +52,12 @@ newtype State = State
   }
 
 _csvInput :: Lens' State String
-_csvInput =
-  lens
+_csvInput = lens
     (\(State state) -> state.input)
     (\(State state) input -> State (state { input = input }))
 
 _result :: Lens' State (Maybe Result)
-_result =
-  lens
+_result = lens
     (\(State state) -> state.result)
     (\(State state) result -> State (state { result = result }))
 
@@ -84,10 +82,8 @@ component =
 
 handleAction :: Action -> H.HalogenM State Action () Output Aff Unit
 handleAction = case _ of
-  Receive (Input input) ->
-    H.modify_ (\_ -> State { mode: input.mode, input: "", result: Nothing })
-  InputChanged raw ->
-    H.modify_ (_csvInput .~ raw)
+  Receive (Input input) -> H.modify_ (\_ -> State { mode: input.mode, input: "", result: Nothing })
+  InputChanged raw -> H.modify_ (_csvInput .~ raw)
   Parse -> do
     st <- H.get
     let
@@ -99,13 +95,10 @@ handleAction = case _ of
   Apply -> do
     st <- H.get
     case st of
-      State { result: Just (CsvResult result) } ->
-        applyItems result.items
-      State { result: Just (IcsResult result) } ->
-        applyItems result.items
+      State { result: Just (CsvResult res) } -> applyItems res.items
+      State { result: Just (IcsResult res) } -> applyItems res.items
       _ -> pure unit
-  Clear ->
-    H.modify_ ((_csvInput .~ "") <<< (_result .~ Nothing))
+  Clear -> H.modify_ ((_csvInput .~ "") <<< (_result .~ Nothing))
   where
   applyItems items =
     if null items then pure unit
@@ -400,10 +393,10 @@ parseCsvStatus raw =
     Just value ->
       case normalizeHeader value of
         "todo" -> Right Todo
-        "en_cours" -> Right EnCours
-        "fait" -> Right Fait
-        "annule" -> Right Annule
-        _ -> Left "Statut invalide (TODO, EN_COURS, FAIT, ANNULE)."
+        "in_progress" -> Right InProgress
+        "done" -> Right Done
+        "canceled" -> Right Canceled
+        _ -> Left "Statut invalide (TODO, IN_PROGRESS, DONE, CANCELED)."
 
 parseActualDuration :: Maybe String -> Either String (Maybe Int)
 parseActualDuration raw =
@@ -656,10 +649,10 @@ parseIcsStatus :: String -> Either String ItemStatus
 parseIcsStatus raw =
   case normalizeHeader raw of
     "todo" -> Right Todo
-    "en_cours" -> Right EnCours
-    "fait" -> Right Fait
-    "annule" -> Right Annule
-    _ -> Left "X-FAVS-STATUS invalide (TODO, EN_COURS, FAIT, ANNULE)."
+    "in_progress" -> Right InProgress
+    "done" -> Right Done
+    "canceled" -> Right Canceled
+    _ -> Left "X-FAVS-STATUS invalide (TODO, IN_PROGRESS, DONE, CANCELED)."
 
 parseIcsSourceItemId :: String -> Either String (Maybe String)
 parseIcsSourceItemId raw =

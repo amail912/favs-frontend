@@ -24,9 +24,9 @@ instance itemTypeShow :: Show ItemType where
 
 data ItemStatus
   = Todo
-  | EnCours
-  | Fait
-  | Annule
+  | InProgress
+  | Done
+  | Canceled
 
 derive instance itemStatusEq :: Eq ItemStatus
 derive instance itemStatusGeneric :: Generic ItemStatus _

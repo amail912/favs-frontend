@@ -209,9 +209,9 @@ render
                 ]
                 [ option [ value "" ] [ text "Tous" ]
                 , option [ value "TODO" ] [ text "TODO" ]
-                , option [ value "EN_COURS" ] [ text "EN_COURS" ]
-                , option [ value "FAIT" ] [ text "FAIT" ]
-                , option [ value "ANNULE" ] [ text "ANNULE" ]
+                , option [ value "IN_PROGRESS" ] [ text "IN_PROGRESS" ]
+                , option [ value "DONE" ] [ text "DONE" ]
+                , option [ value "CANCELED" ] [ text "CANCELED" ]
                 ]
             ]
         , div [ class_ "calendar-export-control" ]
@@ -398,9 +398,9 @@ exportItemType ScheduledBlock = "BLOC_PLANIFIE"
 
 exportItemStatus :: ItemStatus -> String
 exportItemStatus Todo = "TODO"
-exportItemStatus EnCours = "EN_COURS"
-exportItemStatus Fait = "FAIT"
-exportItemStatus Annule = "ANNULE"
+exportItemStatus InProgress = "IN_PROGRESS"
+exportItemStatus Done = "DONE"
+exportItemStatus Canceled = "CANCELED"
 
 toOptionalString :: String -> Maybe String
 toOptionalString raw = if trimmed == "" then Nothing else Just trimmed
@@ -414,9 +414,9 @@ parseTypeFilter _ = Nothing
 
 parseStatusFilter :: String -> Maybe ItemStatus
 parseStatusFilter "TODO" = Just Todo
-parseStatusFilter "EN_COURS" = Just EnCours
-parseStatusFilter "FAIT" = Just Fait
-parseStatusFilter "ANNULE" = Just Annule
+parseStatusFilter "IN_PROGRESS" = Just InProgress
+parseStatusFilter "DONE" = Just Done
+parseStatusFilter "CANCELED" = Just Canceled
 parseStatusFilter _ = Nothing
 
 parseDateInput :: String -> Maybe Date
@@ -432,9 +432,9 @@ typeFilterValue (Just ScheduledBlock) = "BLOC_PLANIFIE"
 statusFilterValue :: Maybe ItemStatus -> String
 statusFilterValue Nothing = ""
 statusFilterValue (Just Todo) = "TODO"
-statusFilterValue (Just EnCours) = "EN_COURS"
-statusFilterValue (Just Fait) = "FAIT"
-statusFilterValue (Just Annule) = "ANNULE"
+statusFilterValue (Just InProgress) = "IN_PROGRESS"
+statusFilterValue (Just Done) = "DONE"
+statusFilterValue (Just Canceled) = "CANCELED"
 
 categoryFilterValue :: Maybe String -> String
 categoryFilterValue = foldMap identity

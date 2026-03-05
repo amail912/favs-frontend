@@ -320,14 +320,14 @@ itemStatusIso = iso toExport fromExport
   where
   toExport = case _ of
     Todo -> Export.Todo
-    EnCours -> Export.EnCours
-    Fait -> Export.Fait
-    Annule -> Export.Annule
+    InProgress -> Export.InProgress
+    Done -> Export.Done
+    Canceled -> Export.Canceled
   fromExport = case _ of
     Export.Todo -> Todo
-    Export.EnCours -> EnCours
-    Export.Fait -> Fait
-    Export.Annule -> Annule
+    Export.InProgress -> InProgress
+    Export.Done -> Done
+    Export.Canceled -> Canceled
 
 fromExportItemType :: Export.ItemType -> ItemType
 fromExportItemType = case _ of
@@ -337,9 +337,9 @@ fromExportItemType = case _ of
 fromExportItemStatus :: Export.ItemStatus -> ItemStatus
 fromExportItemStatus = case _ of
   Export.Todo -> Todo
-  Export.EnCours -> EnCours
-  Export.Fait -> Fait
-  Export.Annule -> Annule
+  Export.InProgress -> InProgress
+  Export.Done -> Done
+  Export.Canceled -> Canceled
 
 toCalendarItemContent :: Export.Item -> CalendarItemContent
 toCalendarItemContent (Export.Item item) =
@@ -1316,8 +1316,8 @@ renderCreateContent draft validationError =
       , value (statusValue draft.status)
       ]
       [ option [ value "todo" ] [ text "À faire" ]
-      , option [ value "progress" ] [ text "En cours" ]
-      , option [ value "done" ] [ text "Fait" ]
+      , option [ value "in_progress" ] [ text "In progress" ]
+                , option [ value "done" ] [ text "Done" ]
       , option [ value "canceled" ] [ text "Annulé" ]
       ]
 
@@ -1390,7 +1390,7 @@ primaryActionFor (ServerCalendarItem { content }) =
   case content.itemType of
     Intention -> PrimaryPlanify
     ScheduledBlock ->
-      if content.status /= Fait then PrimaryValidate else PrimaryNone
+      if content.status /= Done then PrimaryValidate else PrimaryNone
 primaryActionFor _ = PrimaryNone
 
 -- END src/Calendar/Calendar/Primary.purs
@@ -2093,8 +2093,8 @@ renderEditContent panel =
               , value (statusValue draft.status)
               ]
               [ option [ value "todo" ] [ text "À faire" ]
-              , option [ value "progress" ] [ text "En cours" ]
-              , option [ value "done" ] [ text "Fait" ]
+              , option [ value "in_progress" ] [ text "In progress" ]
+              , option [ value "done" ] [ text "Done" ]
               , option [ value "canceled" ] [ text "Annulé" ]
               ]
           ]
@@ -2135,16 +2135,16 @@ statusValue :: ItemStatus -> String
 statusValue status =
   case status of
     Todo -> "todo"
-    EnCours -> "progress"
-    Fait -> "done"
-    Annule -> "canceled"
+    InProgress -> "in_progress"
+    Done -> "done"
+    Canceled -> "canceled"
 
 parseStatus :: String -> ItemStatus
 parseStatus raw =
   case raw of
-    "progress" -> EnCours
-    "done" -> Fait
-    "canceled" -> Annule
+    "in_progress" -> InProgress
+    "done" -> Done
+    "canceled" -> Canceled
     _ -> Todo
 
 editErrorMessage :: EditError -> String
@@ -2993,9 +2993,9 @@ sortItems mode conflictIds items =
   conflictRank ids item = if isConflict ids item then 0 else 1
 
   statusRank Todo = 0
-  statusRank EnCours = 1
-  statusRank Fait = 2
-  statusRank Annule = 3
+  statusRank InProgress = 1
+  statusRank Done = 2
+  statusRank Canceled = 3
 
   categoryKey Nothing = "~~~"
   categoryKey (Just value) = value
@@ -3021,8 +3021,6 @@ minuteOfDay raw =
   in
     (fromEnum (hour t) * 60) + fromEnum (minute t)
 
--- END src/Calendar/Helpers.purs
-
 data ItemType = Intention | ScheduledBlock
 
 derive instance itemTypeGeneric :: Generic ItemType _
@@ -3030,7 +3028,7 @@ derive instance itemTypeEq :: Eq ItemType
 instance itemTypeShow :: Show ItemType where
   show = genericShow
 
-data ItemStatus = Todo | EnCours | Fait | Annule
+data ItemStatus = Todo | InProgress | Done | Canceled
 
 derive instance itemStatusGeneric :: Generic ItemStatus _
 derive instance itemStatusEq :: Eq ItemStatus
@@ -3139,18 +3137,18 @@ instance itemTypeDecodeJson :: DecodeJson ItemType where
 
 instance itemStatusEncodeJson :: EncodeJson ItemStatus where
   encodeJson Todo = encodeJson "TODO"
-  encodeJson EnCours = encodeJson "EN_COURS"
-  encodeJson Fait = encodeJson "FAIT"
-  encodeJson Annule = encodeJson "ANNULE"
+  encodeJson InProgress = encodeJson "IN_PROGRESS"
+  encodeJson Done = encodeJson "DONE"
+  encodeJson Canceled = encodeJson "CANCELED"
 
 instance itemStatusDecodeJson :: DecodeJson ItemStatus where
   decodeJson json = do
     str <- decodeJson json
     case str of
       "TODO" -> pure Todo
-      "EN_COURS" -> pure EnCours
-      "FAIT" -> pure Fait
-      "ANNULE" -> pure Annule
+      "IN_PROGRESS" -> pure InProgress
+      "DONE" -> pure Done
+      "CANCELED" -> pure Canceled
       _ -> Left $ UnexpectedValue json
 
 instance calendarItemDecodeJson :: DecodeJson CalendarItem where
@@ -3221,8 +3219,6 @@ encodeCalendarContent { itemType, title, windowStart, windowEnd, status, sourceI
           ~> "recurrence_exception_dates" := map DateTime.formatLocalDate recurrenceExceptionDates
           ~> base
       Nothing -> base
-
--- END src/Calendar/Model.purs
 
 -- BEGIN src/Calendar/Notifications.purs
 newtype NotificationState = NotificationState
