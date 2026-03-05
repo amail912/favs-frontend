@@ -1,7 +1,7 @@
 module Calendar.ExImport.Export
   ( module Calendar.ExImport.Model
-  , ExportInput(..)
-  , ExportFilter(..)
+  , ExportInput
+  , ExportFilter
   , ExportFormat(..)
   , component
   , filterItemsForExport
@@ -33,7 +33,7 @@ import Helpers.DateTime as DateTime
 import Ui.AgendaRender (renderPanelHeader)
 import Ui.Utils (class_)
 
-newtype ExportInput = ExportInput
+type ExportInput =
   { items :: Array Item }
 
 data ExportFormat = ExportCSV | ExportICS
@@ -43,7 +43,7 @@ derive instance exportFormatGeneric :: Generic ExportFormat _
 instance exportFormatShow :: Show ExportFormat where
   show = genericShow
 
-newtype ExportFilter = ExportFilter
+type ExportFilter =
   { itemType :: Maybe ItemType
   , status :: Maybe ItemStatus
   , category :: Maybe String
@@ -51,7 +51,7 @@ newtype ExportFilter = ExportFilter
   , endDate :: Maybe Date
   }
 
-newtype ExportState = ExportState
+type ExportState =
   { format :: ExportFormat
   , form :: ExportFormState
   , filter :: ExportFilter
@@ -68,49 +68,48 @@ type ExportFormState =
 
 exportInitialState :: ExportState
 exportInitialState =
-  ExportState
-    { format: ExportCSV
-    , form:
+  { format: ExportCSV
+  , form:
+      { typeFilter: Nothing
+      , statusFilter: Nothing
+      , categoryFilter: Nothing
+      , startDate: Nothing
+      , endDate: Nothing
+      }
+  , filter:
+      buildFilter
         { typeFilter: Nothing
         , statusFilter: Nothing
         , categoryFilter: Nothing
         , startDate: Nothing
         , endDate: Nothing
         }
-    , filter:
-        buildFilter
-          { typeFilter: Nothing
-          , statusFilter: Nothing
-          , categoryFilter: Nothing
-          , startDate: Nothing
-          , endDate: Nothing
-          }
-    , output: ""
-    }
+  , output: ""
+  }
 
 _exportFormat :: Lens' ExportState ExportFormat
 _exportFormat =
   lens
-    (\(ExportState state) -> state.format)
-    (\(ExportState state) format -> ExportState (state { format = format }))
+    _.format
+    (_ { format = _ })
 
 _exportForm :: Lens' ExportState ExportFormState
 _exportForm =
   lens
-    (\(ExportState state) -> state.form)
-    (\(ExportState state) form -> ExportState (state { form = form }))
+    _.form
+    (_ { form = _ })
 
 _exportFilter :: Lens' ExportState ExportFilter
 _exportFilter =
   lens
-    (\(ExportState state) -> state.filter)
-    (\(ExportState state) filter -> ExportState (state { filter = filter }))
+    _.filter
+    (_ { filter = _ })
 
 _exportOutput :: Lens' ExportState String
 _exportOutput =
   lens
-    (\(ExportState state) -> state.output)
-    (\(ExportState state) output -> ExportState (state { output = output }))
+    _.output
+    (_ { output = _ })
 
 data Action
   = Receive ExportInput
@@ -126,14 +125,14 @@ data Action
 component :: forall q. H.Component q ExportInput Void Aff
 component =
   H.mkComponent
-    { initialState: \(ExportInput input) -> { export: exportInitialState, items: input.items }
+    { initialState: \input -> { export: exportInitialState, items: input.items }
     , render
     , eval: H.mkEval $ H.defaultEval { handleAction = handleAction, receive = Just <<< Receive }
     }
 
 handleAction :: Action -> H.HalogenM { export :: ExportState, items :: Array Item } Action () Void Aff Unit
 handleAction = case _ of
-  Receive (ExportInput input) -> H.modify_ (_ { items = input.items })
+  Receive input -> H.modify_ (_ { items = input.items })
   FormatChanged raw -> H.modify_ $ updateExport (\st -> st # _exportFormat .~ parseExportFormat raw)
   TypeFilterChanged raw -> H.modify_ $ updateForm (_ { typeFilter = parseTypeFilter raw })
   StatusFilterChanged raw -> H.modify_ $ updateForm (_ { statusFilter = parseStatusFilter raw })
@@ -163,7 +162,7 @@ handleAction = case _ of
 
 render :: forall m. { export :: ExportState, items :: Array Item } -> H.ComponentHTML Action () m
 render
-  { export: ExportState
+  { export:
       { format
       , form
       , output
@@ -264,16 +263,15 @@ parseExportFormat raw =
 
 buildFilter :: ExportFormState -> ExportFilter
 buildFilter form =
-  ExportFilter
-    { itemType: form.typeFilter
-    , status: form.statusFilter
-    , category: form.categoryFilter
-    , startDate: form.startDate
-    , endDate: form.endDate
-    }
+  { itemType: form.typeFilter
+  , status: form.statusFilter
+  , category: form.categoryFilter
+  , startDate: form.startDate
+  , endDate: form.endDate
+  }
 
 filterItemsForExport :: ExportFilter -> Array Item -> Array Item
-filterItemsForExport (ExportFilter criteria) items = filter (matchesFilter criteria) items
+filterItemsForExport criteria items = filter (matchesFilter criteria) items
 
 matchesFilter :: { itemType :: Maybe ItemType, status :: Maybe ItemStatus, category :: Maybe String, startDate :: Maybe Date, endDate :: Maybe Date } -> Item -> Boolean
 matchesFilter criteria (Item item) =

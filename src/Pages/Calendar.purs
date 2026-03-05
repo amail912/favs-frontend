@@ -34,7 +34,6 @@ import Affjax.Web (Response)
 import Api.Calendar (ValidateItemPayload(..), createItemResponse, getItemsResponse, updateItemResponse, validateItemResponse)
 import Calendar.Recurrence (RecurrenceDraft, RecurrenceRule, defaultRecurrenceDraft, draftFromRecurrence, draftToRecurrence)
 import Calendar.Recurrence as Recurrence
-import Calendar.ExImport.Export (ExportInput(..))
 import Calendar.ExImport.Export as Export
 import Calendar.ExImport.Import as Import
 import Calendar.Templates as Templates
@@ -837,7 +836,7 @@ renderAgendaModals { activeModal, filters, notifications, templates, exportItems
   let
     renderModal title content = Modal.renderModal title content (ViewAction ViewCloseModal) (ViewAction ViewCloseModal)
     renderExportModal items =
-      slot (Proxy :: _ "export") ExportModal Export.component (ExportInput { items }) absurd
+      slot (Proxy :: _ "export") ExportModal Export.component { items } absurd
   in
     maybe (div [] [])
       case _ of
@@ -850,12 +849,12 @@ renderAgendaModals { activeModal, filters, notifications, templates, exportItems
         ModalTemplates -> renderModal "Templates de tâches" [ renderTemplatesPanelPage templates ]
         ModalImportCsv ->
           renderModal "Import CSV"
-            [ slot (Proxy :: _ "importCsv") ImportCsv Import.component (Import.Input { mode: Import.Csv })
+            [ slot (Proxy :: _ "importCsv") ImportCsv Import.component { mode: Import.Csv }
                 (\(Import.ApplyItems items) -> ImportApplyItems (map toCalendarItemContent items))
             ]
         ModalImportIcs ->
           renderModal "Import ICS"
-            [ slot (Proxy :: _ "importIcs") ImportIcs Import.component (Import.Input { mode: Import.Ics })
+            [ slot (Proxy :: _ "importIcs") ImportIcs Import.component { mode: Import.Ics }
                 (\(Import.ApplyItems items) -> ImportApplyItems (map toCalendarItemContent items))
             ]
         ModalExport -> renderModal "Export" [ renderExportModal exportItems ]
@@ -1317,7 +1316,7 @@ renderCreateContent draft validationError =
       ]
       [ option [ value "todo" ] [ text "À faire" ]
       , option [ value "in_progress" ] [ text "In progress" ]
-                , option [ value "done" ] [ text "Done" ]
+      , option [ value "done" ] [ text "Done" ]
       , option [ value "canceled" ] [ text "Annulé" ]
       ]
 

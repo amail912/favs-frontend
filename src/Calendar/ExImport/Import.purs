@@ -1,6 +1,6 @@
 module Calendar.ExImport.Import
   ( Mode(..)
-  , Input(..)
+  , Input
   , Output(..)
   , CsvError
   , CsvResult
@@ -36,7 +36,7 @@ import Helpers.DateTime as DateTime
 import Ui.AgendaRender (renderPanelHeader)
 import Ui.Utils (class_)
 
-newtype Input = Input
+type Input =
   { mode :: Mode }
 
 data Output = ApplyItems (Array Item)
@@ -45,7 +45,7 @@ data Mode
   = Csv
   | Ics
 
-newtype State = State
+type State =
   { mode :: Mode
   , input :: String
   , result :: Maybe Result
@@ -53,13 +53,13 @@ newtype State = State
 
 _csvInput :: Lens' State String
 _csvInput = lens
-    (\(State state) -> state.input)
-    (\(State state) input -> State (state { input = input }))
+  _.input
+  (_ { input = _ })
 
 _result :: Lens' State (Maybe Result)
 _result = lens
-    (\(State state) -> state.result)
-    (\(State state) result -> State (state { result = result }))
+  _.result
+  (_ { result = _ })
 
 data Result
   = CsvResult CsvResult
@@ -75,28 +75,28 @@ data Action
 component :: forall q. H.Component q Input Output Aff
 component =
   H.mkComponent
-    { initialState: \(Input input) -> State { mode: input.mode, input: "", result: Nothing }
+    { initialState: \input -> { mode: input.mode, input: "", result: Nothing }
     , render
     , eval: H.mkEval $ H.defaultEval { handleAction = handleAction, receive = Just <<< Receive }
     }
 
 handleAction :: Action -> H.HalogenM State Action () Output Aff Unit
 handleAction = case _ of
-  Receive (Input input) -> H.modify_ (\_ -> State { mode: input.mode, input: "", result: Nothing })
+  Receive input -> H.modify_ (\_ -> { mode: input.mode, input: "", result: Nothing })
   InputChanged raw -> H.modify_ (_csvInput .~ raw)
   Parse -> do
     st <- H.get
     let
       nextResult =
         case st of
-          State { mode: Csv, input } -> CsvResult (parseCsv input)
-          State { mode: Ics, input } -> IcsResult (parseIcs input)
+          { mode: Csv, input } -> CsvResult (parseCsv input)
+          { mode: Ics, input } -> IcsResult (parseIcs input)
     H.modify_ (_result .~ Just nextResult)
   Apply -> do
     st <- H.get
     case st of
-      State { result: Just (CsvResult res) } -> applyItems res.items
-      State { result: Just (IcsResult res) } -> applyItems res.items
+      { result: Just (CsvResult res) } -> applyItems res.items
+      { result: Just (IcsResult res) } -> applyItems res.items
       _ -> pure unit
   Clear -> H.modify_ ((_csvInput .~ "") <<< (_result .~ Nothing))
   where
@@ -107,7 +107,7 @@ handleAction = case _ of
       H.modify_ ((_csvInput .~ "") <<< (_result .~ Nothing))
 
 render :: forall m. State -> H.ComponentHTML Action () m
-render (State state) =
+render state =
   let
     config =
       case state.mode of

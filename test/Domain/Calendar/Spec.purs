@@ -430,13 +430,12 @@ spec = do
             , recurrenceExceptionDates: []
             }
         filter =
-          Export.ExportFilter
-            { itemType: Just Export.Intention
-            , status: Just Export.Todo
-            , category: Nothing
-            , startDate: Nothing
-            , endDate: Nothing
-            }
+          { itemType: Just Export.Intention
+          , status: Just Export.Todo
+          , category: Nothing
+          , startDate: Nothing
+          , endDate: Nothing
+          }
       Export.filterItemsForExport filter [ itemA, itemB ] `shouldEqual` [ itemA ]
 
     it "exportItemsToCsv/ToIcs include expected markers" do
