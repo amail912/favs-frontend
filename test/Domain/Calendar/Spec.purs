@@ -11,7 +11,6 @@ import Pages.Calendar
   , ItemType(..)
   , SortMode(..)
   , ValidationError(..)
-  , defaultNotificationDefaults
   , detectConflictGroups
   , detectConflictIds
   , toNewIntention
@@ -25,7 +24,6 @@ import Pages.Calendar
   , durationMinutesBetween
   , sortItems
   , validateIntention
-  , reminderTimesForIntention
   , applyOfflineMutation
   , applyTemplateToDraft
   )
@@ -274,31 +272,6 @@ spec = do
   describe "Calendar time helpers" do
     it "durationMinutesBetween returns minutes between start and end" do
       durationMinutesBetween (unsafeDateTime "2026-02-19T09:00") (unsafeDateTime "2026-02-19T10:30") `shouldEqual` 90
-
-  describe "Calendar notifications" do
-    it "reminderTimesForIntention uses default notification settings" do
-      let
-        content = calendarContent Intention "Notif" "2026-02-19T09:00" "2026-02-20T12:00"
-        reminders = reminderTimesForIntention defaultNotificationDefaults Nothing content
-      reminders `shouldEqual`
-        [ { label: "Jour de début", at: "2026-02-19T06:00" }
-        , { label: "24h avant fin", at: "2026-02-19T12:00" }
-        ]
-
-    it "reminderTimesForIntention uses override startDayTime and beforeEndHours" do
-      let
-        content = calendarContent Intention "Notif" "2026-02-19T09:00" "2026-02-20T12:00"
-        override =
-          Just
-            { itemId: "x"
-            , startDayTime: Just "08:30"
-            , beforeEndHours: Just 12
-            }
-        reminders = reminderTimesForIntention defaultNotificationDefaults override content
-      reminders `shouldEqual`
-        [ { label: "Jour de début", at: "2026-02-19T08:30" }
-        , { label: "12h avant fin", at: "2026-02-20T00:00" }
-        ]
 
   describe "Calendar templates" do
     it "applyTemplateToDraft sets title/category/window from template" do

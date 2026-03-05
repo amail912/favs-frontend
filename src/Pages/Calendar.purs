@@ -8,7 +8,6 @@ module Pages.Calendar
   , ItemType(..)
   , SortMode(..)
   , ValidationError(..)
-  , defaultNotificationDefaults
   , detectConflictGroups
   , detectConflictIds
   , toNewIntention
@@ -22,7 +21,6 @@ module Pages.Calendar
   , durationMinutesBetween
   , sortItems
   , validateIntention
-  , reminderTimesForIntention
   , applyOfflineMutation
   , applyTemplateToDraft
   , computeDropMinuteIndex
@@ -44,7 +42,7 @@ import Control.Monad.Writer.Trans (WriterT, runWriterT)
 import Data.Argonaut.Core (Json, jsonEmptyObject)
 import Data.Argonaut.Decode (class DecodeJson, decodeJson, (.:), (.:?))
 import Data.Argonaut.Decode.Error (JsonDecodeError(..))
-import Data.Array (any, catMaybes, elem, filter, find, findIndex, foldM, foldl, index, length, mapMaybe, mapWithIndex, nub, null, sortBy, uncons, updateAt)
+import Data.Array (any, elem, filter, find, findIndex, foldM, foldl, index, length, mapMaybe, mapWithIndex, nub, null, sortBy, uncons, updateAt)
 import Data.Bifunctor (lmap)
 import Data.Either (Either(..), either)
 import Data.Foldable (traverse_, fold)
@@ -97,7 +95,6 @@ import Web.DOM.ParentNode as ParentNode
 import Web.TouchEvent.Touch (clientY) as Touch
 import Web.TouchEvent.TouchList as TouchList
 import Ui.Vibration (vibrateIfAvailable)
-import Ui.AgendaRender (renderPanelHeader)
 import Helpers.DateTime as DateTime
 import Web.HTML.HTMLDocument as HTMLDocument
 import Data.Date (Date, canonicalDate, month, year)
@@ -118,7 +115,6 @@ type State =
   { calendar :: CalendarState
   , sync :: SyncState
   , drag :: DragState
-  , notifications :: NotificationState
   , templates :: Templates.TemplateState
   , view :: ViewState
   }
@@ -133,7 +129,6 @@ data Action
   | ViewAction ViewAction
   | GlobalKeyDown String
   | GlobalResize
-  | NotificationAction NotificationAction
   | TemplatesOutputAction Templates.TemplatesOutput
   | ImportApplyItems (Array CalendarItemContent)
   | CreateRecurrenceCmd Recurrence.RecurrenceCommand
@@ -396,7 +391,6 @@ initialState = const
   { calendar: calendarInitialState
   , sync: syncInitialState
   , drag: dragInitialState
-  , notifications: notificationInitialState
   , templates: Templates.templateInitialState
   , view: viewInitialState
   }
@@ -409,9 +403,6 @@ _sync = prop (Proxy :: _ "sync")
 
 _drag :: Lens' State DragState
 _drag = prop (Proxy :: _ "drag")
-
-_notifications :: Lens' State NotificationState
-_notifications = prop (Proxy :: _ "notifications")
 
 _templates :: Lens' State Templates.TemplateState
 _templates = prop (Proxy :: _ "templates")
@@ -457,9 +448,6 @@ instance hasStateLensDrag :: HasStateLens DragState where
 
 instance hasStateLensView :: HasStateLens ViewState where
   getLens = _view
-
-instance hasStateLensNotifications :: HasStateLens NotificationState where
-  getLens = _notifications
 
 withSubState :: forall s a cmd. HasStateLens s => ToCommand cmd => StateT s (WriterT (Array cmd) Aff) a -> ErrorAgendaAppM a
 withSubState action = do
@@ -607,7 +595,6 @@ handleAction action = handleError $
     GlobalResize -> do
       viewport <- liftEffect $ window >>= Window.innerWidth
       withSubState $ handleViewAction (ViewSetIsMobile (viewport <= 768))
-    NotificationAction notificationAction -> withSubState $ handleNotificationAction notificationAction
     TemplatesOutputAction output ->
       case output of
         Templates.TemplatesStateChanged nextState ->
@@ -742,16 +729,14 @@ subscribeToGlobalResize = do
   pure unit
 
 render :: State -> H.ComponentHTML Action Slots Aff
-render { calendar, sync, drag, notifications, templates, view } =
+render { calendar, sync, drag, templates, view } =
   let
     { items, showConflictsOnly, conflictResolution, sortMode } = calendar
     SyncState { offlineMode, syncConflict, updateError } = sync
     DragState { draggingId, dragHoverIndex } = drag
-    NotificationState { notificationDefaults, notificationOverrides, notificationPanelOpen, notificationEditor } = notifications
     ViewState { viewMode, focusDate, validationPanel, isMobile } = view
-    agendaModalsInput = buildAgendaModalsInput { calendar, sync, drag, notifications, templates, view }
+    agendaModalsInput = buildAgendaModalsInput { calendar, sync, drag, templates, view }
     { conflictGroups } = agendaModalsInput.filters
-    { intentions: unplannedIntentions } = agendaModalsInput.notifications
     conflictIds = detectConflictIds items
     itemsToShow =
       if showConflictsOnly then filter (isConflict conflictIds) items
@@ -788,8 +773,7 @@ render { calendar, sync, drag, notifications, templates, view } =
                 , maybe (text "") (map toAction <<< renderSyncConflict) syncConflict
                 ]
             , div [ class_ "calendar-side" ]
-                [ NotificationAction <$> renderNotificationsPanel notificationPanelOpen notificationDefaults notificationOverrides notificationEditor unplannedIntentions
-                ]
+                []
             ]
         ]
           <> [ renderAgendaModals agendaModalsInput ]
@@ -818,12 +802,6 @@ type AgendaModalsInput =
       , offlineMode :: Boolean
       , sortMode :: SortMode
       }
-  , notifications ::
-      { defaults :: NotificationDefaults
-      , overrides :: Array NotificationOverride
-      , editor :: Maybe NotificationEditor
-      , intentions :: Array CalendarItem
-      }
   , templates :: Templates.TemplateState
   , exportItems :: Array Export.Item
   , draft :: IntentionDraft
@@ -832,7 +810,7 @@ type AgendaModalsInput =
   }
 
 renderAgendaModals :: AgendaModalsInput -> H.ComponentHTML Action Slots Aff
-renderAgendaModals { activeModal, filters, notifications, templates, exportItems, draft, validationError, editPanel } =
+renderAgendaModals { activeModal, filters, templates, exportItems, draft, validationError, editPanel } =
   let
     renderModal title content = Modal.renderModal title content (ViewAction ViewCloseModal) (ViewAction ViewCloseModal)
     renderExportModal items =
@@ -845,7 +823,6 @@ renderAgendaModals { activeModal, filters, notifications, templates, exportItems
         ModalCreateItem -> Modal.renderModal "Créer un item" [ renderCreateContent draft validationError ]
           (ViewAction ViewCloseCreate)
           (SyncAction SyncSubmitIntention)
-        ModalNotifications -> renderModal "Rappels" [ NotificationAction <$> renderNotificationsContent notifications.defaults notifications.overrides notifications.editor notifications.intentions ]
         ModalTemplates -> renderModal "Templates de tâches" [ renderTemplatesPanelPage templates ]
         ModalImportCsv ->
           renderModal "Import CSV"
@@ -868,11 +845,10 @@ renderAgendaModals { activeModal, filters, notifications, templates, exportItems
       activeModal
 
 buildAgendaModalsInput :: State -> AgendaModalsInput
-buildAgendaModalsInput { calendar, sync, notifications, templates, view } =
+buildAgendaModalsInput { calendar, sync, templates, view } =
   let
     { items, draft, validationError, showConflictsOnly, sortMode } = calendar
     SyncState { offlineMode } = sync
-    NotificationState { notificationDefaults, notificationOverrides, notificationEditor } = notifications
     ViewState { activeModal, editPanel } = view
     conflictGroups = detectConflictGroups items
   in
@@ -882,12 +858,6 @@ buildAgendaModalsInput { calendar, sync, notifications, templates, view } =
         , conflictGroups
         , offlineMode
         , sortMode
-        }
-    , notifications:
-        { defaults: notificationDefaults
-        , overrides: notificationOverrides
-        , editor: notificationEditor
-        , intentions: filter (isUnplannedIntention items) items
         }
     , templates
     , exportItems: map toExportItem items
@@ -1757,8 +1727,7 @@ renderConfirmation pending =
 
 -- BEGIN src/Calendar/Display.purs
 data AgendaModal
-  = ModalNotifications
-  | ModalTemplates
+  = ModalTemplates
   | ModalImportCsv
   | ModalImportIcs
   | ModalExport
@@ -2023,8 +1992,7 @@ renderMobileTools _ =
 renderToolsContent :: forall w. HTML w ViewAction
 renderToolsContent =
   div [ class_ "calendar-modal-stack" ]
-    [ button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalNotifications)) ] [ text "Rappels" ]
-    , button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalTemplates)) ] [ text "Templates" ]
+    [ button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalTemplates)) ] [ text "Templates" ]
     , button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalImportCsv)) ] [ text "Import CSV" ]
     , button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalImportIcs)) ] [ text "Import ICS" ]
     , button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalExport)) ] [ text "Export" ]
@@ -2827,9 +2795,6 @@ parsePositiveInt raw =
   Int.fromString (StringCommon.trim raw) >>= \val ->
     if val > 0 then Just val else Nothing
 
-isTimeLocal :: String -> Boolean
-isTimeLocal = DateTime.isLocalTime
-
 combineDateWithTime :: Date -> Time -> DateTime
 combineDateWithTime dateValue timeValue =
   DateTime dateValue timeValue
@@ -2955,20 +2920,6 @@ addDaysToDate days date' = do
 addDays :: Int -> DateTime -> Maybe DateTime
 addDays n dt = adjust (Days (Int.toNumber n)) dt
 
-isUnplannedIntention :: Array CalendarItem -> CalendarItem -> Boolean
-isUnplannedIntention items item =
-  case item of
-    ServerCalendarItem { id, content } | content.itemType == Intention ->
-      not (elem id (plannedIntentionIds items))
-    _ -> false
-
-plannedIntentionIds :: Array CalendarItem -> Array String
-plannedIntentionIds items =
-  mapMaybe extractSource items
-  where
-  extractSource (ServerCalendarItem { content }) | content.itemType == ScheduledBlock = content.sourceItemId
-  extractSource _ = Nothing
-
 isConflict :: Array String -> CalendarItem -> Boolean
 isConflict conflictIds (ServerCalendarItem { id }) = elem id conflictIds
 isConflict _ _ = false
@@ -3045,28 +2996,6 @@ type CalendarItemContent =
   , category :: Maybe String
   , recurrenceRule :: Maybe RecurrenceRule
   , recurrenceExceptionDates :: Array Date
-  }
-
-type NotificationDefaults =
-  { startDayTime :: String
-  , beforeEndHours :: Int
-  }
-
-type NotificationOverride =
-  { itemId :: String
-  , startDayTime :: Maybe String
-  , beforeEndHours :: Maybe Int
-  }
-
-type ReminderTime =
-  { label :: String
-  , at :: String
-  }
-
-defaultNotificationDefaults :: NotificationDefaults
-defaultNotificationDefaults =
-  { startDayTime: "06:00"
-  , beforeEndHours: 24
   }
 
 data CalendarItem
@@ -3218,310 +3147,6 @@ encodeCalendarContent { itemType, title, windowStart, windowEnd, status, sourceI
           ~> "recurrence_exception_dates" := map DateTime.formatLocalDate recurrenceExceptionDates
           ~> base
       Nothing -> base
-
--- BEGIN src/Calendar/Notifications.purs
-newtype NotificationState = NotificationState
-  { notificationDefaults :: NotificationDefaults
-  , notificationOverrides :: Array NotificationOverride
-  , notificationPanelOpen :: Boolean
-  , notificationEditor :: Maybe NotificationEditor
-  }
-
-type NotificationEditor =
-  { itemId :: String
-  , startTime :: String
-  , beforeEndRaw :: String
-  }
-
-notificationInitialState :: NotificationState
-notificationInitialState =
-  NotificationState
-    { notificationDefaults: defaultNotificationDefaults
-    , notificationOverrides: []
-    , notificationPanelOpen: false
-    , notificationEditor: Nothing
-    }
-
-_notificationDefaultsS :: Lens' NotificationState NotificationDefaults
-_notificationDefaultsS =
-  lens
-    (\(NotificationState state) -> state.notificationDefaults)
-    (\(NotificationState state) notificationDefaults -> NotificationState (state { notificationDefaults = notificationDefaults }))
-
-_notificationOverridesS :: Lens' NotificationState (Array NotificationOverride)
-_notificationOverridesS =
-  lens
-    (\(NotificationState state) -> state.notificationOverrides)
-    (\(NotificationState state) notificationOverrides -> NotificationState (state { notificationOverrides = notificationOverrides }))
-
-_notificationPanelOpenS :: Lens' NotificationState Boolean
-_notificationPanelOpenS =
-  lens
-    (\(NotificationState state) -> state.notificationPanelOpen)
-    (\(NotificationState state) notificationPanelOpen -> NotificationState (state { notificationPanelOpen = notificationPanelOpen }))
-
-_notificationEditorS :: Lens' NotificationState (Maybe NotificationEditor)
-_notificationEditorS =
-  lens
-    (\(NotificationState state) -> state.notificationEditor)
-    (\(NotificationState state) notificationEditor -> NotificationState (state { notificationEditor = notificationEditor }))
-
-data NotificationAction
-  = NotificationTogglePanel
-  | NotificationDefaultStartTimeChanged String
-  | NotificationDefaultBeforeEndChanged String
-  | NotificationOpenEditor String
-  | NotificationStartTimeChanged String
-  | NotificationBeforeEndChanged String
-  | NotificationSaveOverride
-  | NotificationResetOverride String
-  | NotificationCancelOverride
-
-handleNotificationAction :: NotificationAction -> StateT NotificationState (WriterT (Array Void) Aff) Unit
-handleNotificationAction = case _ of
-  NotificationTogglePanel ->
-    modify_ (_notificationPanelOpenS %~ not)
-  NotificationDefaultStartTimeChanged raw ->
-    if isTimeLocal raw then
-      modify_ (_notificationDefaultsS <<< prop (Proxy :: _ "startDayTime") .~ raw)
-    else
-      pure unit
-  NotificationDefaultBeforeEndChanged raw ->
-    case parsePositiveInt raw of
-      Just hours ->
-        modify_ (_notificationDefaultsS <<< prop (Proxy :: _ "beforeEndHours") .~ hours)
-      Nothing -> pure unit
-  NotificationOpenEditor itemId -> do
-    st <- get
-    let
-      existing = lookupNotificationOverride itemId (st ^. _notificationOverridesS)
-      startTime =
-        fromMaybe (st ^. _notificationDefaultsS).startDayTime (existing >>= _.startDayTime)
-      beforeEnd =
-        fromMaybe (st ^. _notificationDefaultsS).beforeEndHours (existing >>= _.beforeEndHours)
-    modify_ (_notificationEditorS .~ Just { itemId, startTime, beforeEndRaw: show beforeEnd })
-  NotificationStartTimeChanged raw ->
-    modify_ (_notificationEditorS %~ map (_ { startTime = raw }))
-  NotificationBeforeEndChanged raw ->
-    modify_ (_notificationEditorS %~ map (_ { beforeEndRaw = raw }))
-  NotificationSaveOverride -> do
-    st <- get
-    case st ^. _notificationEditorS of
-      Nothing -> pure unit
-      Just editor -> do
-        let
-          cleanedTime = if isTimeLocal editor.startTime then Just editor.startTime else Nothing
-          cleanedHours = parsePositiveInt editor.beforeEndRaw
-        modify_
-          ( (_notificationOverridesS %~ upsertNotificationOverride editor.itemId cleanedTime cleanedHours)
-              <<< (_notificationEditorS .~ Nothing)
-          )
-  NotificationResetOverride itemId ->
-    modify_
-      ( (_notificationOverridesS %~ removeNotificationOverride itemId)
-          <<< (_notificationEditorS .~ Nothing)
-      )
-  NotificationCancelOverride ->
-    modify_ (_notificationEditorS .~ Nothing)
-
-renderNotificationsPanel
-  :: forall w
-   . Boolean
-  -> NotificationDefaults
-  -> Array NotificationOverride
-  -> Maybe NotificationEditor
-  -> Array CalendarItem
-  -> HTML w NotificationAction
-renderNotificationsPanel isOpen defaults overrides editor intentions =
-  if null intentions then text ""
-  else
-    section [ class_ "calendar-notifications" ]
-      [ renderPanelHeader
-          { baseClass: "calendar-notifications"
-          , title: "Rappels des intentions non planifiées"
-          , subtitle: "Les rappels par défaut s'appliquent aux intentions non planifiées."
-          }
-          [ button
-              [ class_ $ "btn btn-sm calendar-notifications-toggle" <> if isOpen then " btn-outline-primary" else " btn-outline-secondary"
-              , onClick (const NotificationTogglePanel)
-              ]
-              [ text $ if isOpen then "Masquer" else "Configurer" ]
-          ]
-      , if isOpen then renderNotificationDefaults defaults else text ""
-      , if isOpen then renderNotificationList defaults overrides editor intentions else text ""
-      ]
-
-renderNotificationsContent
-  :: forall w
-   . NotificationDefaults
-  -> Array NotificationOverride
-  -> Maybe NotificationEditor
-  -> Array CalendarItem
-  -> HTML w NotificationAction
-renderNotificationsContent defaults overrides editor intentions =
-  if null intentions then
-    div [ class_ "calendar-modal-empty" ]
-      [ text "Aucune intention non planifiée." ]
-  else
-    div [ class_ "calendar-notifications-modal" ]
-      [ renderNotificationDefaults defaults
-      , renderNotificationList defaults overrides editor intentions
-      ]
-
-renderNotificationDefaults :: forall w. NotificationDefaults -> HTML w NotificationAction
-renderNotificationDefaults defaults =
-  div [ class_ "calendar-notifications-defaults" ]
-    [ div [ class_ "calendar-notifications-section-title" ] [ text "Rappels par défaut" ]
-    , div [ class_ "calendar-notifications-controls" ]
-        [ div [ class_ "calendar-notifications-control" ]
-            [ div [ class_ "calendar-notifications-label" ] [ text "Jour de début" ]
-            , input
-                [ class_ "form-control calendar-input"
-                , type_ InputTime
-                , value defaults.startDayTime
-                , onValueChange NotificationDefaultStartTimeChanged
-                ]
-            ]
-        , div [ class_ "calendar-notifications-control" ]
-            [ div [ class_ "calendar-notifications-label" ] [ text "Avant fin (heures)" ]
-            , input
-                [ class_ "form-control calendar-input"
-                , type_ InputNumber
-                , value (show defaults.beforeEndHours)
-                , onValueChange NotificationDefaultBeforeEndChanged
-                ]
-            ]
-        ]
-    ]
-
-renderNotificationList
-  :: forall w
-   . NotificationDefaults
-  -> Array NotificationOverride
-  -> Maybe NotificationEditor
-  -> Array CalendarItem
-  -> HTML w NotificationAction
-renderNotificationList defaults overrides editor intentions =
-  div [ class_ "calendar-notifications-list" ]
-    (map (renderNotificationItem defaults overrides editor) intentions)
-
-renderNotificationItem
-  :: forall w
-   . NotificationDefaults
-  -> Array NotificationOverride
-  -> Maybe NotificationEditor
-  -> CalendarItem
-  -> HTML w NotificationAction
-renderNotificationItem defaults overrides editor item =
-  case item of
-    ServerCalendarItem { id, content } | content.itemType == Intention ->
-      let
-        override = lookupNotificationOverride id overrides
-        reminders = reminderTimesForIntention defaults override content
-        editorForItem = editor >>= \current -> if current.itemId == id then Just current else Nothing
-        hasOverride = case override of
-          Nothing -> false
-          Just _ -> true
-      in
-        div [ class_ "calendar-notification-item" ]
-          [ div [ class_ "calendar-notification-header" ]
-              [ div []
-                  [ div [ class_ "calendar-notification-title" ] [ text content.title ]
-                  , div [ class_ "calendar-notification-window" ] [ text $ formatDateTimeLocal content.windowStart <> " → " <> formatDateTimeLocal content.windowEnd ]
-                  ]
-              , div [ class_ "calendar-notification-actions" ]
-                  [ div [ class_ $ "calendar-notification-badge" <> guard hasOverride " calendar-notification-badge--custom" ]
-                      [ text $ if hasOverride then "Personnalisé" else "Par défaut" ]
-                  , button
-                      [ class_ "btn btn-sm btn-outline-secondary"
-                      , onClick (const (NotificationOpenEditor id))
-                      ]
-                      [ text "Personnaliser" ]
-                  ]
-              ]
-          , renderReminderTimes reminders
-          , maybe (text "") (renderNotificationEditor id) editorForItem
-          ]
-    _ -> text ""
-
-renderReminderTimes :: forall w action. Array ReminderTime -> HTML w action
-renderReminderTimes reminders =
-  div [ class_ "calendar-notification-times" ]
-    (map (\reminder -> div [ class_ "calendar-notification-time" ] [ text $ reminder.label <> ": " <> reminder.at ]) reminders)
-
-renderNotificationEditor :: forall w. String -> NotificationEditor -> HTML w NotificationAction
-renderNotificationEditor itemId editor =
-  div [ class_ "calendar-notification-editor" ]
-    [ div [ class_ "calendar-notifications-section-title" ] [ text "Surcharge de rappel" ]
-    , div [ class_ "calendar-notifications-controls" ]
-        [ div [ class_ "calendar-notifications-control" ]
-            [ div [ class_ "calendar-notifications-label" ] [ text "Jour de début" ]
-            , input
-                [ class_ "form-control calendar-input"
-                , type_ InputTime
-                , value editor.startTime
-                , onValueChange NotificationStartTimeChanged
-                ]
-            ]
-        , div [ class_ "calendar-notifications-control" ]
-            [ div [ class_ "calendar-notifications-label" ] [ text "Avant fin (heures)" ]
-            , input
-                [ class_ "form-control calendar-input"
-                , type_ InputNumber
-                , value editor.beforeEndRaw
-                , onValueChange NotificationBeforeEndChanged
-                ]
-            ]
-        ]
-    , div [ class_ "calendar-notification-editor-actions" ]
-        [ button [ class_ "btn btn-sm btn-success", onClick (const NotificationSaveOverride) ] [ text "Enregistrer" ]
-        , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const NotificationCancelOverride) ] [ text "Annuler" ]
-        , button [ class_ "btn btn-sm btn-outline-danger", onClick (const (NotificationResetOverride itemId)) ] [ text "Réinitialiser" ]
-        ]
-    ]
-
-reminderTimesForIntention :: NotificationDefaults -> Maybe NotificationOverride -> CalendarItemContent -> Array ReminderTime
-reminderTimesForIntention defaults override content =
-  if content.itemType /= Intention then []
-  else
-    let
-      startTime = fromMaybe defaults.startDayTime (override >>= _.startDayTime)
-      beforeEndHours = fromMaybe defaults.beforeEndHours (override >>= _.beforeEndHours)
-      startReminder =
-        parseTimeLocal startTime <#> \timeValue ->
-          mkReminder "Jour de début" (formatDateTimeLocal (combineDateWithTime (date content.windowStart) timeValue))
-      beforeEndReminder =
-        shiftMinutes (negate (beforeEndHours * 60)) content.windowEnd <#> \dateTimeValue ->
-          mkReminder (show beforeEndHours <> "h avant fin") (formatDateTimeLocal dateTimeValue)
-    in
-      catMaybes [ startReminder, beforeEndReminder ]
-  where
-  mkReminder label at = { label, at }
-
-lookupNotificationOverride :: String -> Array NotificationOverride -> Maybe NotificationOverride
-lookupNotificationOverride itemId overrides =
-  find (\override -> override.itemId == itemId) overrides
-
-upsertNotificationOverride :: String -> Maybe String -> Maybe Int -> Array NotificationOverride -> Array NotificationOverride
-upsertNotificationOverride itemId startTime beforeEnd overrides =
-  let
-    cleaned =
-      case { start: startTime, end: beforeEnd } of
-        { start: Nothing, end: Nothing } -> Nothing
-        { start, end } -> Just { itemId, startDayTime: start, beforeEndHours: end }
-  in
-    case cleaned of
-      Nothing -> removeNotificationOverride itemId overrides
-      Just entry ->
-        case find (\override -> override.itemId == itemId) overrides of
-          Nothing -> overrides <> [ entry ]
-          Just _ -> map (\override -> if override.itemId == itemId then entry else override) overrides
-
-removeNotificationOverride :: String -> Array NotificationOverride -> Array NotificationOverride
-removeNotificationOverride itemId overrides =
-  filter (\override -> override.itemId /= itemId) overrides
-
--- END src/Calendar/Notifications.purs
 
 -- BEGIN src/Calendar/Offline.purs
 type OfflineMutationResult =

@@ -1039,52 +1039,6 @@ a.nav-link:hover {
   font-size: 0.95rem;
 }
 
-.calendar-notifications {
-  border: 1px solid var(--app-border);
-  background: rgba(255, 255, 255, 0.92);
-  border-radius: 18px;
-  padding: 1rem;
-  display: grid;
-  gap: 0.85rem;
-  box-shadow: 0 12px 28px rgba(20, 37, 68, 0.08);
-}
-
-
-.calendar-notifications-toggle {
-  border-radius: 999px;
-  font-weight: 600;
-}
-
-.calendar-notifications-modal {
-  display: grid;
-  gap: 0.75rem;
-}
-
-.calendar-modal-empty {
-  color: var(--app-muted);
-  font-size: 0.95rem;
-  padding: 0.4rem 0.1rem;
-}
-
-.calendar-notifications-defaults {
-  display: grid;
-  gap: 0.6rem;
-}
-
-.calendar-notifications-section-title {
-  font-weight: 600;
-  color: var(--app-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: 0.75rem;
-}
-
-.calendar-notifications-controls {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 0.75rem;
-}
-
 .calendar-notifications-label {
   font-size: 0.85rem;
   color: var(--app-muted);
@@ -1119,79 +1073,6 @@ a.nav-link:hover {
 
 .calendar-recurrence-exception-date {
   font-weight: 600;
-}
-
-.calendar-notifications-list {
-  display: grid;
-  gap: 0.8rem;
-}
-
-.calendar-notification-item {
-  border: 1px solid var(--app-border);
-  border-radius: 14px;
-  padding: 0.8rem;
-  background: #fff;
-  display: grid;
-  gap: 0.6rem;
-}
-
-.calendar-notification-header {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-
-.calendar-notification-title {
-  font-weight: 700;
-}
-
-.calendar-notification-window {
-  color: var(--app-muted);
-  font-size: 0.9rem;
-}
-
-.calendar-notification-actions {
-  display: inline-flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.calendar-notification-badge {
-  padding: 0.2rem 0.6rem;
-  border-radius: 999px;
-  background: #eef4ff;
-  color: #2f4c7a;
-  font-weight: 600;
-  font-size: 0.75rem;
-}
-
-.calendar-notification-badge--custom {
-  background: #fff1e6;
-  color: #9a4a00;
-}
-
-.calendar-notification-times {
-  display: grid;
-  gap: 0.35rem;
-  font-size: 0.9rem;
-}
-
-.calendar-notification-time {
-  color: #1d2a3a;
-}
-
-.calendar-notification-editor {
-  border-top: 1px dashed var(--app-border);
-  padding-top: 0.7rem;
-  display: grid;
-  gap: 0.75rem;
-}
-
-.calendar-notification-editor-actions {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
 }
 
 .calendar-templates {
