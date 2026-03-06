@@ -415,14 +415,8 @@ handleAction :: Action -> AgendaAppM Unit
 handleAction action = handleError $
   case action of
     Init -> initAction
-    CreateFormAction formAction -> do
-      modify_ (_calendar %~ applyCreateFormAction formAction)
-      case formAction of
-        CreateFormDraftTypeChanged itemType -> do
-          st <- get
-          let updatedDraft = prefillCreateDraft itemType (st ^. _viewFocusDatePage) (st ^. _calendarDraft)
-          modify_ (_calendarDraft .~ updatedDraft)
-        _ -> pure unit
+    CreateFormAction formAction ->
+      lift (applyCreateFormAction formAction)
     ControlsAction controlsAction ->
       modify_ (_calendar %~ applyControlsAction controlsAction)
     ConflictAction conflictAction ->
@@ -468,38 +462,38 @@ handleAction action = handleError $
             (st ^. _calendarItems) <#> \item ->
             durationMinutesBetween (calendarItemContent item).windowStart (calendarItemContent item).windowEnd
       offset <- liftEffect $ dragOffsetFromEvent ev duration
-      modify_ (_drag %~ ((_draggingIdS .~ Just itemId) <<< (_dragOffsetMinutesS .~ offset)))
+      modify_ (_drag %~ ((_draggingId .~ Just itemId) <<< (_dragOffsetMinutes .~ offset)))
     DragOver _ ev ->
       liftEffect $ preventDefault (toEvent ev)
     DropOn targetId -> do
       st <- get
       let items = st ^. _calendarItems
-      case st ^. (_drag <<< _draggingIdS) of
+      case st ^. (_drag <<< _draggingId) of
         Nothing -> pure unit
         Just draggingId -> do
           let reordered = moveItemBefore draggingId targetId items
           modify_ (_calendarItems .~ reordered)
-          modify_ (_drag <<< _draggingIdS .~ Nothing)
+          modify_ (_drag <<< _draggingId .~ Nothing)
     DragEnd ->
-      modify_ (_drag %~ ((_draggingIdS .~ Nothing) <<< (_dragHoverIndexS .~ Nothing) <<< (_dragOffsetMinutesS .~ Nothing)))
+      modify_ (_drag %~ ((_draggingId .~ Nothing) <<< (_dragHoverIndex .~ Nothing) <<< (_dragOffsetMinutes .~ Nothing)))
     DragOverCalendar ev -> do
       liftEffect $ preventDefault (toEvent ev)
       idx <- liftEffect $ dragMinuteIndexFromEvent ev
       st <- get
       let
-        offset = fromMaybe 0 (st ^. (_drag <<< _dragOffsetMinutesS))
+        offset = fromMaybe 0 (st ^. (_drag <<< _dragOffsetMinutes))
         adjusted = idx <#> \minuteIndex -> computeDropMinuteIndex minuteIndex offset
-      modify_ (_drag <<< _dragHoverIndexS .~ adjusted)
+      modify_ (_drag <<< _dragHoverIndex .~ adjusted)
     DropOnCalendar ev -> do
       liftEffect $ preventDefault (toEvent ev)
       idx <- liftEffect $ dragMinuteIndexFromEvent ev
       st <- get
       let items = st ^. _calendarItems
-      case st ^. (_drag <<< _draggingIdS) of
+      case st ^. (_drag <<< _draggingId) of
         Nothing -> pure unit
         Just draggingId -> do
           let
-            offset = fromMaybe 0 (st ^. (_drag <<< _dragOffsetMinutesS))
+            offset = fromMaybe 0 (st ^. (_drag <<< _dragOffsetMinutes))
             minuteIndex = fromMaybe 0 idx
             adjustedIndex = computeDropMinuteIndex minuteIndex offset
             totalMinutes = indexToMinutes adjustedIndex
@@ -522,9 +516,9 @@ handleAction action = handleError $
               end <- shiftMinutes mins start
               pure { start, end }
             resetDragState =
-              (_draggingIdS .~ Nothing)
-                <<< (_dragHoverIndexS .~ Nothing)
-                <<< (_dragOffsetMinutesS .~ Nothing)
+              (_draggingId .~ Nothing)
+                <<< (_dragHoverIndex .~ Nothing)
+                <<< (_dragOffsetMinutes .~ Nothing)
           case updated of
             Nothing ->
               modify_ (_drag %~ resetDragState)
@@ -560,55 +554,55 @@ handleAction action = handleError $
       offset <- liftEffect $ dragOffsetFromTouch ev duration
       modify_
         ( _drag %~
-            ( (_touchStartItemIdS .~ Just itemId)
-                <<< (_touchStartAtS .~ Just now)
-                <<< (_dragOffsetMinutesS .~ offset)
-                <<< (_touchDragActiveS .~ false)
+            ( (_touchStartItemId .~ Just itemId)
+                <<< (_touchStartAt .~ Just now)
+                <<< (_dragOffsetMinutes .~ offset)
+                <<< (_touchDragActive .~ false)
             )
         )
     DragTouchMove ev -> do
       st <- get
-      when (st ^. (_drag <<< _touchDragActiveS))
+      when (st ^. (_drag <<< _touchDragActive))
         $ liftEffect
         $ preventDefault (TouchEvent.toEvent ev)
-      case { draggingId: st ^. (_drag <<< _draggingIdS), touchStartAt: st ^. (_drag <<< _touchStartAtS), touchStartItemId: st ^. (_drag <<< _touchStartItemIdS) } of
+      case { draggingId: st ^. (_drag <<< _draggingId), touchStartAt: st ^. (_drag <<< _touchStartAt), touchStartItemId: st ^. (_drag <<< _touchStartItemId) } of
         { draggingId: Nothing, touchStartAt: Just startedAt, touchStartItemId: Just itemId } -> do
           now <- liftEffect Now.now
           let elapsedMs = case Instant.diff now startedAt of Milliseconds ms -> ms
           when (elapsedMs >= 350.0) do
             liftEffect $ preventDefault (TouchEvent.toEvent ev)
-            modify_ (_drag %~ ((_draggingIdS .~ Just itemId) <<< (_touchDragActiveS .~ true)))
+            modify_ (_drag %~ ((_draggingId .~ Just itemId) <<< (_touchDragActive .~ true)))
             liftEffect $ vibrateIfAvailable 10
         _ -> pure unit
     DragTouchMoveCalendar ev -> do
       st <- get
-      when (st ^. (_drag <<< _touchDragActiveS)) do
+      when (st ^. (_drag <<< _touchDragActive)) do
         liftEffect $ preventDefault (TouchEvent.toEvent ev)
         idx <- liftEffect $ dragMinuteIndexFromTouch ev
         let
-          offset = fromMaybe 0 (st ^. (_drag <<< _dragOffsetMinutesS))
+          offset = fromMaybe 0 (st ^. (_drag <<< _dragOffsetMinutes))
           adjusted = idx <#> \minuteIndex -> computeDropMinuteIndex minuteIndex offset
-        modify_ (_drag <<< _dragHoverIndexS .~ adjusted)
+        modify_ (_drag <<< _dragHoverIndex .~ adjusted)
     DragTouchEnd -> do
       let
         resetTouchState =
-          (_draggingIdS .~ Nothing)
-            <<< (_dragHoverIndexS .~ Nothing)
-            <<< (_dragOffsetMinutesS .~ Nothing)
-            <<< (_touchStartItemIdS .~ Nothing)
-            <<< (_touchStartAtS .~ Nothing)
-            <<< (_touchDragActiveS .~ false)
+          (_draggingId .~ Nothing)
+            <<< (_dragHoverIndex .~ Nothing)
+            <<< (_dragOffsetMinutes .~ Nothing)
+            <<< (_touchStartItemId .~ Nothing)
+            <<< (_touchStartAt .~ Nothing)
+            <<< (_touchDragActive .~ false)
       st <- get
-      case st ^. (_drag <<< _draggingIdS) of
+      case st ^. (_drag <<< _draggingId) of
         Nothing ->
           modify_ (_drag %~ resetTouchState)
         Just draggingId ->
-          case st ^. (_drag <<< _dragHoverIndexS) of
+          case st ^. (_drag <<< _dragHoverIndex) of
             Nothing -> modify_ (_drag %~ resetTouchState)
             Just minuteIndex -> do
               let items = st ^. _calendarItems
               let
-                offset = fromMaybe 0 (st ^. (_drag <<< _dragOffsetMinutesS))
+                offset = fromMaybe 0 (st ^. (_drag <<< _dragOffsetMinutes))
                 adjustedIndex = computeDropMinuteIndex minuteIndex offset
                 totalMinutes = indexToMinutes adjustedIndex
                 hour = Int.quot totalMinutes 60
@@ -651,12 +645,12 @@ handleAction action = handleError $
     DragTouchCancel ->
       modify_
         ( _drag %~
-            ( (_draggingIdS .~ Nothing)
-                <<< (_dragHoverIndexS .~ Nothing)
-                <<< (_dragOffsetMinutesS .~ Nothing)
-                <<< (_touchStartItemIdS .~ Nothing)
-                <<< (_touchStartAtS .~ Nothing)
-                <<< (_touchDragActiveS .~ false)
+            ( (_draggingId .~ Nothing)
+                <<< (_dragHoverIndex .~ Nothing)
+                <<< (_dragOffsetMinutes .~ Nothing)
+                <<< (_touchStartItemId .~ Nothing)
+                <<< (_touchStartAt .~ Nothing)
+                <<< (_touchDragActive .~ false)
             )
         )
     ViewAction viewAction -> do
@@ -1068,7 +1062,7 @@ renderTimelineItem conflictIds isMobile draggingId layout =
         , show layout.columnCount
         , ";"
         ]
-    dragProps = dragCalendarHandlers identity layout.item
+    dragProps = dragCalendarHandlers layout.item
     editProps = editHandlers isMobile draggingId layout.item
   in
     div
@@ -1131,7 +1125,7 @@ renderItem conflictIds isMobile _ item =
   let
     content = calendarItemContent item
     conflictClass = guard (isConflict conflictIds item) " calendar-card--conflict"
-    dragProps = dragHandlers identity item
+    dragProps = dragHandlers item
     editProps = editHandlers isMobile Nothing item
   in
     li ([ class_ $ "row list-group-item entity-card calendar-card" <> conflictClass ] <> dragProps <> editProps)
@@ -1290,23 +1284,26 @@ data CreateFormAction
   | CreateFormDraftStatusChanged String
   | CreateFormDraftDurationChanged String
 
-applyCreateFormAction :: CreateFormAction -> CalendarState -> CalendarState
-applyCreateFormAction action dataState =
+applyCreateFormAction :: CreateFormAction -> AgendaAppM Unit
+applyCreateFormAction action =
   case action of
     CreateFormDraftTitleChanged title ->
-      ((_draftTitleS .~ title) <<< (_validationError .~ Nothing)) dataState
-    CreateFormDraftTypeChanged itemType ->
-      ((_draftItemTypeS .~ itemType) <<< (_lastCreateType .~ itemType) <<< (_validationError .~ Nothing)) dataState
+      modify_ (_calendar %~ ((_draftTitleS .~ title) <<< (_validationError .~ Nothing)))
+    CreateFormDraftTypeChanged itemType -> do
+      modify_ (_calendar %~ ((_draftItemTypeS .~ itemType) <<< (_lastCreateType .~ itemType) <<< (_validationError .~ Nothing)))
+      st <- get
+      let updatedDraft = prefillCreateDraft itemType (st ^. _viewFocusDatePage) (st ^. _calendarDraft)
+      modify_ (_calendarDraft .~ updatedDraft)
     CreateFormDraftStartChanged windowStart ->
-      ((_draftWindowStartS .~ windowStart) <<< (_validationError .~ Nothing)) dataState
+      modify_ (_calendar %~ ((_draftWindowStartS .~ windowStart) <<< (_validationError .~ Nothing)))
     CreateFormDraftEndChanged windowEnd ->
-      ((_draftWindowEndS .~ windowEnd) <<< (_validationError .~ Nothing)) dataState
+      modify_ (_calendar %~ ((_draftWindowEndS .~ windowEnd) <<< (_validationError .~ Nothing)))
     CreateFormDraftCategoryChanged category ->
-      ((_draftCategoryS .~ category) <<< (_validationError .~ Nothing)) dataState
+      modify_ (_calendar %~ ((_draftCategoryS .~ category) <<< (_validationError .~ Nothing)))
     CreateFormDraftStatusChanged raw ->
-      ((_draftStatusS .~ parseStatus raw) <<< (_validationError .~ Nothing)) dataState
+      modify_ (_calendar %~ ((_draftStatusS .~ parseStatus raw) <<< (_validationError .~ Nothing)))
     CreateFormDraftDurationChanged raw ->
-      ((_draftDurationS .~ raw) <<< (_validationError .~ Nothing)) dataState
+      modify_ (_calendar %~ ((_draftDurationS .~ raw) <<< (_validationError .~ Nothing)))
 
 renderCreateContent
   :: IntentionDraft
@@ -2250,46 +2247,45 @@ dragInitialState =
   , touchDragActive: false
   }
 
-_draggingIdS :: Lens' DragState (Maybe String)
-_draggingIdS =
+_draggingId :: Lens' DragState (Maybe String)
+_draggingId =
   lens
     _.draggingId
     (_ { draggingId = _ })
 
-_dragHoverIndexS :: Lens' DragState (Maybe Int)
-_dragHoverIndexS =
+_dragHoverIndex :: Lens' DragState (Maybe Int)
+_dragHoverIndex =
   lens
     _.dragHoverIndex
     (_ { dragHoverIndex = _ })
 
-_dragOffsetMinutesS :: Lens' DragState (Maybe Int)
-_dragOffsetMinutesS =
+_dragOffsetMinutes :: Lens' DragState (Maybe Int)
+_dragOffsetMinutes =
   lens
     _.dragOffsetMinutes
     (_ { dragOffsetMinutes = _ })
 
-_touchStartItemIdS :: Lens' DragState (Maybe String)
-_touchStartItemIdS =
+_touchStartItemId :: Lens' DragState (Maybe String)
+_touchStartItemId =
   lens
     _.touchStartItemId
     (_ { touchStartItemId = _ })
 
-_touchStartAtS :: Lens' DragState (Maybe Instant)
-_touchStartAtS =
+_touchStartAt :: Lens' DragState (Maybe Instant)
+_touchStartAt =
   lens
     _.touchStartAt
     (_ { touchStartAt = _ })
 
-_touchDragActiveS :: Lens' DragState Boolean
-_touchDragActiveS =
+_touchDragActive :: Lens' DragState Boolean
+_touchDragActive =
   lens
     _.touchDragActive
     (_ { touchDragActive = _ })
 
 dragHandlers
-  :: forall action r
-   . (Action -> action)
-  -> CalendarItem
+  :: forall r
+   . CalendarItem
   -> Array
        ( IProp
            ( draggable :: Boolean
@@ -2299,21 +2295,20 @@ dragHandlers
            , onDragEnd :: DragEvent
            | r
            )
-           action
+           Action
        )
-dragHandlers onAction (ServerCalendarItem { id }) =
+dragHandlers (ServerCalendarItem { id }) =
   [ draggable true
-  , onDragStart (\ev -> onAction $ DragStart id ev)
-  , onDragOver (\ev -> onAction $ DragOver id ev)
-  , onDrop (const $ onAction $ DropOn id)
-  , onDragEnd (const (onAction DragEnd))
+  , onDragStart (\ev -> DragStart id ev)
+  , onDragOver (\ev -> DragOver id ev)
+  , onDrop (const $ DropOn id)
+  , onDragEnd (const DragEnd)
   ]
-dragHandlers _ _ = []
+dragHandlers _ = []
 
 dragCalendarHandlers
-  :: forall action r
-   . (Action -> action)
-  -> CalendarItem
+  :: forall r
+   . CalendarItem
   -> Array
        ( IProp
            ( draggable :: Boolean
@@ -2325,20 +2320,20 @@ dragCalendarHandlers
            , onTouchCancel :: TouchEvent.TouchEvent
            | r
            )
-           action
+           Action
        )
-dragCalendarHandlers onAction (ServerCalendarItem { id, content }) =
+dragCalendarHandlers (ServerCalendarItem { id, content }) =
   if content.itemType == Intention then
     [ draggable true
-    , onDragStart (\ev -> onAction (DragStart id ev))
-    , onDragEnd (const (onAction DragEnd))
-    , onTouchStart (\ev -> onAction (DragTouchStart id ev))
-    , onTouchMove (\ev -> onAction (DragTouchMove ev))
-    , onTouchEnd (const (onAction DragTouchEnd))
-    , onTouchCancel (const (onAction DragTouchCancel))
+    , onDragStart (\ev -> DragStart id ev)
+    , onDragEnd (const DragEnd)
+    , onTouchStart (\ev -> DragTouchStart id ev)
+    , onTouchMove (\ev -> DragTouchMove ev)
+    , onTouchEnd (const DragTouchEnd)
+    , onTouchCancel (const DragTouchCancel)
     ]
   else []
-dragCalendarHandlers _ _ = []
+dragCalendarHandlers _ = []
 
 renderDropIndicator :: forall w action. Int -> HTML w action
 renderDropIndicator idx =
@@ -3077,28 +3072,16 @@ syncInitialState =
   }
 
 _syncOfflineMode :: Lens' SyncState Boolean
-_syncOfflineMode =
-  lens
-    _.offlineMode
-    (_ { offlineMode = _ })
+_syncOfflineMode = lens _.offlineMode (_ { offlineMode = _ })
 
 _syncPendingSync :: Lens' SyncState (Array CalendarItem)
-_syncPendingSync =
-  lens
-    _.pendingSync
-    (_ { pendingSync = _ })
+_syncPendingSync = lens _.pendingSync (_ { pendingSync = _ })
 
 _syncConflict :: Lens' SyncState (Maybe (Array CalendarItem))
-_syncConflict =
-  lens
-    _.syncConflict
-    (_ { syncConflict = _ })
+_syncConflict = lens _.syncConflict (_ { syncConflict = _ })
 
 _syncUpdateError :: Lens' SyncState (Maybe String)
-_syncUpdateError =
-  lens
-    _.updateError
-    (_ { updateError = _ })
+_syncUpdateError = lens _.updateError (_ { updateError = _ })
 
 toScheduledBlock :: String -> CalendarItemContent -> CalendarItem
 toScheduledBlock sourceId content =
