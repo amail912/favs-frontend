@@ -5,9 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="/static/bootstrap/bootstrap.min.css"></link>
     <link rel="stylesheet" href="/static/bootstrap-icons/bootstrap-icons.css"></link>
+    <link rel="stylesheet" href="/static/mobile-drag-drop.default.css"></link>
     <link rel="stylesheet" href="/static/app.css"></link>
   </head>
   <body>
+    <script src="/static/mobile-drag-drop.min.js"></script>
+    <script src="/static/mobile-drag-drop.scroll-behaviour.min.js"></script>
+    <script>
+      (function () {
+        if (!window.MobileDragDrop) return;
+        try {
+          window.addEventListener("touchmove", function () {}, { passive: false });
+        } catch (e) {}
+        window.MobileDragDrop.polyfill({
+          dragImageTranslateOverride: window.MobileDragDrop.scrollBehaviourDragImageTranslateOverride
+        });
+      })();
+    </script>
     <script src="/static/index.js"></script>
   </body>
 </html>

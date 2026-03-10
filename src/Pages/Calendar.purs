@@ -41,7 +41,7 @@ import Control.Monad.Trans.Class (lift)
 import Data.Argonaut.Core (Json, jsonEmptyObject)
 import Data.Argonaut.Decode (class DecodeJson, decodeJson, (.:), (.:?))
 import Data.Argonaut.Decode.Error (JsonDecodeError(..))
-import Data.Array (any, elem, filter, find, findIndex, foldM, foldl, index, length, mapMaybe, mapWithIndex, nub, null, sortBy, uncons, updateAt)
+import Data.Array (any, elem, filter, find, findIndex, foldM, foldl, length, mapMaybe, mapWithIndex, nub, null, sortBy, uncons, updateAt)
 import Data.Bifunctor (lmap)
 import Data.Either (Either(..), either)
 import Data.Foldable (fold)
@@ -54,13 +54,13 @@ import Data.String.CodeUnits as String
 import Effect.Aff (Aff)
 import Effect.Aff.Class (liftAff)
 import Effect.Class (liftEffect)
+import Effect.Console as Console
 import Effect.Now (nowDateTime)
-import Effect.Now as Now
 import Halogen (Component, ComponentHTML, HalogenM, Slot, defaultEval, getRef, mkComponent, mkEval) as H
 import Halogen (subscribe)
 import Halogen.HTML (HTML, button, div, h2, i, input, li, option, section, select, slot, span, text, ul)
 import Halogen.HTML.Core (AttrName(..))
-import Halogen.HTML.Events (onClick, onDragOver, onDrop, onMouseDown, onTouchCancel, onTouchEnd, onTouchMove, onValueChange, onKeyDown, onDragEnd, onDragStart, onTouchStart)
+import Halogen.HTML.Events (onClick, onDragEnter, onDragOver, onDrop, onMouseDown, onValueChange, onKeyDown, onDragEnd, onDragStart)
 import Halogen.HTML.Properties (attr, style, IProp, value, placeholder, type_, draggable)
 import Halogen.Query.Event as HQE
 import Type.Proxy (Proxy(..))
@@ -74,26 +74,20 @@ import Web.HTML.Window as Window
 import Web.UIEvent.KeyboardEvent as KE
 import Web.UIEvent.KeyboardEvent.EventTypes as KeyboardEventTypes
 import Web.UIEvent.MouseEvent as MouseEvent
-import Web.TouchEvent.TouchEvent as TouchEvent
 import Data.Enum (enumFromTo, fromEnum, toEnum)
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Data.Generic.Rep (class Generic)
 import Data.Show.Generic (genericShow)
 import Control.Alt ((<|>))
-import Data.DateTime.Instant (Instant)
-import Data.DateTime.Instant as Instant
-import Data.Time.Duration (Milliseconds(..), Days(..), Minutes(..))
+import Data.Time.Duration (Days(..), Minutes(..))
 import Effect (Effect)
 import Web.Event.Event (currentTarget, target) as Event
-import Web.HTML.Event.DragEvent (DragEvent, toEvent)
+import Web.HTML.Event.DragEvent (DragEvent, dataTransfer, toEvent)
+import Data.MediaType (MediaType(..))
+import Web.HTML.Event.DataTransfer (setData)
 import Web.HTML.HTMLElement as HTMLElement
 import Web.DOM.Element (getBoundingClientRect)
-import Web.DOM.ParentNode as ParentNode
-import Web.TouchEvent.Touch (clientY) as Touch
-import Web.TouchEvent.TouchList as TouchList
-import Ui.Vibration (vibrateIfAvailable)
 import Helpers.DateTime as DateTime
-import Web.HTML.HTMLDocument as HTMLDocument
 import Data.Date (Date, canonicalDate, month, year)
 import Data.DateTime (DateTime(..), adjust, date, diff, time)
 import Data.Time (Time, hour, minute)
@@ -111,7 +105,7 @@ type ErrorAgendaAppM = ExceptT FatalError AgendaAppM
 type State =
   { calendar :: CalendarState
   , sync :: SyncState
-  , drag :: DragState
+  , mouseDrag :: DragState
   , templates :: Templates.TemplateState
   , view :: ViewState
   }
@@ -121,17 +115,7 @@ data Action
   | CreateFormAction CreateFormAction
   | ControlsAction ControlsAction
   | ConflictAction ConflictAction
-  | DragStart String DragEvent
-  | DragOver String DragEvent
-  | DropOn String
-  | DragEnd
-  | DragOverCalendar DragEvent
-  | DropOnCalendar DragEvent
-  | DragTouchStart String TouchEvent.TouchEvent
-  | DragTouchMove TouchEvent.TouchEvent
-  | DragTouchMoveCalendar TouchEvent.TouchEvent
-  | DragTouchEnd
-  | DragTouchCancel
+  | DragAction DragAction
   | ViewAction ViewAction
   | SyncDraftTitleKeyDown String
   | SyncSubmitIntention
@@ -146,6 +130,17 @@ data Action
   | ImportApplyItems (Array CalendarItemContent)
   | CreateRecurrenceCmd Recurrence.RecurrenceCommand
   | EditRecurrenceCmd Recurrence.RecurrenceCommand
+
+type DragAction =
+  { log :: String
+  , dragAction :: DragActionImpl
+  }
+
+data DragActionImpl
+  = DragStart String DragEvent
+  | DragEnd
+  | DragOverCalendar DragEvent
+  | DropOnCalendar DragEvent
 
 data RecurrenceSlot
   = RecurrenceCreate
@@ -364,7 +359,7 @@ initialState :: forall i. i -> State
 initialState = const
   { calendar: calendarInitialState
   , sync: syncInitialState
-  , drag: dragInitialState
+  , mouseDrag: dragInitialState
   , templates: Templates.templateInitialState
   , view: viewInitialState
   }
@@ -375,8 +370,8 @@ _calendar = prop (Proxy :: _ "calendar")
 _sync :: Lens' State SyncState
 _sync = prop (Proxy :: _ "sync")
 
-_drag :: Lens' State DragState
-_drag = prop (Proxy :: _ "drag")
+_mouseDrag :: Lens' State DragState
+_mouseDrag = prop (Proxy :: _ "mouseDrag")
 
 _templates :: Lens' State Templates.TemplateState
 _templates = prop (Proxy :: _ "templates")
@@ -450,209 +445,8 @@ handleAction action = handleError $
       refreshItems
     SyncDismissUpdateError ->
       modify_ (_syncUpdateErrorState .~ Nothing)
-    DragStart itemId ev -> do
-      st <- get
-      let
-        duration =
-          find
-            ( \item -> case item of
-                ServerCalendarItem { id } -> id == itemId
-                _ -> false
-            )
-            (st ^. _calendarItems) <#> \item ->
-            durationMinutesBetween (calendarItemContent item).windowStart (calendarItemContent item).windowEnd
-      offset <- liftEffect $ dragOffsetFromEvent ev duration
-      modify_ (_drag %~ ((_draggingId .~ Just itemId) <<< (_dragOffsetMinutes .~ offset)))
-    DragOver _ ev ->
-      liftEffect $ preventDefault (toEvent ev)
-    DropOn targetId -> do
-      st <- get
-      let items = st ^. _calendarItems
-      case st ^. (_drag <<< _draggingId) of
-        Nothing -> pure unit
-        Just draggingId -> do
-          let reordered = moveItemBefore draggingId targetId items
-          modify_ (_calendarItems .~ reordered)
-          modify_ (_drag <<< _draggingId .~ Nothing)
-    DragEnd ->
-      modify_ (_drag %~ ((_draggingId .~ Nothing) <<< (_dragHoverIndex .~ Nothing) <<< (_dragOffsetMinutes .~ Nothing)))
-    DragOverCalendar ev -> do
-      liftEffect $ preventDefault (toEvent ev)
-      idx <- liftEffect $ dragMinuteIndexFromEvent ev
-      st <- get
-      let
-        offset = fromMaybe 0 (st ^. (_drag <<< _dragOffsetMinutes))
-        adjusted = idx <#> \minuteIndex -> computeDropMinuteIndex minuteIndex offset
-      modify_ (_drag <<< _dragHoverIndex .~ adjusted)
-    DropOnCalendar ev -> do
-      liftEffect $ preventDefault (toEvent ev)
-      idx <- liftEffect $ dragMinuteIndexFromEvent ev
-      st <- get
-      let items = st ^. _calendarItems
-      case st ^. (_drag <<< _draggingId) of
-        Nothing -> pure unit
-        Just draggingId -> do
-          let
-            offset = fromMaybe 0 (st ^. (_drag <<< _dragOffsetMinutes))
-            minuteIndex = fromMaybe 0 idx
-            adjustedIndex = computeDropMinuteIndex minuteIndex offset
-            totalMinutes = indexToMinutes adjustedIndex
-            hour = Int.quot totalMinutes 60
-            minute = Int.rem totalMinutes 60
-            newStart =
-              parseDateLocal (st ^. _viewFocusDatePage) >>= \dateValue ->
-                DateTime.timeFromParts hour minute <#> \timeValue ->
-                  combineDateWithTime dateValue timeValue
-            updated = do
-              start <- newStart
-              item <-
-                find
-                  ( \item -> case item of
-                      ServerCalendarItem { id } -> id == draggingId
-                      _ -> false
-                  )
-                  items
-              let mins = durationMinutesBetween (calendarItemContent item).windowStart (calendarItemContent item).windowEnd
-              end <- shiftMinutes mins start
-              pure { start, end }
-            resetDragState =
-              (_draggingId .~ Nothing)
-                <<< (_dragHoverIndex .~ Nothing)
-                <<< (_dragOffsetMinutes .~ Nothing)
-          case updated of
-            Nothing ->
-              modify_ (_drag %~ resetDragState)
-            Just { start, end } -> do
-              let
-                result = updateItemWindowById draggingId start end items
-              case result.updated of
-                Nothing ->
-                  modify_ (_drag %~ resetDragState)
-                Just updatedItem ->
-                  if st ^. _syncOfflineModeState then do
-                    modify_ ((_calendarItems .~ result.items) <<< (_pendingSync %~ upsertPendingItem updatedItem) <<< (_syncUpdateErrorState .~ Nothing))
-                    modify_ (_drag %~ resetDragState)
-                  else do
-                    resp <- updateItem draggingId updatedItem
-                    if statusOk resp then modify_ (_syncUpdateErrorState .~ Nothing)
-                    else modify_ (_syncUpdateErrorState .~ Just (updateErrorMessage (unwrap resp.status)))
-                    refreshItems
-                    modify_ (_drag %~ resetDragState)
-    DragTouchStart itemId ev -> do
-      liftEffect $ preventDefault (TouchEvent.toEvent ev)
-      now <- liftEffect Now.now
-      st <- get
-      let
-        duration =
-          find
-            ( \item -> case item of
-                ServerCalendarItem { id } -> id == itemId
-                _ -> false
-            )
-            (st ^. _calendarItems) <#> \item ->
-            durationMinutesBetween (calendarItemContent item).windowStart (calendarItemContent item).windowEnd
-      offset <- liftEffect $ dragOffsetFromTouch ev duration
-      modify_
-        ( _drag %~
-            ( (_touchStartItemId .~ Just itemId)
-                <<< (_touchStartAt .~ Just now)
-                <<< (_dragOffsetMinutes .~ offset)
-                <<< (_touchDragActive .~ false)
-            )
-        )
-    DragTouchMove ev -> do
-      st <- get
-      when (st ^. (_drag <<< _touchDragActive))
-        $ liftEffect
-        $ preventDefault (TouchEvent.toEvent ev)
-      case { draggingId: st ^. (_drag <<< _draggingId), touchStartAt: st ^. (_drag <<< _touchStartAt), touchStartItemId: st ^. (_drag <<< _touchStartItemId) } of
-        { draggingId: Nothing, touchStartAt: Just startedAt, touchStartItemId: Just itemId } -> do
-          now <- liftEffect Now.now
-          let elapsedMs = case Instant.diff now startedAt of Milliseconds ms -> ms
-          when (elapsedMs >= 350.0) do
-            liftEffect $ preventDefault (TouchEvent.toEvent ev)
-            modify_ (_drag %~ ((_draggingId .~ Just itemId) <<< (_touchDragActive .~ true)))
-            liftEffect $ vibrateIfAvailable 10
-        _ -> pure unit
-    DragTouchMoveCalendar ev -> do
-      st <- get
-      when (st ^. (_drag <<< _touchDragActive)) do
-        liftEffect $ preventDefault (TouchEvent.toEvent ev)
-        idx <- liftEffect $ dragMinuteIndexFromTouch ev
-        let
-          offset = fromMaybe 0 (st ^. (_drag <<< _dragOffsetMinutes))
-          adjusted = idx <#> \minuteIndex -> computeDropMinuteIndex minuteIndex offset
-        modify_ (_drag <<< _dragHoverIndex .~ adjusted)
-    DragTouchEnd -> do
-      let
-        resetTouchState =
-          (_draggingId .~ Nothing)
-            <<< (_dragHoverIndex .~ Nothing)
-            <<< (_dragOffsetMinutes .~ Nothing)
-            <<< (_touchStartItemId .~ Nothing)
-            <<< (_touchStartAt .~ Nothing)
-            <<< (_touchDragActive .~ false)
-      st <- get
-      case st ^. (_drag <<< _draggingId) of
-        Nothing ->
-          modify_ (_drag %~ resetTouchState)
-        Just draggingId ->
-          case st ^. (_drag <<< _dragHoverIndex) of
-            Nothing -> modify_ (_drag %~ resetTouchState)
-            Just minuteIndex -> do
-              let items = st ^. _calendarItems
-              let
-                offset = fromMaybe 0 (st ^. (_drag <<< _dragOffsetMinutes))
-                adjustedIndex = computeDropMinuteIndex minuteIndex offset
-                totalMinutes = indexToMinutes adjustedIndex
-                hour = Int.quot totalMinutes 60
-                minute = Int.rem totalMinutes 60
-                newStart =
-                  parseDateLocal (st ^. _viewFocusDatePage) >>= \dateValue ->
-                    DateTime.timeFromParts hour minute <#> \timeValue ->
-                      combineDateWithTime dateValue timeValue
-                updated = do
-                  start <- newStart
-                  item <-
-                    find
-                      ( \item -> case item of
-                          ServerCalendarItem { id } -> id == draggingId
-                          _ -> false
-                      )
-                      items
-                  let mins = durationMinutesBetween (calendarItemContent item).windowStart (calendarItemContent item).windowEnd
-                  end <- shiftMinutes mins start
-                  pure { start, end }
-              case updated of
-                Nothing ->
-                  modify_ (_drag %~ resetTouchState)
-                Just { start, end } -> do
-                  let
-                    result = updateItemWindowById draggingId start end items
-                  case result.updated of
-                    Nothing ->
-                      modify_ (_drag %~ resetTouchState)
-                    Just updatedItem ->
-                      if st ^. _syncOfflineModeState then do
-                        modify_ ((_calendarItems .~ result.items) <<< (_pendingSync %~ upsertPendingItem updatedItem) <<< (_syncUpdateErrorState .~ Nothing))
-                        modify_ (_drag %~ resetTouchState)
-                      else do
-                        resp <- updateItem draggingId updatedItem
-                        if statusOk resp then modify_ (_syncUpdateErrorState .~ Nothing)
-                        else modify_ (_syncUpdateErrorState .~ Just (updateErrorMessage (unwrap resp.status)))
-                        refreshItems
-                        modify_ (_drag %~ resetTouchState)
-    DragTouchCancel ->
-      modify_
-        ( _drag %~
-            ( (_draggingId .~ Nothing)
-                <<< (_dragHoverIndex .~ Nothing)
-                <<< (_dragOffsetMinutes .~ Nothing)
-                <<< (_touchStartItemId .~ Nothing)
-                <<< (_touchStartAt .~ Nothing)
-                <<< (_touchDragActive .~ false)
-            )
-        )
+    DragAction dragAction ->
+      handleDragAction dragAction
     ViewAction viewAction -> do
       case viewAction of
         ViewOpenModal ModalTemplates ->
@@ -722,6 +516,89 @@ handleAction action = handleError $
         modify_ ((_calendarItems .~ final.items) <<< (_pendingSync .~ final.pending))
       else
         modify_ (_calendarItems %~ (_ <> imported))
+
+handleDragAction :: DragAction -> ErrorAgendaAppM Unit
+handleDragAction { log, dragAction } = do
+  liftEffect $ Console.log log
+  case dragAction of
+    DragStart itemId ev -> do
+      liftEffect $ setData (MediaType "text/plain") itemId (dataTransfer ev)
+      st <- get
+      let
+        duration =
+          find
+            ( \item -> case item of
+                ServerCalendarItem { id } -> id == itemId
+                _ -> false
+            )
+            (st ^. _calendarItems) <#> \item ->
+            durationMinutesBetween (calendarItemContent item).windowStart (calendarItemContent item).windowEnd
+      offset <- liftEffect $ dragOffsetFromEvent ev duration
+      modify_ (_mouseDrag %~ ((_draggingId .~ Just itemId) <<< (_dragOffsetMinutes .~ offset)))
+    DragEnd ->
+      modify_ (_mouseDrag %~ ((_draggingId .~ Nothing) <<< (_dragHoverIndex .~ Nothing) <<< (_dragOffsetMinutes .~ Nothing)))
+    DragOverCalendar ev -> do
+      liftEffect $ preventDefault (toEvent ev)
+      idx <- liftEffect $ dragMinuteIndexFromEvent ev
+      st <- get
+      let
+        offset = fromMaybe 0 (st ^. (_mouseDrag <<< _dragOffsetMinutes))
+        adjusted = idx <#> \minuteIndex -> computeDropMinuteIndex minuteIndex offset
+      modify_ (_mouseDrag <<< _dragHoverIndex .~ adjusted)
+    DropOnCalendar ev -> do
+      liftEffect $ preventDefault (toEvent ev)
+      idx <- liftEffect $ dragMinuteIndexFromEvent ev
+      st <- get
+      let items = st ^. _calendarItems
+      case st ^. (_mouseDrag <<< _draggingId) of
+        Nothing -> pure unit
+        Just draggingId -> do
+          let
+            offset = fromMaybe 0 (st ^. (_mouseDrag <<< _dragOffsetMinutes))
+            minuteIndex = fromMaybe 0 idx
+            adjustedIndex = computeDropMinuteIndex minuteIndex offset
+            totalMinutes = indexToMinutes adjustedIndex
+            hour = Int.quot totalMinutes 60
+            minute = Int.rem totalMinutes 60
+            newStart =
+              parseDateLocal (st ^. _viewFocusDatePage) >>= \dateValue ->
+                DateTime.timeFromParts hour minute <#> \timeValue ->
+                  combineDateWithTime dateValue timeValue
+            updated = do
+              start <- newStart
+              item <-
+                find
+                  ( \item -> case item of
+                      ServerCalendarItem { id } -> id == draggingId
+                      _ -> false
+                  )
+                  items
+              let mins = durationMinutesBetween (calendarItemContent item).windowStart (calendarItemContent item).windowEnd
+              end <- shiftMinutes mins start
+              pure { start, end }
+            resetDragState =
+              (_draggingId .~ Nothing)
+                <<< (_dragHoverIndex .~ Nothing)
+                <<< (_dragOffsetMinutes .~ Nothing)
+          case updated of
+            Nothing ->
+              modify_ (_mouseDrag %~ resetDragState)
+            Just { start, end } -> do
+              let
+                result = updateItemWindowById draggingId start end items
+              case result.updated of
+                Nothing ->
+                  modify_ (_mouseDrag %~ resetDragState)
+                Just updatedItem ->
+                  if st ^. _syncOfflineModeState then do
+                    modify_ ((_calendarItems .~ result.items) <<< (_pendingSync %~ upsertPendingItem updatedItem) <<< (_syncUpdateErrorState .~ Nothing))
+                    modify_ (_mouseDrag %~ resetDragState)
+                  else do
+                    resp <- updateItem draggingId updatedItem
+                    if statusOk resp then modify_ (_syncUpdateErrorState .~ Nothing)
+                    else modify_ (_syncUpdateErrorState .~ Just (updateErrorMessage (unwrap resp.status)))
+                    refreshItems
+                    modify_ (_mouseDrag %~ resetDragState)
 
 initAction :: ErrorAgendaAppM Unit
 initAction = do
@@ -828,13 +705,14 @@ subscribeToGlobalResize = do
   pure unit
 
 render :: State -> H.ComponentHTML Action Slots Aff
-render { calendar, sync, drag, templates, view } =
+render { calendar, sync, mouseDrag, templates, view } =
   let
     { items, showConflictsOnly, conflictResolution, sortMode } = calendar
     { offlineMode, syncConflict, updateError } = sync
-    { draggingId, dragHoverIndex } = drag
+    draggingId = mouseDrag.draggingId
+    dragHoverIndex = mouseDrag.dragHoverIndex
     { viewMode, focusDate, validationPanel, isMobile } = view
-    agendaModalsInput = buildAgendaModalsInput { calendar, sync, drag, templates, view }
+    agendaModalsInput = buildAgendaModalsInput { calendar, sync, mouseDrag, templates, view }
     { conflictGroups } = agendaModalsInput.filters
     conflictIds = detectConflictIds items
     itemsToShow =
@@ -866,8 +744,7 @@ render { calendar, sync, drag, templates, view } =
                 [ maybe (text "") renderUpdateError updateError
                 , maybe (text "") (map toAction <<< renderValidationPanel) validationPanel
                 , section [ class_ $ "calendar-list-panel" <> guard (viewMode == ViewDay) " calendar-list-panel--calendar" ]
-                    [ renderAgendaView viewMode focusDate conflictIds sortedItems isMobile draggingId dragHoverIndex
-                    ]
+                    [ renderAgendaView viewMode focusDate conflictIds sortedItems isMobile draggingId dragHoverIndex ]
                 , maybe (text "") (map toAction <<< renderConflictResolution items) conflictResolution
                 , maybe (text "") renderSyncConflict syncConflict
                 ]
@@ -999,11 +876,9 @@ renderDayCalendar focusDate conflictIds items isMobile draggingId dragHoverIndex
                 (map renderHourLabel (enumFromTo 0 23) <> [ renderHourLabelEnd ])
             , div
                 [ class_ "calendar-calendar-grid"
-                , onDragOver (\ev -> DragOverCalendar ev)
-                , onDrop (\ev -> DropOnCalendar ev)
-                , onTouchMove (\ev -> DragTouchMoveCalendar ev)
-                , onTouchEnd (const DragTouchEnd)
-                , onTouchCancel (const DragTouchCancel)
+                , onDragEnter (\ev -> DragAction { log: "DragEnterCalendar@calendar-grid", dragAction: DragOverCalendar ev })
+                , onDragOver (\ev -> DragAction { log: "DragOverCalendar@calendar-grid", dragAction: DragOverCalendar ev })
+                , onDrop (\ev -> DragAction { log: "DropOnCalendar@calendar-grid", dragAction: DropOnCalendar ev })
                 ]
                 [ div [ class_ "calendar-calendar-lines" ]
                     (map renderHourLine (enumFromTo 0 23))
@@ -1125,10 +1000,9 @@ renderItem conflictIds isMobile _ item =
   let
     content = calendarItemContent item
     conflictClass = guard (isConflict conflictIds item) " calendar-card--conflict"
-    dragProps = dragHandlers item
     editProps = editHandlers isMobile Nothing item
   in
-    li ([ class_ $ "row list-group-item entity-card calendar-card" <> conflictClass ] <> dragProps <> editProps)
+    li ([ class_ $ "row list-group-item entity-card calendar-card" <> conflictClass ] <> editProps)
       [ div [ class_ "col entity-card-body" ]
           [ div [ class_ "calendar-card-time" ] [ text (timeLabel content.windowStart) ]
           , div [ class_ "calendar-card-title" ] [ text content.title ]
@@ -1168,19 +1042,11 @@ editHandlers
   -> Array
        ( IProp
            ( onDoubleClick :: MouseEvent.MouseEvent
-           , onTouchEnd :: TouchEvent.TouchEvent
            | r
            )
            Action
        )
-editHandlers isMobile draggingId item =
-  if isMobile then
-    if draggingId == Nothing then
-      [ onTouchEnd (const (ViewAction (ViewMobileTap item))) ]
-    else
-      []
-  else
-    []
+editHandlers _ _ _ = []
 
 renderCategory :: forall w action. Maybe String -> HTML w action
 renderCategory category =
@@ -1835,7 +1701,6 @@ type ViewState =
   , validationPanel :: Maybe ValidationPanel
   , editPanel :: Maybe EditPanel
   , isMobile :: Boolean
-  , lastTapAt :: Maybe Instant
   }
 
 viewInitialState :: ViewState
@@ -1846,7 +1711,6 @@ viewInitialState =
   , validationPanel: Nothing
   , editPanel: Nothing
   , isMobile: false
-  , lastTapAt: Nothing
   }
 
 _viewMode :: Lens' ViewState CalendarView
@@ -1884,12 +1748,6 @@ _viewIsMobile =
     _.isMobile
     (_ { isMobile = _ })
 
-_viewLastTapAt :: Lens' ViewState (Maybe Instant)
-_viewLastTapAt =
-  lens
-    _.lastTapAt
-    (_ { lastTapAt = _ })
-
 type EditPanel =
   { item :: CalendarItem
   , draft :: EditDraft
@@ -1909,7 +1767,6 @@ data ViewAction
   | ViewCloseCreate
   | ViewOpenEdit CalendarItem
   | ViewOpenEditFromDoubleClick CalendarItem
-  | ViewMobileTap CalendarItem
   | ViewEditTitleChanged String
   | ViewEditStartChanged String
   | ViewEditEndChanged String
@@ -1961,7 +1818,6 @@ handleViewAction = case _ of
               %~
                 ( (_viewEditPanel .~ Just { item, draft, validationError: Nothing })
                     <<< (_viewActiveModal .~ Just ModalEditItem)
-                    <<< (_viewLastTapAt .~ Nothing)
                 )
           )
   ViewOpenEditFromDoubleClick item -> do
@@ -1970,23 +1826,6 @@ handleViewAction = case _ of
     modify_ (_view <<< _viewIsMobile .~ isMobileNow)
     if isMobileNow then
       handleViewAction (ViewOpenEdit item)
-    else
-      pure unit
-  ViewMobileTap item -> do
-    st <- get
-    if st ^. (_view <<< _viewIsMobile) then do
-      now <- liftEffect Now.now
-      case st ^. (_view <<< _viewLastTapAt) of
-        Nothing ->
-          modify_ (_view <<< _viewLastTapAt .~ Just now)
-        Just previous ->
-          let
-            elapsedMs = case Instant.diff now previous of Milliseconds ms -> ms
-          in
-            if elapsedMs <= 350.0 then
-              modify_ (_view <<< _viewLastTapAt .~ Nothing) *> handleViewAction (ViewOpenEdit item)
-            else
-              modify_ (_view <<< _viewLastTapAt .~ Just now)
     else
       pure unit
   ViewEditTitleChanged raw ->
@@ -2226,9 +2065,6 @@ type DragState =
   { draggingId :: Maybe String
   , dragHoverIndex :: Maybe Int
   , dragOffsetMinutes :: Maybe Int
-  , touchStartItemId :: Maybe String
-  , touchStartAt :: Maybe Instant
-  , touchDragActive :: Boolean
   }
 
 type DragCtx =
@@ -2242,9 +2078,6 @@ dragInitialState =
   { draggingId: Nothing
   , dragHoverIndex: Nothing
   , dragOffsetMinutes: Nothing
-  , touchStartItemId: Nothing
-  , touchStartAt: Nothing
-  , touchDragActive: false
   }
 
 _draggingId :: Lens' DragState (Maybe String)
@@ -2265,47 +2098,6 @@ _dragOffsetMinutes =
     _.dragOffsetMinutes
     (_ { dragOffsetMinutes = _ })
 
-_touchStartItemId :: Lens' DragState (Maybe String)
-_touchStartItemId =
-  lens
-    _.touchStartItemId
-    (_ { touchStartItemId = _ })
-
-_touchStartAt :: Lens' DragState (Maybe Instant)
-_touchStartAt =
-  lens
-    _.touchStartAt
-    (_ { touchStartAt = _ })
-
-_touchDragActive :: Lens' DragState Boolean
-_touchDragActive =
-  lens
-    _.touchDragActive
-    (_ { touchDragActive = _ })
-
-dragHandlers
-  :: forall r
-   . CalendarItem
-  -> Array
-       ( IProp
-           ( draggable :: Boolean
-           , onDragStart :: DragEvent
-           , onDragOver :: DragEvent
-           , onDrop :: DragEvent
-           , onDragEnd :: DragEvent
-           | r
-           )
-           Action
-       )
-dragHandlers (ServerCalendarItem { id }) =
-  [ draggable true
-  , onDragStart (\ev -> DragStart id ev)
-  , onDragOver (\ev -> DragOver id ev)
-  , onDrop (const $ DropOn id)
-  , onDragEnd (const DragEnd)
-  ]
-dragHandlers _ = []
-
 dragCalendarHandlers
   :: forall r
    . CalendarItem
@@ -2314,10 +2106,6 @@ dragCalendarHandlers
            ( draggable :: Boolean
            , onDragStart :: DragEvent
            , onDragEnd :: DragEvent
-           , onTouchStart :: TouchEvent.TouchEvent
-           , onTouchMove :: TouchEvent.TouchEvent
-           , onTouchEnd :: TouchEvent.TouchEvent
-           , onTouchCancel :: TouchEvent.TouchEvent
            | r
            )
            Action
@@ -2325,12 +2113,8 @@ dragCalendarHandlers
 dragCalendarHandlers (ServerCalendarItem { id, content }) =
   if content.itemType == Intention then
     [ draggable true
-    , onDragStart (\ev -> DragStart id ev)
-    , onDragEnd (const DragEnd)
-    , onTouchStart (\ev -> DragTouchStart id ev)
-    , onTouchMove (\ev -> DragTouchMove ev)
-    , onTouchEnd (const DragTouchEnd)
-    , onTouchCancel (const DragTouchCancel)
+    , onDragStart (\ev -> DragAction { log: "DragStart@calendar-card", dragAction: DragStart id ev })
+    , onDragEnd (const (DragAction { log: "DragEnd@calendar-card", dragAction: DragEnd }))
     ]
   else []
 dragCalendarHandlers _ = []
@@ -2417,101 +2201,6 @@ dragMinuteIndexFromEvent ev = do
         minutes = max 0 (min 1439 (Int.floor rawMinutes))
         index = Int.quot minutes 5
       pure (Just index)
-
-touchClientY :: TouchEvent.TouchEvent -> Maybe Int
-touchClientY ev =
-  TouchList.item 0 (TouchEvent.touches ev) <#> Touch.clientY
-
-dragOffsetFromTouch :: TouchEvent.TouchEvent -> Maybe Int -> Effect (Maybe Int)
-dragOffsetFromTouch ev duration = do
-  let
-    dur = fromMaybe 0 duration
-    event = TouchEvent.toEvent ev
-    clientY = fromMaybe 0 (touchClientY ev)
-    targetEl =
-      (Event.currentTarget event <|> Event.target event)
-        >>= HTMLElement.fromEventTarget
-        <#> HTMLElement.toElement
-  case targetEl of
-    Nothing -> pure (Just 0)
-    Just el -> do
-      rect <- getBoundingClientRect el
-      let
-        safeDuration = max 1 dur
-        minuteHeight = rect.height / Int.toNumber safeDuration
-        offsetPx = Int.toNumber clientY - rect.top
-        rawMinutes = if minuteHeight <= 0.0 then 0.0 else offsetPx / minuteHeight
-        minutes = Int.floor rawMinutes
-        clamped = max 0 (min (safeDuration - 1) minutes)
-        snapped = Int.quot clamped 5 * 5
-      pure (Just snapped)
-
-dragMinuteIndexFromTouch :: TouchEvent.TouchEvent -> Effect (Maybe Int)
-dragMinuteIndexFromTouch ev = do
-  let
-    event = TouchEvent.toEvent ev
-    clientY = fromMaybe 0 (touchClientY ev)
-  win <- window
-  doc <- Window.document win
-  gridEl <- ParentNode.querySelector (ParentNode.QuerySelector ".calendar-calendar-grid") (HTMLDocument.toParentNode doc)
-  let
-    targetElFromEvent =
-      (Event.currentTarget event <|> Event.target event)
-        >>= HTMLElement.fromEventTarget
-        <#> HTMLElement.toElement
-    targetEl = case gridEl of
-      Just el -> Just el
-      Nothing -> targetElFromEvent
-  case targetEl of
-    Nothing -> pure Nothing
-    Just el -> do
-      rect <- getBoundingClientRect el
-      let
-        minuteHeight = rect.height / 1440.0
-        offsetPx = Int.toNumber clientY - rect.top
-        rawMinutes = if minuteHeight <= 0.0 then 0.0 else offsetPx / minuteHeight
-        minutes = max 0 (min 1439 (Int.floor rawMinutes))
-        index = Int.quot minutes 5
-      pure (Just index)
-
-moveItemBefore :: String -> String -> Array CalendarItem -> Array CalendarItem
-moveItemBefore dragId targetId items =
-  case { from: indexOf dragId items, to: indexOf targetId items } of
-    { from: Just fromIdx, to: Just toIdx } ->
-      let
-        without = deleteAtIndex fromIdx items
-        adjustedTo = if fromIdx < toIdx then toIdx - 1 else toIdx
-        draggedItem = index items fromIdx
-      in
-        insertAtIndex adjustedTo draggedItem without
-    _ -> items
-  where
-  indexOf id = findIndex (matchesId id)
-  matchesId id (ServerCalendarItem { id: candidate }) = id == candidate
-  matchesId _ _ = false
-
-  findIndex predicate arr =
-    case uncons arr of
-      Nothing -> Nothing
-      Just { head, tail } ->
-        if predicate head then Just 0
-        else map (_ + 1) (findIndex predicate tail)
-
-  deleteAtIndex idx arr =
-    case uncons arr of
-      Nothing -> []
-      Just { head, tail } ->
-        if idx == 0 then tail
-        else [ head ] <> deleteAtIndex (idx - 1) tail
-
-  insertAtIndex idx maybeItem arr =
-    case maybeItem of
-      Nothing -> arr
-      Just item ->
-        if idx <= 0 then [ item ] <> arr
-        else case uncons arr of
-          Nothing -> [ item ]
-          Just { head, tail } -> [ head ] <> insertAtIndex (idx - 1) (Just item) tail
 
 updateItemWindowById
   :: String

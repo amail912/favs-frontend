@@ -356,14 +356,18 @@ test("calendar desktop: double click does not open edit modal", async ({ authent
 
   await expect(row).toBeVisible();
   await expect(row.locator("..").getByRole("button", { name: "Editer" })).toBeVisible();
-  await row.dblclick({ position: { x: 20, y: 20 }, force: true });
+  const box = await row.boundingBox();
+  if (!box) {
+    throw new Error("Missing bounding box for calendar item");
+  }
+  await row.dblclick({ position: { x: box.width / 2, y: box.height - 6 }, force: true });
   await expect(page.locator(".app-modal__dialog")).toHaveCount(0);
 });
 
 test.describe("calendar mobile touch", () => {
   test.use({ hasTouch: true });
 
-  test("calendar mobile: double tap opens edit modal", async ({ authenticatedPage: page }) => {
+test("calendar mobile: double tap does not open edit modal", async ({ authenticatedPage: page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
 
   const now = new Date();
@@ -407,7 +411,7 @@ test.describe("calendar mobile touch", () => {
   await page.waitForTimeout(120);
   await page.touchscreen.tap(x, y);
 
-    await expect(page.getByText("Modifier l'item")).toBeVisible();
+    await expect(page.getByText("Modifier l'item")).toHaveCount(0);
   });
 });
 
