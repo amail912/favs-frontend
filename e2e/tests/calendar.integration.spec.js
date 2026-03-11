@@ -26,11 +26,11 @@ async function openCreateModal(page) {
   return modal;
 }
 
-test("calendar integration: create intention then planify", async ({ authenticatedPage: page }) => {
+test("calendar integration: create task and show completion action", async ({ authenticatedPage: page }) => {
   const now = new Date();
   const start = new Date(now.getTime() + 60 * 60 * 1000);
   const end = new Date(now.getTime() + 2 * 60 * 60 * 1000);
-  const title = `Intention ${Date.now()}`;
+  const title = `Task ${Date.now()}`;
 
   await calendarTab(page).click();
   await expect(page).toHaveURL(/\/calendar$/);
@@ -66,25 +66,20 @@ test("calendar integration: create intention then planify", async ({ authenticat
   }).first();
 
   await expect(row).toBeVisible();
-  await expect(row.getByRole("button", { name: "Planifier" })).toBeVisible();
-  await expect(row.getByRole("button", { name: "Valider" })).toHaveCount(0);
-
-  await row.getByRole("button", { name: "Planifier" }).click();
-  await expect(row).toBeVisible();
+  await expect(row.getByRole("button", { name: "Valider" })).toBeVisible();
   await appTitle(page).click();
 });
 
-test("calendar integration: create scheduled block via modal toggle", async ({ authenticatedPage: page }) => {
+test("calendar integration: complete task from the validation panel", async ({ authenticatedPage: page }) => {
   const focusDate = toLocalDateInput(new Date());
   const start = new Date(`${focusDate}T10:00`);
   const end = new Date(`${focusDate}T11:00`);
-  const title = `Planifié ${Date.now()}`;
+  const title = `Task complete ${Date.now()}`;
 
   await calendarTab(page).click();
   await expect(page).toHaveURL(/\/calendar$/);
 
   const modal = await openCreateModal(page);
-  await modal.getByRole("button", { name: "Bloc planifié" }).click();
   await modal.getByPlaceholder("Titre").fill(title);
   await modal.getByPlaceholder("Début").fill(toLocalDatetimeInput(start));
   await modal.getByPlaceholder("Fin").fill(toLocalDatetimeInput(end));
@@ -113,7 +108,32 @@ test("calendar integration: create scheduled block via modal toggle", async ({ a
 
   await expect(row).toBeVisible();
   await expect(row.getByRole("button", { name: "Valider" })).toBeVisible();
-  await expect(row.getByRole("button", { name: "Planifier" })).toHaveCount(0);
+
+  const validateResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items") &&
+      response.request().method() === "POST"
+  );
+  const refreshResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items") &&
+      response.request().method() === "GET"
+  );
+
+  await row.getByRole("button", { name: "Valider" }).click();
+
+  const validationPanel = page.locator(".calendar-validation-panel");
+  await expect(validationPanel.getByText("Valider la tâche")).toBeVisible();
+  await validationPanel.getByPlaceholder("Durée réelle (minutes)").fill("45");
+  await validationPanel.getByRole("button", { name: "Confirmer" }).click();
+
+  const validateResponse = await validateResponsePromise;
+  expect(validateResponse.ok()).toBeTruthy();
+
+  const refreshResponse = await refreshResponsePromise;
+  expect(refreshResponse.ok()).toBeTruthy();
+
+  await expect(row.getByRole("button", { name: "Valider" })).toHaveCount(0);
 });
 
 test("calendar integration: create item on a later day", async ({ authenticatedPage: page }) => {
@@ -190,7 +210,7 @@ test("calendar integration: edit item via modal", async ({ authenticatedPage: pa
   const now = new Date();
   const start = new Date(now.getTime() + 60 * 60 * 1000);
   const end = new Date(now.getTime() + 2 * 60 * 60 * 1000);
-  const title = `Intention ${Date.now()}`;
+  const title = `Task ${Date.now()}`;
 
   await calendarTab(page).click();
   await expect(page).toHaveURL(/\/calendar$/);
@@ -252,7 +272,7 @@ test("calendar integration: escape closes edit modal", async ({ authenticatedPag
   const now = new Date();
   const start = new Date(now.getTime() + 60 * 60 * 1000);
   const end = new Date(now.getTime() + 2 * 60 * 60 * 1000);
-  const title = `Intention ${Date.now()}`;
+  const title = `Task ${Date.now()}`;
 
   await calendarTab(page).click();
   await expect(page).toHaveURL(/\/calendar$/);
@@ -360,7 +380,7 @@ test("calendar desktop: double click does not open edit modal", async ({ authent
   if (!box) {
     throw new Error("Missing bounding box for calendar item");
   }
-  await row.dblclick({ position: { x: box.width / 2, y: box.height - 6 }, force: true });
+  await row.dblclick({ position: { x: box.width / 2, y: box.height / 2 }, force: true });
   await expect(page.locator(".app-modal__dialog")).toHaveCount(0);
 });
 
@@ -415,25 +435,28 @@ test("calendar mobile: double tap does not open edit modal", async ({ authentica
   });
 });
 
-test("calendar mobile tools: filters and tools stay visible across views", async ({ authenticatedPage: page }) => {
+test("calendar mobile actions: secondary actions stay reachable across views", async ({ authenticatedPage: page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
 
   await calendarTab(page).click();
   await expect(page).toHaveURL(/\/calendar$/);
 
-  const filtersButton = page.getByRole("button", { name: "Filtres" });
-  const toolsButton = page.getByRole("button", { name: "Outils" });
+  const actionsButton = page.getByRole("button", { name: "Actions" });
 
-  await expect(filtersButton).toBeVisible();
-  await expect(toolsButton).toBeVisible();
+  await expect(actionsButton).toBeVisible();
 
   await page.getByRole("button", { name: "Semaine" }).click();
-  await expect(filtersButton).toBeVisible();
-  await expect(toolsButton).toBeVisible();
+  await expect(actionsButton).toBeVisible();
 
   await page.getByRole("button", { name: "Mois" }).click();
-  await expect(filtersButton).toBeVisible();
-  await expect(toolsButton).toBeVisible();
+  await expect(actionsButton).toBeVisible();
+
+  await actionsButton.click();
+  await expect(page.getByRole("button", { name: "Import CSV" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Import ICS" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Export" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Templates" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Filtres" })).toHaveCount(0);
 });
 
 test("calendar mobile: edit button is not rendered", async ({ authenticatedPage: page }) => {

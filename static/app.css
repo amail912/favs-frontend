@@ -517,12 +517,6 @@ a.nav-link:hover {
   border-color: rgba(45, 108, 223, 0.3);
 }
 
-.calendar-calendar-item--conflict {
-  border-color: rgba(178, 34, 34, 0.5);
-  border-left-color: #b42318;
-  box-shadow: 0 12px 22px rgba(178, 34, 34, 0.2);
-}
-
 .calendar-calendar-item--dragging {
   box-shadow:
     0 0 0 3px rgba(47, 111, 228, 0.28),
@@ -673,15 +667,6 @@ a.nav-link:hover {
 }
 
 .calendar-filter {
-  border-radius: 999px;
-  font-weight: 600;
-}
-
-.calendar-conflict-actions {
-  margin-top: 0;
-}
-
-.calendar-conflict-button {
   border-radius: 999px;
   font-weight: 600;
 }
@@ -851,20 +836,6 @@ a.nav-link:hover {
   font-weight: 600;
 }
 
-.calendar-card--conflict {
-  border-color: #f2b5b5;
-  box-shadow: 0 10px 28px rgba(178, 34, 34, 0.15);
-}
-
-.calendar-conflict-panel {
-  border: 1px solid #f2b5b5;
-  background: rgba(255, 245, 245, 0.9);
-  border-radius: 16px;
-  padding: 1rem;
-  display: grid;
-  gap: 0.75rem;
-}
-
 .calendar-sync-conflict {
   border: 1px solid #f2b5b5;
   background: rgba(255, 245, 245, 0.9);
@@ -872,57 +843,6 @@ a.nav-link:hover {
   padding: 1rem;
   display: grid;
   gap: 0.75rem;
-}
-
-.calendar-conflict-title {
-  font-weight: 700;
-}
-
-.calendar-conflict-subtitle {
-  color: var(--app-muted);
-}
-
-.calendar-conflict-list {
-  list-style: none;
-  padding-left: 0;
-  margin-bottom: 0;
-  display: grid;
-  gap: 0.5rem;
-}
-
-.calendar-conflict-item {
-  padding: 0.6rem 0.75rem;
-  border-radius: 12px;
-  background: #fff;
-  border: 1px solid #f2b5b5;
-}
-
-.calendar-conflict-item-title {
-  font-weight: 600;
-}
-
-.calendar-conflict-item-window {
-  color: var(--app-muted);
-  font-size: 0.9rem;
-}
-
-.calendar-conflict-strategies {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
-.calendar-conflict-confirmation {
-  border: 1px dashed #f2b5b5;
-  border-radius: 12px;
-  padding: 0.6rem 0.75rem;
-}
-
-.calendar-conflict-confirmation-actions {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-  margin-top: 0.4rem;
 }
 
 .calendar-validation-panel {
@@ -934,9 +854,24 @@ a.nav-link:hover {
   gap: 0.75rem;
 }
 
+.calendar-validation-title {
+  font-weight: 700;
+}
+
+.calendar-validation-subtitle {
+  color: var(--app-muted);
+}
+
 .calendar-validation-proposal {
   color: #1b5e35;
   font-weight: 600;
+}
+
+.calendar-validation-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.4rem;
 }
 
 .calendar-range {

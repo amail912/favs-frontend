@@ -3,14 +3,12 @@ module Pages.Calendar
   , decodeCalendarItemsResponse
   , CalendarItem(..)
   , CalendarItemContent
-  , IntentionDraft
+  , TaskDraft
   , ItemStatus(..)
   , ItemType(..)
   , SortMode(..)
   , ValidationError(..)
-  , detectConflictGroups
-  , detectConflictIds
-  , toNewIntention
+  , toNewTask
   , primaryActionFor
   , PrimaryAction(..)
   , buildTimelineLayout
@@ -20,28 +18,25 @@ module Pages.Calendar
   , buildEditDraft
   , durationMinutesBetween
   , sortItems
-  , validateIntention
-  , applyOfflineMutation
-  , applyTemplateToDraft
+  , validateTask
   , computeDropMinuteIndex
   , indexToTimeLabel
   ) where
 
 import Prelude hiding (div)
 import Affjax.Web (Response)
-import Api.Calendar (ValidateItemPayload(..), createItemResponse, getItemsResponse, updateItemResponse, validateItemResponse)
+import Api.Calendar (createItemResponse, getItemsResponse, updateItemResponse)
 import Calendar.Recurrence (RecurrenceDraft, RecurrenceRule, defaultRecurrenceDraft, draftFromRecurrence, draftToRecurrence)
 import Calendar.Recurrence as Recurrence
 import Calendar.ExImport.Export as Export
 import Calendar.ExImport.Import as Import
-import Calendar.Templates as Templates
 import Control.Monad.Except (ExceptT(..), withExceptT)
 import Control.Monad.State.Trans (get, modify_)
 import Control.Monad.Trans.Class (lift)
 import Data.Argonaut.Core (Json, jsonEmptyObject)
 import Data.Argonaut.Decode (class DecodeJson, decodeJson, (.:), (.:?))
 import Data.Argonaut.Decode.Error (JsonDecodeError(..))
-import Data.Array (any, elem, filter, find, findIndex, foldM, foldl, length, mapMaybe, mapWithIndex, nub, null, sortBy, uncons, updateAt)
+import Data.Array (any, filter, find, findIndex, foldl, length, mapMaybe, mapWithIndex, null, sortBy, uncons, updateAt)
 import Data.Bifunctor (lmap)
 import Data.Either (Either(..), either)
 import Data.Foldable (fold)
@@ -50,7 +45,6 @@ import Data.Lens.Record (prop)
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.Monoid (guard)
 import Data.Newtype (unwrap, wrap)
-import Data.String.CodeUnits as String
 import Effect.Aff (Aff)
 import Effect.Aff.Class (liftAff)
 import Effect.Class (liftEffect)
@@ -106,27 +100,19 @@ type State =
   { calendar :: CalendarState
   , sync :: SyncState
   , mouseDrag :: DragState
-  , templates :: Templates.TemplateState
   , view :: ViewState
   }
 
 data Action
   = Init
   | CreateFormAction CreateFormAction
-  | ControlsAction ControlsAction
-  | ConflictAction ConflictAction
   | DragAction DragAction
   | ViewAction ViewAction
   | SyncDraftTitleKeyDown String
-  | SyncSubmitIntention
-  | SyncPlanifyFrom String CalendarItemContent
-  | SyncToggleOffline
-  | SyncResolveKeepLocal
-  | SyncResolveDiscardLocal
+  | SyncSubmitTask
   | SyncDismissUpdateError
   | GlobalKeyDown String
   | GlobalResize
-  | TemplatesOutputAction Templates.TemplatesOutput
   | ImportApplyItems (Array CalendarItemContent)
   | CreateRecurrenceCmd Recurrence.RecurrenceCommand
   | EditRecurrenceCmd Recurrence.RecurrenceCommand
@@ -150,12 +136,6 @@ derive instance eqRecurrenceSlot :: Eq RecurrenceSlot
 derive instance ordRecurrenceSlot :: Ord RecurrenceSlot
 type RecurrenceSlotDef slot = forall query. H.Slot query Recurrence.RecurrenceCommand slot
 
-data TemplatesSlot = TemplatesModal
-
-derive instance eqTemplatesSlot :: Eq TemplatesSlot
-derive instance ordTemplatesSlot :: Ord TemplatesSlot
-type TemplatesSlotDef slot = forall query. H.Slot query Templates.TemplatesOutput slot
-
 data ExportSlot = ExportModal
 
 derive instance eqExportSlot :: Eq ExportSlot
@@ -172,7 +152,6 @@ type ImportSlotDef slot = forall query. H.Slot query Import.Output slot
 
 type Slots =
   ( recurrence :: RecurrenceSlotDef RecurrenceSlot
-  , templates :: TemplatesSlotDef TemplatesSlot
   , export :: ExportSlotDef ExportSlot
   , importCsv :: ImportSlotDef ImportSlot
   , importIcs :: ImportSlotDef ImportSlot
@@ -184,42 +163,26 @@ class ToAction a where
 instance toActionCreateFormAction :: ToAction CreateFormAction where
   toAction = CreateFormAction
 
-instance toActionControlsAction :: ToAction ControlsAction where
-  toAction = ControlsAction
-
-instance toActionConflictAction :: ToAction ConflictAction where
-  toAction = ConflictAction
-
 instance toActionViewAction :: ToAction ViewAction where
   toAction = ViewAction
-
-renderOfflineTogglePage :: forall w. Boolean -> HTML w Action
-renderOfflineTogglePage = renderOfflineToggle
-
-renderSortPickerPage :: forall w. SortMode -> HTML w Action
-renderSortPickerPage = map toAction <<< renderSortPicker
-
-renderConflictActionsPage :: forall w. Array (Array String) -> HTML w Action
-renderConflictActionsPage = map toAction <<< renderConflictActions
 
 renderAgendaView
   :: forall w
    . CalendarView
   -> String
-  -> Array String
   -> Array CalendarItem
   -> Boolean
   -> Maybe String
   -> Maybe Int
   -> HTML w Action
-renderAgendaView viewMode focusDate conflictIds items isMobile draggingId dragHoverIndex =
+renderAgendaView viewMode focusDate items isMobile draggingId dragHoverIndex =
   case viewMode of
     ViewDay ->
-      renderDayCalendar focusDate conflictIds items isMobile draggingId dragHoverIndex
+      renderDayCalendar focusDate items isMobile draggingId dragHoverIndex
     ViewWeek ->
-      renderRangeView "Semaine" (generateDateRange focusDate 7) conflictIds items isMobile
+      renderRangeView "Semaine" (generateDateRange focusDate 7) items isMobile
     ViewMonth ->
-      renderRangeView "Mois" (generateMonthDates focusDate) conflictIds items isMobile
+      renderRangeView "Mois" (generateMonthDates focusDate) items isMobile
 
 renderCreateFab :: forall w. HTML w Action
 renderCreateFab =
@@ -234,49 +197,16 @@ renderRecurrenceSlot :: RecurrenceSlot -> RecurrenceDraft -> (Recurrence.Recurre
 renderRecurrenceSlot slotId draft onOutput =
   slot (Proxy :: _ "recurrence") slotId Recurrence.component draft onOutput
 
-defaultStartDateTime :: String -> String
-defaultStartDateTime focusDate =
-  if String.length focusDate >= 16 then
-    focusDate
-  else if String.length focusDate >= 10 then
-    String.slice 0 10 focusDate <> "T09:00"
-  else
-    ""
-
-prefillCreateDraft :: ItemType -> String -> IntentionDraft -> IntentionDraft
-prefillCreateDraft itemType focusDate draft
-  | itemType /= ScheduledBlock || draft.windowStart /= "" || defaultStartDateTime focusDate == "" = draft
-  | otherwise =
-      let
-        start = defaultStartDateTime focusDate
-        end = if draft.windowEnd == "" then fromMaybe start (shiftMinutesRaw 30 start) else draft.windowEnd
-      in
-        draft
-          { windowStart = start
-          , windowEnd = end
-          }
-
-applyTemplateToDraft :: Templates.TaskTemplate -> String -> String -> IntentionDraft
-applyTemplateToDraft template windowStart windowEnd =
-  { itemType: Intention
-  , title: template.title
-  , windowStart
-  , windowEnd
-  , category: template.category
-  , status: Todo
-  , actualDurationMinutes: ""
-  , recurrence: defaultRecurrenceDraft
-  }
+prefillCreateDraft :: ItemType -> String -> TaskDraft -> TaskDraft
+prefillCreateDraft _ _ draft = draft
 
 itemTypeIso :: Iso' ItemType Export.ItemType
 itemTypeIso = iso toExport fromExport
   where
   toExport = case _ of
-    Intention -> Export.Intention
-    ScheduledBlock -> Export.ScheduledBlock
+    Task -> Export.Task
   fromExport = case _ of
-    Export.Intention -> Intention
-    Export.ScheduledBlock -> ScheduledBlock
+    Export.Task -> Task
 
 itemStatusIso :: Iso' ItemStatus Export.ItemStatus
 itemStatusIso = iso toExport fromExport
@@ -294,8 +224,7 @@ itemStatusIso = iso toExport fromExport
 
 fromExportItemType :: Export.ItemType -> ItemType
 fromExportItemType = case _ of
-  Export.Intention -> Intention
-  Export.ScheduledBlock -> ScheduledBlock
+  Export.Task -> Task
 
 fromExportItemStatus :: Export.ItemStatus -> ItemStatus
 fromExportItemStatus = case _ of
@@ -340,10 +269,6 @@ toExportItem item =
       , recurrenceExceptionDates: content.recurrenceExceptionDates
       }
 
-renderTemplatesPanelPage :: Templates.TemplateState -> H.ComponentHTML Action Slots Aff
-renderTemplatesPanelPage templatesState =
-  slot (Proxy :: _ "templates") TemplatesModal Templates.component templatesState TemplatesOutputAction
-
 component :: forall q i. H.Component q i NoOutput Aff
 component =
   H.mkComponent
@@ -360,7 +285,6 @@ initialState = const
   { calendar: calendarInitialState
   , sync: syncInitialState
   , mouseDrag: dragInitialState
-  , templates: Templates.templateInitialState
   , view: viewInitialState
   }
 
@@ -373,16 +297,13 @@ _sync = prop (Proxy :: _ "sync")
 _mouseDrag :: Lens' State DragState
 _mouseDrag = prop (Proxy :: _ "mouseDrag")
 
-_templates :: Lens' State Templates.TemplateState
-_templates = prop (Proxy :: _ "templates")
-
 _view :: Lens' State ViewState
 _view = prop (Proxy :: _ "view")
 
 _calendarItems :: Lens' State (Array CalendarItem)
 _calendarItems = _calendar <<< _items
 
-_calendarDraft :: Lens' State IntentionDraft
+_calendarDraft :: Lens' State TaskDraft
 _calendarDraft = _calendar <<< _draft
 
 _calendarValidationError :: Lens' State (Maybe String)
@@ -390,15 +311,6 @@ _calendarValidationError = _calendar <<< _validationError
 
 _calendarLastCreateType :: Lens' State ItemType
 _calendarLastCreateType = _calendar <<< _lastCreateType
-
-_syncOfflineModeState :: Lens' State Boolean
-_syncOfflineModeState = _sync <<< _syncOfflineMode
-
-_pendingSync :: Lens' State (Array CalendarItem)
-_pendingSync = _sync <<< _syncPendingSync
-
-_syncConflictState :: Lens' State (Maybe (Array CalendarItem))
-_syncConflictState = _sync <<< _syncConflict
 
 _syncUpdateErrorState :: Lens' State (Maybe String)
 _syncUpdateErrorState = _sync <<< _syncUpdateError
@@ -412,46 +324,15 @@ handleAction action = handleError $
     Init -> initAction
     CreateFormAction formAction ->
       lift (applyCreateFormAction formAction)
-    ControlsAction controlsAction ->
-      modify_ (_calendar %~ applyControlsAction controlsAction)
-    ConflictAction conflictAction ->
-      modify_ (_calendar %~ applyConflictAction conflictAction)
     SyncDraftTitleKeyDown key ->
-      when (key == "Enter") submitIntention
-    SyncSubmitIntention ->
-      submitIntention
-    SyncPlanifyFrom sourceId content -> do
-      st <- get
-      let
-        item = toScheduledBlock sourceId content
-        items = st ^. _calendarItems
-      if st ^. (_sync <<< _syncOfflineMode) then do
-        let
-          result = applyOfflineMutation true item items $ st ^. (_sync <<< _syncPendingSync)
-        modify_ ((_pendingSync .~ result.pending) <<< (_calendarItems .~ result.items))
-      else do
-        _ <- createItem item
-        refreshItems
-    SyncToggleOffline -> do
-      st <- get
-      if st ^. _syncOfflineModeState then do
-        modify_ (_syncOfflineModeState .~ false)
-        syncPending
-      else modify_ (_syncOfflineModeState .~ true)
-    SyncResolveKeepLocal ->
-      modify_ ((_syncConflictState .~ Nothing) <<< (_syncOfflineModeState .~ true))
-    SyncResolveDiscardLocal -> do
-      modify_ ((_syncConflictState .~ Nothing) <<< (_pendingSync .~ []))
-      refreshItems
+      when (key == "Enter") submitTask
+    SyncSubmitTask ->
+      submitTask
     SyncDismissUpdateError ->
       modify_ (_syncUpdateErrorState .~ Nothing)
     DragAction dragAction ->
       handleDragAction dragAction
     ViewAction viewAction -> do
-      case viewAction of
-        ViewOpenModal ModalTemplates ->
-          modify_ (_templates %~ Templates.resetTemplateDraft)
-        _ -> pure unit
       handleViewAction viewAction
       case viewAction of
         ViewOpenModal _ -> focusModal
@@ -488,15 +369,6 @@ handleAction action = handleError $
     GlobalResize -> do
       viewport <- liftEffect $ window >>= Window.innerWidth
       handleViewAction (ViewSetIsMobile (viewport <= 768))
-    TemplatesOutputAction output ->
-      case output of
-        Templates.TemplatesStateChanged nextState ->
-          modify_ (_templates .~ nextState)
-        Templates.TemplatesUse template -> do
-          now <- liftEffect nowDateTime
-          let startStr = formatDateTimeLocal now
-          let endStr = fromMaybe startStr (shiftMinutesRaw template.durationMinutes startStr)
-          modify_ (_calendarDraft .~ applyTemplateToDraft template startStr endStr)
     CreateRecurrenceCmd (Recurrence.RecurrenceApplied draft) ->
       modify_
         ( (_calendar <<< _draftRecurrenceS .~ draft)
@@ -506,16 +378,9 @@ handleAction action = handleError $
       modify_
         ((_view <<< _viewEditPanel) %~ map (\panel -> panel { draft = panel.draft { recurrence = draft }, validationError = Nothing }))
     ImportApplyItems contents -> do
-      st <- get
       let
         imported = map toCalendarItem contents
-      if st ^. _syncOfflineModeState then do
-        let
-          initial = { items: st ^. _calendarItems, pending: st ^. _pendingSync }
-          final = foldl (\acc item -> applyOfflineMutation true item acc.items acc.pending) initial imported
-        modify_ ((_calendarItems .~ final.items) <<< (_pendingSync .~ final.pending))
-      else
-        modify_ (_calendarItems %~ (_ <> imported))
+      modify_ (_calendarItems %~ (_ <> imported))
 
 handleDragAction :: DragAction -> ErrorAgendaAppM Unit
 handleDragAction { log, dragAction } = do
@@ -590,10 +455,7 @@ handleDragAction { log, dragAction } = do
                 Nothing ->
                   modify_ (_mouseDrag %~ resetDragState)
                 Just updatedItem ->
-                  if st ^. _syncOfflineModeState then do
-                    modify_ ((_calendarItems .~ result.items) <<< (_pendingSync %~ upsertPendingItem updatedItem) <<< (_syncUpdateErrorState .~ Nothing))
-                    modify_ (_mouseDrag %~ resetDragState)
-                  else do
+                  do
                     resp <- updateItem draggingId updatedItem
                     if statusOk resp then modify_ (_syncUpdateErrorState .~ Nothing)
                     else modify_ (_syncUpdateErrorState .~ Just (updateErrorMessage (unwrap resp.status)))
@@ -629,44 +491,42 @@ createItem item = withExceptT toFatalError $ ExceptT $ liftAff $ createItemRespo
 updateItem :: String -> CalendarItem -> ErrorAgendaAppM (Response Json)
 updateItem itemId item = withExceptT toFatalError $ ExceptT $ liftAff $ updateItemResponse itemId item
 
-validateItem :: String -> Int -> ErrorAgendaAppM (Response Json)
-validateItem itemId minutes =
-  withExceptT toFatalError $ ExceptT $ liftAff
-    $ validateItemResponse itemId
-    $ ValidateItemPayload { duree_reelle_minutes: minutes }
+validateItem :: String -> Int -> ErrorAgendaAppM Unit
+validateItem itemId minutes = do
+  st <- get
+  case find matchesId (st ^. _calendarItems) of
+    Just (ServerCalendarItem payload) ->
+      void
+        $ updateItem itemId
+            ( ServerCalendarItem
+                payload
+                  { content =
+                      payload.content
+                        { actualDurationMinutes = Just minutes
+                        , status = Done
+                        }
+                  }
+            )
+    _ -> pure unit
+  where
+  matchesId = case _ of
+    ServerCalendarItem { id } -> id == itemId
+    _ -> false
 
 statusOk :: forall a. Response a -> Boolean
 statusOk r = unwrap r.status >= 200 && unwrap r.status < 300
 
-replaceItemById :: String -> CalendarItem -> Array CalendarItem -> Array CalendarItem
-replaceItemById targetId updated =
-  map
-    ( \item -> case item of
-        ServerCalendarItem { id } | id == targetId -> updated
-        _ -> item
-    )
-
-submitIntention :: ErrorAgendaAppM Unit
-submitIntention = do
+submitTask :: ErrorAgendaAppM Unit
+submitTask = do
   st <- get
-  case validateIntention (st ^. _calendarDraft) of
+  case validateTask (st ^. _calendarDraft) of
     Left err -> modify_ (_calendarValidationError .~ Just (validationErrorMessage err))
     Right validDraft ->
-      case toNewIntention validDraft of
+      case toNewTask validDraft of
         Left err ->
           modify_ (_calendarValidationError .~ Just err)
         Right item ->
-          if st ^. _syncOfflineModeState then do
-            let
-              result = applyOfflineMutation true item (st ^. _calendarItems) (st ^. _pendingSync)
-            modify_
-              ( (_calendarItems .~ result.items)
-                  <<< (_calendarDraft .~ emptyDraft)
-                  <<< (_calendarValidationError .~ Nothing)
-                  <<< (_pendingSync .~ result.pending)
-                  <<< ((_view <<< _viewActiveModal) .~ Nothing)
-              )
-          else do
+          do
             _ <- createItem item
             modify_
               ( (_calendarDraft .~ emptyDraft)
@@ -705,37 +565,20 @@ subscribeToGlobalResize = do
   pure unit
 
 render :: State -> H.ComponentHTML Action Slots Aff
-render { calendar, sync, mouseDrag, templates, view } =
+render { calendar, sync, mouseDrag, view } =
   let
-    { items, showConflictsOnly, conflictResolution, sortMode } = calendar
-    { offlineMode, syncConflict, updateError } = sync
+    { items } = calendar
+    { updateError } = sync
     draggingId = mouseDrag.draggingId
     dragHoverIndex = mouseDrag.dragHoverIndex
     { viewMode, focusDate, validationPanel, isMobile } = view
-    agendaModalsInput = buildAgendaModalsInput { calendar, sync, mouseDrag, templates, view }
-    { conflictGroups } = agendaModalsInput.filters
-    conflictIds = detectConflictIds items
-    itemsToShow =
-      if showConflictsOnly then filter (isConflict conflictIds) items
-      else items
-    sortedItems = sortItems sortMode conflictIds itemsToShow
+    agendaModalsInput = buildAgendaModalsInput { calendar, sync, mouseDrag, view }
+    sortedItems = sortItems SortByTime items
   in
     div [ class_ "entity-page calendar-page" ]
       ( [ section [ class_ "calendar-header" ]
             [ h2 [ class_ "calendar-title" ] [ text (viewTitle viewMode) ]
-            , div [ class_ "calendar-subtitle" ] [ text "Capture rapide des intentions à planifier." ]
-            , div [ class_ "calendar-controls" ]
-                [ button
-                    [ class_ $ "btn btn-sm calendar-filter"
-                        <> guard showConflictsOnly " btn-outline-primary"
-                        <> guard (not showConflictsOnly) " btn-outline-secondary"
-                    , onClick (const (ControlsAction ControlsToggleConflictFilter))
-                    ]
-                    [ text "Filtrer: en conflit" ]
-                , renderOfflineTogglePage offlineMode
-                , renderSortPickerPage sortMode
-                , renderConflictActionsPage conflictGroups
-                ]
+            , div [ class_ "calendar-subtitle" ] [ text "Capture rapide des tâches à organiser." ]
             , toAction <$> renderViewSelector viewMode focusDate
             , toAction <$> renderMobileTools viewMode
             ]
@@ -744,9 +587,7 @@ render { calendar, sync, mouseDrag, templates, view } =
                 [ maybe (text "") renderUpdateError updateError
                 , maybe (text "") (map toAction <<< renderValidationPanel) validationPanel
                 , section [ class_ $ "calendar-list-panel" <> guard (viewMode == ViewDay) " calendar-list-panel--calendar" ]
-                    [ renderAgendaView viewMode focusDate conflictIds sortedItems isMobile draggingId dragHoverIndex ]
-                , maybe (text "") (map toAction <<< renderConflictResolution items) conflictResolution
-                , maybe (text "") renderSyncConflict syncConflict
+                    [ renderAgendaView viewMode focusDate sortedItems isMobile draggingId dragHoverIndex ]
                 ]
             , div [ class_ "calendar-side" ]
                 []
@@ -757,36 +598,16 @@ render { calendar, sync, mouseDrag, templates, view } =
             [ renderCreateFab ]
       )
 
-renderFiltersContent :: forall w. Boolean -> Array (Array String) -> Boolean -> SortMode -> HTML w Action
-renderFiltersContent showConflictsOnly conflictGroups offlineMode sortMode =
-  div [ class_ "calendar-modal-stack" ]
-    [ button
-        [ class_ $ "btn btn-sm calendar-filter" <> if showConflictsOnly then " btn-outline-primary" else "btn-outline-secondary"
-        , onClick (const (ControlsAction ControlsToggleConflictFilter))
-        ]
-        [ text "Filtrer: en conflit" ]
-    , renderOfflineTogglePage offlineMode
-    , renderSortPickerPage sortMode
-    , renderConflictActionsPage conflictGroups
-    ]
-
 type AgendaModalsInput =
   { activeModal :: Maybe AgendaModal
-  , filters ::
-      { showConflictsOnly :: Boolean
-      , conflictGroups :: Array (Array String)
-      , offlineMode :: Boolean
-      , sortMode :: SortMode
-      }
-  , templates :: Templates.TemplateState
   , exportItems :: Array Export.Item
-  , draft :: IntentionDraft
+  , draft :: TaskDraft
   , validationError :: Maybe String
   , editPanel :: Maybe EditPanel
   }
 
 renderAgendaModals :: AgendaModalsInput -> H.ComponentHTML Action Slots Aff
-renderAgendaModals { activeModal, filters, templates, exportItems, draft, validationError, editPanel } =
+renderAgendaModals { activeModal, exportItems, draft, validationError, editPanel } =
   let
     renderModal title content = Modal.renderModal title content (ViewAction ViewCloseModal) (ViewAction ViewCloseModal)
     renderExportModal items =
@@ -794,12 +615,10 @@ renderAgendaModals { activeModal, filters, templates, exportItems, draft, valida
   in
     maybe (div [] [])
       case _ of
-        ModalFilters -> renderModal "Filtres" [ renderFiltersContent filters.showConflictsOnly filters.conflictGroups filters.offlineMode filters.sortMode ]
-        ModalTools -> renderModal "Outils" [ map toAction renderToolsContent ]
+        ModalTools -> renderModal "Actions" [ map toAction renderToolsContent ]
         ModalCreateItem -> Modal.renderModal "Créer un item" [ renderCreateContent draft validationError ]
           (ViewAction ViewCloseCreate)
-          SyncSubmitIntention
-        ModalTemplates -> renderModal "Templates de tâches" [ renderTemplatesPanelPage templates ]
+          SyncSubmitTask
         ModalImportCsv ->
           renderModal "Import CSV"
             [ slot (Proxy :: _ "importCsv") ImportCsv Import.component { mode: Import.Csv }
@@ -821,21 +640,12 @@ renderAgendaModals { activeModal, filters, templates, exportItems, draft, valida
       activeModal
 
 buildAgendaModalsInput :: State -> AgendaModalsInput
-buildAgendaModalsInput { calendar, sync, templates, view } =
+buildAgendaModalsInput { calendar, view } =
   let
-    { items, draft, validationError, showConflictsOnly, sortMode } = calendar
-    { offlineMode } = sync
+    { items, draft, validationError } = calendar
     { activeModal, editPanel } = view
-    conflictGroups = detectConflictGroups items
   in
     { activeModal
-    , filters:
-        { showConflictsOnly
-        , conflictGroups
-        , offlineMode
-        , sortMode
-        }
-    , templates
     , exportItems: map toExportItem items
     , draft
     , validationError
@@ -852,16 +662,15 @@ buildAgendaModalsInput { calendar, sync, templates, view } =
 renderDayCalendar
   :: forall w
    . String
-  -> Array String
   -> Array CalendarItem
   -> Boolean
   -> Maybe String
   -> Maybe Int
   -> HTML w Action
-renderDayCalendar focusDate conflictIds items isMobile draggingId dragHoverIndex =
+renderDayCalendar focusDate items isMobile draggingId dragHoverIndex =
   let
     itemsForDate = filter (isItemOnDate focusDate) items
-    sorted = sortItems SortByTime conflictIds itemsForDate
+    sorted = sortItems SortByTime itemsForDate
     layout = buildTimelineLayout sorted
   in
     if null itemsForDate then emptyAgenda
@@ -885,7 +694,7 @@ renderDayCalendar focusDate conflictIds items isMobile draggingId dragHoverIndex
                 , maybe (text "") renderDropIndicator dragHoverIndex
                 , div
                     [ class_ $ "calendar-calendar-items" <> if draggingId == Nothing then "" else " calendar-calendar-items--dragging" ]
-                    (map (renderTimelineItem conflictIds isMobile draggingId) layout)
+                    (map (renderTimelineItem isMobile draggingId) layout)
                 ]
             ]
         ]
@@ -904,19 +713,13 @@ renderHourLine _ =
 
 renderTimelineItem
   :: forall w
-   . Array String
-  -> Boolean
+   . Boolean
   -> Maybe String
   -> TimelineLayout
   -> HTML w Action
-renderTimelineItem conflictIds isMobile draggingId layout =
+renderTimelineItem isMobile draggingId layout =
   let
     content = calendarItemContent layout.item
-    typeClass =
-      case content.itemType of
-        ScheduledBlock -> " calendar-calendar-item--scheduled"
-        Intention -> " calendar-calendar-item--intention"
-    conflictClass = guard (isConflict conflictIds layout.item) " calendar-calendar-item--conflict"
     draggingClass =
       case { draggingId, item: layout.item } of
         { draggingId: Just activeId, item: ServerCalendarItem { id } } | activeId == id ->
@@ -947,7 +750,7 @@ renderTimelineItem conflictIds isMobile draggingId layout =
       )
       [ renderTimelineEditButton isMobile layout.item
       , div
-          ( [ class_ $ "calendar-calendar-card" <> typeClass <> conflictClass <> draggingClass
+          ( [ class_ $ "calendar-calendar-card calendar-calendar-item--task" <> draggingClass
             ] <> dragProps
           )
           [ div [ class_ "calendar-calendar-meta" ]
@@ -982,27 +785,24 @@ renderTimelineEditButton isMobile item =
 
 agendaList
   :: forall w
-   . Array String
-  -> Array CalendarItem
+   . Array CalendarItem
   -> Boolean
   -> HTML w Action
-agendaList conflictIds items isMobile =
-  ul [ class_ "list-group entity-list calendar-list" ] (mapWithIndex (renderItem conflictIds isMobile) items)
+agendaList items isMobile =
+  ul [ class_ "list-group entity-list calendar-list" ] (mapWithIndex (renderItem isMobile) items)
 
 renderItem
   :: forall w
-   . Array String
-  -> Boolean
+   . Boolean
   -> Int
   -> CalendarItem
   -> HTML w Action
-renderItem conflictIds isMobile _ item =
+renderItem isMobile _ item =
   let
     content = calendarItemContent item
-    conflictClass = guard (isConflict conflictIds item) " calendar-card--conflict"
     editProps = editHandlers isMobile Nothing item
   in
-    li ([ class_ $ "row list-group-item entity-card calendar-card" <> conflictClass ] <> editProps)
+    li ([ class_ "row list-group-item entity-card calendar-card" ] <> editProps)
       [ div [ class_ "col entity-card-body" ]
           [ div [ class_ "calendar-card-time" ] [ text (timeLabel content.windowStart) ]
           , div [ class_ "calendar-card-title" ] [ text content.title ]
@@ -1020,12 +820,6 @@ renderPrimaryAction
   -> HTML w Action
 renderPrimaryAction item content =
   case primaryActionFor item of
-    PrimaryPlanify ->
-      case item of
-        ServerCalendarItem { id } ->
-          button [ class_ "btn btn-sm btn-outline-primary calendar-primary-action", onClick (const (SyncPlanifyFrom id content)) ]
-            [ text "Planifier" ]
-        _ -> text ""
     PrimaryValidate ->
       case item of
         ServerCalendarItem { id } ->
@@ -1057,11 +851,11 @@ renderCategory category =
 emptyAgenda :: forall w action. HTML w action
 emptyAgenda =
   div [ class_ "row entity-empty calendar-empty" ]
-    [ div [ class_ "entity-empty-title" ] [ text "Aucune intention aujourd'hui" ]
-    , div [ class_ "entity-empty-subtitle" ] [ text "Ajoutez une intention pour demarrer votre journee." ]
+    [ div [ class_ "entity-empty-title" ] [ text "Aucune tâche aujourd'hui" ]
+    , div [ class_ "entity-empty-subtitle" ] [ text "Ajoutez une tâche pour commencer à organiser votre journée." ]
     , div [ class_ "calendar-empty-cta" ]
         [ span [ class_ "badge rounded-pill text-bg-primary" ] [ text "Astuce" ]
-        , span [ class_ "text-muted" ] [ text "Commencez par un titre et appuyez sur Entrée." ]
+        , span [ class_ "text-muted" ] [ text "Commencez par un titre puis appuyez sur Entrée." ]
         ]
     ]
 
@@ -1071,74 +865,41 @@ renderRangeView
   :: forall w
    . String
   -> Array String
-  -> Array String
   -> Array CalendarItem
   -> Boolean
   -> HTML w Action
-renderRangeView label dates conflictIds items isMobile =
+renderRangeView label dates items isMobile =
   if null dates then emptyAgendaRange label
   else
     div [ class_ "calendar-range" ]
-      (map (renderDateSection label conflictIds items isMobile) dates)
+      (map (renderDateSection label items isMobile) dates)
 
 renderDateSection
   :: forall w
    . String
-  -> Array String
   -> Array CalendarItem
   -> Boolean
   -> String
   -> HTML w Action
-renderDateSection _ conflictIds items isMobile dateStr =
+renderDateSection _ items isMobile dateStr =
   let
     itemsForDate = filter (isItemOnDate dateStr) items
-    sorted = sortItems SortByTime conflictIds itemsForDate
+    sorted = sortItems SortByTime itemsForDate
   in
     section [ class_ "calendar-date-section" ]
       [ div [ class_ "calendar-date-title" ] [ text dateStr ]
       , if null sorted then div [ class_ "calendar-date-empty" ] [ text "Aucun item" ]
-        else agendaList conflictIds sorted isMobile
+        else agendaList sorted isMobile
       ]
 
 emptyAgendaRange :: forall w action. String -> HTML w action
 emptyAgendaRange label =
   div [ class_ "row entity-empty calendar-empty" ]
     [ div [ class_ "entity-empty-title" ] [ text $ "Aucun item sur la " <> label ]
-    , div [ class_ "entity-empty-subtitle" ] [ text "Ajoutez une intention pour demarrer." ]
+    , div [ class_ "entity-empty-subtitle" ] [ text "Ajoutez une tâche pour commencer." ]
     ]
 
 -- END src/Calendar/Calendar/Agenda/Range.purs
-
--- BEGIN src/Calendar/Calendar/Controls.purs
-data ControlsAction
-  = ControlsSortChanged String
-  | ControlsToggleConflictFilter
-
-applyControlsAction :: ControlsAction -> CalendarState -> CalendarState
-applyControlsAction action dataState =
-  case action of
-    ControlsSortChanged raw ->
-      (_sortModeS .~ parseSortMode raw) dataState
-    ControlsToggleConflictFilter ->
-      (_showConflictsOnlyS %~ not) dataState
-
-renderSortPicker :: forall w. SortMode -> HTML w ControlsAction
-renderSortPicker sortMode =
-  div [ class_ "calendar-sort" ]
-    [ text "Trier:"
-    , select
-        [ class_ "form-select calendar-sort-select"
-        , onValueChange ControlsSortChanged
-        , value (sortModeValue sortMode)
-        ]
-        [ option [ value "time" ] [ text "Horaire" ]
-        , option [ value "status" ] [ text "Statut" ]
-        , option [ value "category" ] [ text "Catégorie" ]
-        , option [ value "conflict" ] [ text "Conflit" ]
-        ]
-    ]
-
--- END src/Calendar/Calendar/Controls.purs
 
 -- BEGIN src/Calendar/Calendar/CreateForm.purs
 data CreateFormAction
@@ -1172,12 +933,12 @@ applyCreateFormAction action =
       modify_ (_calendar %~ ((_draftDurationS .~ raw) <<< (_validationError .~ Nothing)))
 
 renderCreateContent
-  :: IntentionDraft
+  :: TaskDraft
   -> Maybe String
   -> H.ComponentHTML Action Slots Aff
 renderCreateContent draft validationError =
   div [ class_ "calendar-modal-stack" ]
-    [ field "Type" typeInput
+    [ field "Tâche" taskTypeDisplay
     , field "Titre" titleInput
     , dateTimeField "Début" CreateFormDraftStartChanged draft.windowStart
     , dateTimeField "Fin" CreateFormDraftEndChanged draft.windowEnd
@@ -1205,11 +966,8 @@ renderCreateContent draft validationError =
         , value currentValue
         ]
 
-  typeInput =
-    div [ class_ "btn-group w-100", attr (AttrName "role") "group" ]
-      [ toggleButton Intention "Intention"
-      , toggleButton ScheduledBlock "Bloc planifié"
-      ]
+  taskTypeDisplay =
+    div [ class_ "badge rounded-pill text-bg-secondary" ] [ text "Tâche" ]
 
   titleInput =
     input
@@ -1235,8 +993,8 @@ renderCreateContent draft validationError =
       , value (statusValue draft.status)
       ]
       [ option [ value "todo" ] [ text "À faire" ]
-      , option [ value "in_progress" ] [ text "In progress" ]
-      , option [ value "done" ] [ text "Done" ]
+      , option [ value "in_progress" ] [ text "En cours" ]
+      , option [ value "done" ] [ text "Terminé" ]
       , option [ value "canceled" ] [ text "Annulé" ]
       ]
 
@@ -1255,19 +1013,11 @@ renderCreateContent draft validationError =
   errorInput =
     maybe (text "") (\msg -> div [ class_ "calendar-error" ] [ text msg ]) validationError
 
-  toggleButton :: ItemType -> String -> H.ComponentHTML Action Slots Aff
-  toggleButton itemType label =
-    button
-      [ class_ $ "btn btn-sm " <> if draft.itemType == itemType then "btn-primary" else "btn-outline-secondary"
-      , onClick (const (CreateFormAction (CreateFormDraftTypeChanged itemType)))
-      ]
-      [ text label ]
-
 -- END src/Calendar/Calendar/CreateForm.purs
 
 -- BEGIN src/Calendar/Calendar/Draft.purs
-toNewIntention :: IntentionDraft -> Either String CalendarItem
-toNewIntention draft = do
+toNewTask :: TaskDraft -> Either String CalendarItem
+toNewTask draft = do
   recurrence <- case draftToRecurrence draft.recurrence of
     Left err -> Left err
     Right ok -> Right ok
@@ -1306,9 +1056,9 @@ toNewIntention draft = do
 -- BEGIN src/Calendar/Calendar/Primary.purs
 primaryActionFor :: CalendarItem -> PrimaryAction
 primaryActionFor (ServerCalendarItem { content }) =
-  case content.itemType of
-    Intention -> PrimaryPlanify
-    ScheduledBlock ->
+  case content.actualDurationMinutes of
+    Just _ -> PrimaryNone
+    Nothing ->
       if content.status /= Done then PrimaryValidate else PrimaryNone
 primaryActionFor _ = PrimaryNone
 
@@ -1317,12 +1067,9 @@ primaryActionFor _ = PrimaryNone
 -- BEGIN src/Calendar/Calendar/State.purs
 type CalendarState =
   { items :: Array CalendarItem
-  , draft :: IntentionDraft
+  , draft :: TaskDraft
   , validationError :: Maybe String
   , lastCreateType :: ItemType
-  , showConflictsOnly :: Boolean
-  , conflictResolution :: Maybe ConflictResolution
-  , sortMode :: SortMode
   }
 
 calendarInitialState :: CalendarState
@@ -1330,15 +1077,12 @@ calendarInitialState =
   { items: []
   , draft: emptyDraft
   , validationError: Nothing
-  , lastCreateType: Intention
-  , showConflictsOnly: false
-  , conflictResolution: Nothing
-  , sortMode: SortByTime
+  , lastCreateType: Task
   }
 
-emptyDraft :: IntentionDraft
+emptyDraft :: TaskDraft
 emptyDraft =
-  { itemType: Intention
+  { itemType: Task
   , title: ""
   , windowStart: ""
   , windowEnd: ""
@@ -1351,20 +1095,11 @@ emptyDraft =
 _items :: Lens' CalendarState (Array CalendarItem)
 _items = prop (Proxy :: _ "items")
 
-_draft :: Lens' CalendarState IntentionDraft
+_draft :: Lens' CalendarState TaskDraft
 _draft = prop (Proxy :: _ "draft")
 
 _validationError :: Lens' CalendarState (Maybe String)
 _validationError = prop (Proxy :: _ "validationError")
-
-_showConflictsOnlyS :: Lens' CalendarState Boolean
-_showConflictsOnlyS = prop (Proxy :: _ "showConflictsOnly")
-
-_conflictResolutionS :: Lens' CalendarState (Maybe ConflictResolution)
-_conflictResolutionS = prop (Proxy :: _ "conflictResolution")
-
-_sortModeS :: Lens' CalendarState SortMode
-_sortModeS = prop (Proxy :: _ "sortMode")
 
 _draftTitleS :: Lens' CalendarState String
 _draftTitleS = _draft <<< prop (Proxy :: _ "title")
@@ -1482,23 +1217,8 @@ toTimelineBlock item =
 -- END src/Calendar/Calendar/Timeline.purs
 
 -- BEGIN src/Calendar/Calendar/Types.purs
-type ConflictResolution =
-  { groupIds :: Array String
-  , pendingStrategy :: Maybe ResolutionStrategy
-  }
-
-data ResolutionStrategy
-  = StrategyShift30
-  | StrategySwap
-
-derive instance resolutionStrategyGeneric :: Generic ResolutionStrategy _
-derive instance resolutionStrategyEq :: Eq ResolutionStrategy
-instance resolutionStrategyShow :: Show ResolutionStrategy where
-  show = genericShow
-
 data PrimaryAction
-  = PrimaryPlanify
-  | PrimaryValidate
+  = PrimaryValidate
   | PrimaryNone
 
 derive instance eqPrimaryAction :: Eq PrimaryAction
@@ -1515,174 +1235,14 @@ type ConflictBlock =
   , end :: DateTime
   }
 
-detectConflictIds :: Array CalendarItem -> Array String
-detectConflictIds items =
-  nub $ go (mapMaybe toConflictBlock items) []
-  where
-  toConflictBlock :: CalendarItem -> Maybe ConflictBlock
-  toConflictBlock (ServerCalendarItem { id, content }) | content.itemType == ScheduledBlock =
-    Just { id, start: content.windowStart, end: content.windowEnd }
-  toConflictBlock _ = Nothing
-
-  overlaps a b = a.start < b.end && b.start < a.end
-
-  go blocks acc =
-    case uncons blocks of
-      Nothing -> acc
-      Just { head: current, tail: rest } ->
-        let
-          acc' =
-            foldl
-              ( \currentAcc other ->
-                  if overlaps current other then currentAcc <> [ current.id, other.id ]
-                  else currentAcc
-              )
-              acc
-              rest
-        in
-          go rest acc'
-
-detectConflictGroups :: Array CalendarItem -> Array (Array String)
-detectConflictGroups items =
-  filter (\group -> length group > 1) $ components allIds []
-  where
-  blocks = mapMaybe toConflictBlock items
-  allIds = map _.id blocks
-
-  toConflictBlock :: CalendarItem -> Maybe ConflictBlock
-  toConflictBlock (ServerCalendarItem { id, content }) | content.itemType == ScheduledBlock =
-    Just { id, start: content.windowStart, end: content.windowEnd }
-  toConflictBlock _ = Nothing
-
-  components ids visited =
-    case uncons ids of
-      Nothing -> []
-      Just { head: current, tail } ->
-        if elem current visited then components tail visited
-        else
-          let
-            group = bfs [ current ] []
-            newVisited = visited <> group
-          in
-            [ group ] <> components tail newVisited
-
-  bfs queue visited =
-    case uncons queue of
-      Nothing -> visited
-      Just { head: current, tail } ->
-        if elem current visited then bfs tail visited
-        else
-          let
-            next = neighbors current
-          in
-            bfs (tail <> next) (visited <> [ current ])
-
-  neighbors id =
-    case find (\block -> block.id == id) blocks of
-      Nothing -> []
-      Just current ->
-        map _.id $ filter (\block -> block.id /= id && overlaps current block) blocks
-
-  overlaps a b = a.start < b.end && b.start < a.end
-
-data ConflictAction
-  = ConflictOpenResolution (Array String)
-  | ConflictChooseStrategy ResolutionStrategy
-  | ConflictConfirm
-  | ConflictCancel
-
-applyConflictAction :: ConflictAction -> CalendarState -> CalendarState
-applyConflictAction action dataState =
-  case action of
-    ConflictOpenResolution groupIds ->
-      (_conflictResolutionS .~ Just { groupIds, pendingStrategy: Nothing }) dataState
-    ConflictChooseStrategy strategy ->
-      (_conflictResolutionS %~ map (_ { pendingStrategy = Just strategy })) dataState
-    ConflictConfirm ->
-      (_conflictResolutionS .~ Nothing) dataState
-    ConflictCancel ->
-      (_conflictResolutionS .~ Nothing) dataState
-
-renderConflictActions :: forall w. Array (Array String) -> HTML w ConflictAction
-renderConflictActions conflictGroups =
-  if null conflictGroups then text ""
-  else
-    div [ class_ "calendar-conflict-actions" ]
-      [ button
-          [ class_ "btn btn-sm btn-outline-danger calendar-conflict-button"
-          , onClick (const (ConflictOpenResolution (headOrEmpty conflictGroups)))
-          ]
-          [ text "Résoudre un conflit" ]
-      ]
-  where
-  headOrEmpty groups =
-    case uncons groups of
-      Just { head } -> head
-      Nothing -> []
-
-renderConflictResolution :: forall w. Array CalendarItem -> ConflictResolution -> HTML w ConflictAction
-renderConflictResolution items resolution =
-  div [ class_ "calendar-conflict-panel" ]
-    [ div [ class_ "calendar-conflict-title" ] [ text "Résolution de conflit" ]
-    , div [ class_ "calendar-conflict-subtitle" ] [ text "Choisissez une stratégie puis confirmez." ]
-    , ul [ class_ "calendar-conflict-list" ] (map (renderConflictItem items) resolution.groupIds)
-    , div [ class_ "calendar-conflict-strategies" ]
-        [ button
-            [ class_ "btn btn-sm btn-outline-primary"
-            , onClick (const (ConflictChooseStrategy StrategyShift30))
-            ]
-            [ text "Décaler de 30 min" ]
-        , button
-            [ class_ "btn btn-sm btn-outline-primary"
-            , onClick (const (ConflictChooseStrategy StrategySwap))
-            ]
-            [ text "Échanger" ]
-        ]
-    , renderConfirmation resolution.pendingStrategy
-    , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const ConflictCancel) ] [ text "Fermer" ]
-    ]
-
-renderConflictItem :: forall w action. Array CalendarItem -> String -> HTML w action
-renderConflictItem items itemId =
-  case find (matchId itemId) items of
-    Just item ->
-      let
-        content = calendarItemContent item
-      in
-        li [ class_ "calendar-conflict-item" ]
-          [ div [ class_ "calendar-conflict-item-title" ] [ text content.title ]
-          , div [ class_ "calendar-conflict-item-window" ]
-              [ text $ formatDateTimeLocal content.windowStart <> " → " <> formatDateTimeLocal content.windowEnd ]
-          ]
-    Nothing -> text ""
-  where
-  matchId id (ServerCalendarItem { id: candidate }) = id == candidate
-  matchId _ _ = false
-
-renderConfirmation :: forall w. Maybe ResolutionStrategy -> HTML w ConflictAction
-renderConfirmation pending =
-  case pending of
-    Nothing -> text ""
-    Just strategy ->
-      div [ class_ "calendar-conflict-confirmation" ]
-        [ div [ class_ "calendar-conflict-confirmation-text" ]
-            [ text $ "Confirmer la stratégie: " <> show strategy <> " ?" ]
-        , div [ class_ "calendar-conflict-confirmation-actions" ]
-            [ button [ class_ "btn btn-sm btn-danger", onClick (const ConflictConfirm) ] [ text "Confirmer" ]
-            , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const ConflictCancel) ] [ text "Annuler" ]
-            ]
-        ]
-
 -- END src/Calendar/Conflict.purs
 
 -- BEGIN src/Calendar/Display.purs
 data AgendaModal
-  = ModalTemplates
-  | ModalImportCsv
+  = ModalImportCsv
   | ModalImportIcs
   | ModalExport
   | ModalTools
-  | ModalFilters
   | ModalCreateItem
   | ModalEditItem
 
@@ -1794,7 +1354,8 @@ handleViewAction = case _ of
           Nothing -> pure unit
           Just minutes -> do
             modify_ (_view <<< _viewValidationPanel .~ Nothing)
-            validateItem panel.itemId minutes >>= (const refreshItems)
+            validateItem panel.itemId minutes
+            refreshItems
   ViewCancelValidation ->
     modify_ (_view <<< _viewValidationPanel .~ Nothing)
   ViewChangedAction raw ->
@@ -1849,13 +1410,10 @@ handleViewAction = case _ of
           Left err ->
             modify_ (_view <<< _viewEditPanel .~ Just (panel { validationError = Just (editErrorMessage err) }))
           Right updatedItem -> do
-            if st ^. _syncOfflineModeState then
-              modify_ ((_calendarItems %~ replaceItemById panel.draft.itemId updatedItem) <<< (_pendingSync %~ upsertPendingItem updatedItem) <<< (_syncUpdateErrorState .~ Nothing))
-            else do
-              resp <- updateItem panel.draft.itemId updatedItem
-              if statusOk resp then modify_ (_syncUpdateErrorState .~ Nothing)
-              else modify_ (_syncUpdateErrorState .~ Just (updateErrorMessage (unwrap resp.status)))
-              refreshItems
+            resp <- updateItem panel.draft.itemId updatedItem
+            if statusOk resp then modify_ (_syncUpdateErrorState .~ Nothing)
+            else modify_ (_syncUpdateErrorState .~ Just (updateErrorMessage (unwrap resp.status)))
+            refreshItems
             modify_
               ((_view <<< _viewEditPanel .~ Nothing) <<< (_view <<< _viewActiveModal .~ Nothing))
   ViewEditCancel ->
@@ -1912,15 +1470,12 @@ renderViewSelector viewMode focusDate =
 renderMobileTools :: forall w. CalendarView -> HTML w ViewAction
 renderMobileTools _ =
   div [ class_ "calendar-mobile-tools" ]
-    [ button [ class_ "btn btn-sm btn-outline-secondary", onClick (const (ViewOpenModal ModalFilters)) ] [ text "Filtres" ]
-    , button [ class_ "btn btn-sm btn-primary", onClick (const (ViewOpenModal ModalTools)) ] [ text "Outils" ]
-    ]
+    [ button [ class_ "btn btn-sm btn-primary", onClick (const (ViewOpenModal ModalTools)) ] [ text "Actions" ] ]
 
 renderToolsContent :: forall w. HTML w ViewAction
 renderToolsContent =
   div [ class_ "calendar-modal-stack" ]
-    [ button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalTemplates)) ] [ text "Templates" ]
-    , button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalImportCsv)) ] [ text "Import CSV" ]
+    [ button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalImportCsv)) ] [ text "Import CSV" ]
     , button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalImportIcs)) ] [ text "Import ICS" ]
     , button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalExport)) ] [ text "Export" ]
     ]
@@ -1933,11 +1488,7 @@ renderEditContent panel =
     div [ class_ "calendar-modal-stack" ]
       [ div [ class_ "calendar-modal-field" ]
           [ div [ class_ "calendar-notifications-label" ] [ text "Type" ]
-          , div [ class_ "badge rounded-pill text-bg-secondary" ]
-              [ text $ case draft.itemType of
-                  Intention -> "Intention"
-                  ScheduledBlock -> "Bloc planifié"
-              ]
+          , div [ class_ "badge rounded-pill text-bg-secondary" ] [ text "Tâche" ]
           ]
       , div [ class_ "calendar-modal-field" ]
           [ div [ class_ "calendar-notifications-label" ] [ text "Titre" ]
@@ -1987,8 +1538,8 @@ renderEditContent panel =
               , value (statusValue draft.status)
               ]
               [ option [ value "todo" ] [ text "À faire" ]
-              , option [ value "in_progress" ] [ text "In progress" ]
-              , option [ value "done" ] [ text "Done" ]
+              , option [ value "in_progress" ] [ text "En cours" ]
+              , option [ value "done" ] [ text "Terminé" ]
               , option [ value "canceled" ] [ text "Annulé" ]
               ]
           ]
@@ -2009,8 +1560,8 @@ renderEditContent panel =
 renderValidationPanel :: forall w. ValidationPanel -> HTML w ViewAction
 renderValidationPanel panel =
   div [ class_ "calendar-validation-panel" ]
-    [ div [ class_ "calendar-conflict-title" ] [ text "Valider la tâche" ]
-    , div [ class_ "calendar-conflict-subtitle" ]
+    [ div [ class_ "calendar-validation-title" ] [ text "Valider la tâche" ]
+    , div [ class_ "calendar-validation-subtitle" ]
         [ text "Saisissez la durée réelle (minutes) ou acceptez la proposition." ]
     , maybe (text "") (\minutes -> div [ class_ "calendar-validation-proposal" ] [ text $ "Proposition: " <> show minutes <> " min" ]) panel.proposedMinutes
     , input
@@ -2019,7 +1570,7 @@ renderValidationPanel panel =
         , onValueChange ViewValidationMinutesChanged
         , value panel.inputValue
         ]
-    , div [ class_ "calendar-conflict-confirmation-actions" ]
+    , div [ class_ "calendar-validation-actions" ]
         [ button [ class_ "btn btn-sm btn-success", onClick (const ViewConfirmValidation) ] [ text "Confirmer" ]
         , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const ViewCancelValidation) ] [ text "Annuler" ]
         ]
@@ -2110,13 +1661,11 @@ dragCalendarHandlers
            )
            Action
        )
-dragCalendarHandlers (ServerCalendarItem { id, content }) =
-  if content.itemType == Intention then
-    [ draggable true
-    , onDragStart (\ev -> DragAction { log: "DragStart@calendar-card", dragAction: DragStart id ev })
-    , onDragEnd (const (DragAction { log: "DragEnd@calendar-card", dragAction: DragEnd }))
-    ]
-  else []
+dragCalendarHandlers (ServerCalendarItem { id }) =
+  [ draggable true
+  , onDragStart (\ev -> DragAction { log: "DragStart@calendar-card", dragAction: DragStart id ev })
+  , onDragEnd (const (DragAction { log: "DragEnd@calendar-card", dragAction: DragEnd }))
+  ]
 dragCalendarHandlers _ = []
 
 renderDropIndicator :: forall w action. Int -> HTML w action
@@ -2278,8 +1827,8 @@ buildEditDraft item =
 applyEditDraft :: EditDraft -> CalendarItem -> Either EditError CalendarItem
 applyEditDraft draft item = do
   let
-    intentionDraft :: IntentionDraft
-    intentionDraft =
+    taskDraft :: TaskDraft
+    taskDraft =
       { itemType: draft.itemType
       , title: draft.title
       , windowStart: draft.windowStart
@@ -2289,7 +1838,7 @@ applyEditDraft draft item = do
       , actualDurationMinutes: draft.actualDurationMinutes
       , recurrence: draft.recurrence
       }
-  case validateIntention intentionDraft of
+  case validateTask taskDraft of
     Left err -> Left (EditValidation err)
     Right _ -> do
       recurrence <- case draftToRecurrence draft.recurrence of
@@ -2362,12 +1911,6 @@ shiftMinutes :: Int -> DateTime -> Maybe DateTime
 shiftMinutes offset start =
   adjust (Minutes (Int.toNumber offset)) start
 
-shiftMinutesRaw :: Int -> String -> Maybe String
-shiftMinutesRaw offset start = do
-  dt <- parseDateTimeLocal start
-  newDt <- shiftMinutes offset dt
-  pure $ formatDateTimeLocal newDt
-
 durationMinutesBetween :: DateTime -> DateTime -> Int
 durationMinutesBetween start end =
   let
@@ -2412,8 +1955,8 @@ toOptionalString raw =
   in
     if trimmed == "" then Nothing else Just trimmed
 
-validateIntention :: IntentionDraft -> Either ValidationError IntentionDraft
-validateIntention draft =
+validateTask :: TaskDraft -> Either ValidationError TaskDraft
+validateTask draft =
   case unit of
     _ | StringCommon.trim draft.title == "" -> Left TitleEmpty
     _ | not (isDateTimeLocal draft.windowStart) -> Left WindowStartInvalid
@@ -2479,16 +2022,11 @@ addDaysToDate days date' = do
 addDays :: Int -> DateTime -> Maybe DateTime
 addDays n dt = adjust (Days (Int.toNumber n)) dt
 
-isConflict :: Array String -> CalendarItem -> Boolean
-isConflict conflictIds (ServerCalendarItem { id }) = elem id conflictIds
-isConflict _ _ = false
-
-sortItems :: SortMode -> Array String -> Array CalendarItem -> Array CalendarItem
-sortItems mode conflictIds items =
+sortItems :: SortMode -> Array CalendarItem -> Array CalendarItem
+sortItems mode items =
   case mode of
     SortByStatus -> sortBy compareStatus items
     SortByCategory -> sortBy compareCategory items
-    SortByConflict -> sortBy (compareConflict conflictIds) items
     SortByTime -> sortBy compareTime items
   where
   compareTime a b = compare (calendarItemContent a).windowStart (calendarItemContent b).windowStart
@@ -2496,10 +2034,6 @@ sortItems mode conflictIds items =
   compareStatus a b = compare (statusRank (calendarItemContent a).status) (statusRank (calendarItemContent b).status)
 
   compareCategory a b = compare (categoryKey (calendarItemContent a).category) (categoryKey (calendarItemContent b).category)
-
-  compareConflict ids a b = compare (conflictRank ids a) (conflictRank ids b)
-
-  conflictRank ids item = if isConflict ids item then 0 else 1
 
   statusRank Todo = 0
   statusRank InProgress = 1
@@ -2509,20 +2043,6 @@ sortItems mode conflictIds items =
   categoryKey Nothing = "~~~"
   categoryKey (Just value) = value
 
-sortModeValue :: SortMode -> String
-sortModeValue SortByTime = "time"
-sortModeValue SortByStatus = "status"
-sortModeValue SortByCategory = "category"
-sortModeValue SortByConflict = "conflict"
-
-parseSortMode :: String -> SortMode
-parseSortMode raw =
-  case raw of
-    "status" -> SortByStatus
-    "category" -> SortByCategory
-    "conflict" -> SortByConflict
-    _ -> SortByTime
-
 minuteOfDay :: DateTime -> Int
 minuteOfDay raw =
   let
@@ -2530,7 +2050,7 @@ minuteOfDay raw =
   in
     (fromEnum (hour t) * 60) + fromEnum (minute t)
 
-data ItemType = Intention | ScheduledBlock
+data ItemType = Task
 
 derive instance itemTypeGeneric :: Generic ItemType _
 derive instance itemTypeEq :: Eq ItemType
@@ -2566,7 +2086,7 @@ derive instance calendarItemEq :: Eq CalendarItem
 instance calendarItemShow :: Show CalendarItem where
   show = genericShow
 
-type IntentionDraft =
+type TaskDraft =
   { itemType :: ItemType
   , title :: String
   , windowStart :: String
@@ -2593,7 +2113,6 @@ data SortMode
   = SortByTime
   | SortByStatus
   | SortByCategory
-  | SortByConflict
 
 derive instance sortModeGeneric :: Generic SortMode _
 derive instance sortModeEq :: Eq SortMode
@@ -2611,15 +2130,14 @@ instance agendaViewShow :: Show CalendarView where
   show = genericShow
 
 instance itemTypeEncodeJson :: EncodeJson ItemType where
-  encodeJson Intention = encodeJson "INTENTION"
-  encodeJson ScheduledBlock = encodeJson "BLOC_PLANIFIE"
+  encodeJson Task = encodeJson "BLOC_PLANIFIE"
 
 instance itemTypeDecodeJson :: DecodeJson ItemType where
   decodeJson json = do
     str <- decodeJson json
     case str of
-      "INTENTION" -> pure Intention
-      "BLOC_PLANIFIE" -> pure ScheduledBlock
+      "INTENTION" -> pure Task
+      "BLOC_PLANIFIE" -> pure Task
       _ -> Left $ UnexpectedValue json
 
 instance itemStatusEncodeJson :: EncodeJson ItemStatus where
@@ -2707,91 +2225,16 @@ encodeCalendarContent { itemType, title, windowStart, windowEnd, status, sourceI
           ~> base
       Nothing -> base
 
--- BEGIN src/Calendar/Offline.purs
-type OfflineMutationResult =
-  { items :: Array CalendarItem
-  , pending :: Array CalendarItem
-  }
-
-applyOfflineMutation :: Boolean -> CalendarItem -> Array CalendarItem -> Array CalendarItem -> OfflineMutationResult
-applyOfflineMutation offline item items pending =
-  if offline then { items: items <> [ item ], pending: pending <> [ item ] }
-  else { items, pending }
-
-upsertPendingItem :: CalendarItem -> Array CalendarItem -> Array CalendarItem
-upsertPendingItem item pending =
-  case item of
-    ServerCalendarItem { id } ->
-      let
-        hasSame =
-          any
-            ( \candidate -> case candidate of
-                ServerCalendarItem { id: candidateId } -> candidateId == id
-                _ -> false
-            )
-            pending
-      in
-        if hasSame then
-          map
-            ( \candidate -> case candidate of
-                ServerCalendarItem payload | payload.id == id -> item
-                _ -> candidate
-            )
-            pending
-        else
-          pending <> [ item ]
-    _ -> pending
-
--- END src/Calendar/Offline.purs
-
 -- BEGIN src/Calendar/purs
 type SyncState =
-  { offlineMode :: Boolean
-  , pendingSync :: Array CalendarItem
-  , syncConflict :: Maybe (Array CalendarItem)
-  , updateError :: Maybe String
-  }
+  { updateError :: Maybe String }
 
 syncInitialState :: SyncState
 syncInitialState =
-  { offlineMode: false
-  , pendingSync: []
-  , syncConflict: Nothing
-  , updateError: Nothing
-  }
-
-_syncOfflineMode :: Lens' SyncState Boolean
-_syncOfflineMode = lens _.offlineMode (_ { offlineMode = _ })
-
-_syncPendingSync :: Lens' SyncState (Array CalendarItem)
-_syncPendingSync = lens _.pendingSync (_ { pendingSync = _ })
-
-_syncConflict :: Lens' SyncState (Maybe (Array CalendarItem))
-_syncConflict = lens _.syncConflict (_ { syncConflict = _ })
+  { updateError: Nothing }
 
 _syncUpdateError :: Lens' SyncState (Maybe String)
 _syncUpdateError = lens _.updateError (_ { updateError = _ })
-
-toScheduledBlock :: String -> CalendarItemContent -> CalendarItem
-toScheduledBlock sourceId content =
-  NewCalendarItem
-    { content:
-        content
-          { itemType = ScheduledBlock
-          , status = Todo
-          , sourceItemId = Just sourceId
-          }
-    }
-
-renderOfflineToggle :: forall w. Boolean -> HTML w Action
-renderOfflineToggle offlineMode =
-  div [ class_ "calendar-offline-toggle" ]
-    [ button
-        [ class_ $ "btn btn-sm " <> if offlineMode then "btn-outline-warning" else "btn-outline-secondary"
-        , onClick (const SyncToggleOffline)
-        ]
-        [ text $ if offlineMode then "Mode hors ligne actif" else "Passer hors ligne" ]
-    ]
 
 renderUpdateError :: forall w. String -> HTML w Action
 renderUpdateError message =
@@ -2807,58 +2250,5 @@ renderUpdateError message =
 updateErrorMessage :: Int -> String
 updateErrorMessage status =
   "Echec de mise a jour de l'item (HTTP " <> show status <> ")."
-
-renderSyncConflict :: forall w. Array CalendarItem -> HTML w Action
-renderSyncConflict pending =
-  div [ class_ "calendar-sync-conflict" ]
-    [ div [ class_ "calendar-conflict-title" ] [ text "Conflit de synchronisation" ]
-    , div [ class_ "calendar-conflict-subtitle" ]
-        [ text "Choisissez comment resoudre la synchronisation des changements locaux." ]
-    , ul [ class_ "calendar-conflict-list" ] (map (renderSyncConflictItem pending) pendingIds)
-    , div [ class_ "calendar-conflict-confirmation-actions" ]
-        [ button [ class_ "btn btn-sm btn-danger", onClick (const SyncResolveDiscardLocal) ] [ text "Abandonner local" ]
-        , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const SyncResolveKeepLocal) ] [ text "Conserver local" ]
-        ]
-    ]
-  where
-  pendingIds = mapMaybe extractId pending
-  extractId (ServerCalendarItem { id }) = Just id
-  extractId _ = Nothing
-
-renderSyncConflictItem :: forall w action. Array CalendarItem -> String -> HTML w action
-renderSyncConflictItem items itemId =
-  case find (matchId itemId) items of
-    Just item ->
-      let
-        content = calendarItemContent item
-      in
-        li [ class_ "calendar-conflict-item" ]
-          [ div [ class_ "calendar-conflict-item-title" ] [ text content.title ]
-          , div [ class_ "calendar-conflict-item-window" ]
-              [ text $ formatDateTimeLocal content.windowStart <> " → " <> formatDateTimeLocal content.windowEnd ]
-          ]
-    Nothing -> text ""
-  where
-  matchId id (ServerCalendarItem { id: candidate }) = id == candidate
-  matchId _ _ = false
-
-syncPending :: ErrorAgendaAppM Unit
-syncPending = do
-  st <- get
-  let pending = st ^. _pendingSync
-  if null pending then
-    refreshItems
-  else do
-    ok <- foldM
-      ( \acc item ->
-          if not acc then pure false
-          else createItem item >>= (pure <<< statusOk)
-      )
-      true
-      pending
-    if ok then do
-      modify_ ((_pendingSync .~ []) <<< (_syncConflictState .~ Nothing))
-      refreshItems
-    else modify_ (_syncConflictState .~ Just pending)
 
 -- END src/Calendar/purs

@@ -380,10 +380,11 @@ lookupField idx fields = index fields idx
 parseCsvItemType :: String -> Either String ItemType
 parseCsvItemType raw =
   case normalizeHeader raw of
-    "intention" -> Right Intention
-    "bloc_planifie" -> Right ScheduledBlock
-    "scheduled_block" -> Right ScheduledBlock
-    _ -> Left "Type invalide (INTENTION ou BLOC_PLANIFIE)."
+    "task" -> Right Task
+    "intention" -> Right Task
+    "bloc_planifie" -> Right Task
+    "scheduled_block" -> Right Task
+    _ -> Left "Type invalide (TASK, INTENTION ou BLOC_PLANIFIE)."
 
 parseCsvStatus :: Maybe String -> Either String ItemStatus
 parseCsvStatus raw =
@@ -641,9 +642,11 @@ splitIcsExdates raw =
 parseIcsItemType :: String -> Either String ItemType
 parseIcsItemType raw =
   case normalizeHeader raw of
-    "intention" -> Right Intention
-    "bloc_planifie" -> Right ScheduledBlock
-    _ -> Left "X-FAVS-TYPE invalide (INTENTION ou BLOC_PLANIFIE)."
+    "task" -> Right Task
+    "intention" -> Right Task
+    "bloc_planifie" -> Right Task
+    "scheduled_block" -> Right Task
+    _ -> Left "X-FAVS-TYPE invalide (TASK, INTENTION ou BLOC_PLANIFIE)."
 
 parseIcsStatus :: String -> Either String ItemStatus
 parseIcsStatus raw =

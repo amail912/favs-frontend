@@ -20,6 +20,7 @@ Improve the mobile calendar experience so the most useful actions and informatio
 
 ## Canceled Stories
 - [001 Header Compaction](canceled/001-header-compaction.md) - Replaced by more focused stories covering top-area density, mobile view navigation, and mobile secondary actions.
+- [006 Mobile Actions Sheet](canceled/006-mobile-actions-sheet.md) - Not useful anymore after cleanup.
 
 ## Screenshots
 - [DayCalendar top area](screenshots/daycalendar-top-mobile.png)

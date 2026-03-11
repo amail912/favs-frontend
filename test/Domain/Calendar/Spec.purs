@@ -6,14 +6,12 @@ import Calendar.ExImport.Export as Export
 import Calendar.ExImport.Import (parseCsv, parseIcs)
 import Pages.Calendar
   ( CalendarItem(..)
-  , IntentionDraft
+  , TaskDraft
   , ItemStatus(..)
   , ItemType(..)
   , SortMode(..)
   , ValidationError(..)
-  , detectConflictGroups
-  , detectConflictIds
-  , toNewIntention
+  , toNewTask
   , primaryActionFor
   , PrimaryAction(..)
   , buildTimelineLayout
@@ -23,23 +21,12 @@ import Pages.Calendar
   , buildEditDraft
   , durationMinutesBetween
   , sortItems
-  , validateIntention
-  , applyOfflineMutation
-  , applyTemplateToDraft
-  )
-import Calendar.Templates
-  ( RoutineTemplate
-  , StepDependency(..)
-  , instantiateRoutine
-  , templateSummary
-  , addTemplate
-  , removeTemplate
-  , updateTemplate
+  , validateTask
   )
 import Calendar.Recurrence (RecurrenceRule(..), defaultRecurrenceDraft, generateOccurrencesForMonth)
 import Data.Argonaut.Decode (decodeJson)
 import Data.Argonaut.Encode (encodeJson)
-import Data.Array (head, length)
+import Data.Array (length)
 import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
 import Data.String.Common as StringCommon
@@ -51,11 +38,11 @@ import Test.Support.Builders (calendarContent, serverCalendarItem, unsafeDate, u
 spec :: Spec Unit
 spec = do
   describe "Calendar creation" do
-    it "encodes/decodes an intention created from a draft" do
+    it "encodes/decodes a task created from a draft" do
       let
-        draft :: IntentionDraft
+        draft :: TaskDraft
         draft =
-          { itemType: Intention
+          { itemType: Task
           , title: "Deep work"
           , windowStart: "2026-02-19T09:00"
           , windowEnd: "2026-02-19T10:00"
@@ -64,38 +51,20 @@ spec = do
           , actualDurationMinutes: ""
           , recurrence: defaultRecurrenceDraft
           }
-      case toNewIntention draft of
+      case toNewTask draft of
         Left err -> fail $ "Creation failed: " <> err
         Right newItem ->
           case decodeJson (encodeJson newItem) of
             Right decoded -> decoded `shouldEqual` newItem
-            Left err -> fail $ "Decoding encoded intention failed: " <> show err
+            Left err -> fail $ "Decoding encoded task failed: " <> show err
 
-    it "creates a scheduled block when draft itemType is ScheduledBlock" do
-      let
-        draft :: IntentionDraft
-        draft =
-          { itemType: ScheduledBlock
-          , title: "Planifié"
-          , windowStart: "2026-02-19T13:00"
-          , windowEnd: "2026-02-19T14:00"
-          , category: ""
-          , status: Todo
-          , actualDurationMinutes: ""
-          , recurrence: defaultRecurrenceDraft
-          }
-      case toNewIntention draft of
-        Left err -> fail $ "Creation failed: " <> err
-        Right (NewCalendarItem { content }) -> content.itemType `shouldEqual` ScheduledBlock
-        Right _ -> fail "Expected new calendar item for scheduled block"
-
-    it "encodes/decodes a scheduled block with sourceItemId" do
+    it "decodes legacy scheduled-block payloads as tasks" do
       let
         scheduled =
           NewCalendarItem
             { content:
-                { itemType: ScheduledBlock
-                , title: "Planifie"
+                { itemType: Task
+                , title: "Task"
                 , windowStart: unsafeDateTime "2026-02-19T11:00"
                 , windowEnd: unsafeDateTime "2026-02-19T12:00"
                 , status: Todo
@@ -108,14 +77,14 @@ spec = do
             }
       case decodeJson (encodeJson scheduled) of
         Right decoded -> decoded `shouldEqual` scheduled
-        Left err -> fail $ "Decoding encoded scheduled block failed: " <> show err
+        Left err -> fail $ "Decoding encoded task failed: " <> show err
 
   describe "Calendar validation" do
     it "fails validation when title is blank" do
       let
-        draft :: IntentionDraft
+        draft :: TaskDraft
         draft =
-          { itemType: Intention
+          { itemType: Task
           , title: "   "
           , windowStart: "2026-02-19T09:00"
           , windowEnd: "2026-02-19T10:00"
@@ -124,13 +93,13 @@ spec = do
           , actualDurationMinutes: ""
           , recurrence: defaultRecurrenceDraft
           }
-      validateIntention draft `shouldEqual` Left TitleEmpty
+      validateTask draft `shouldEqual` Left TitleEmpty
 
     it "fails validation when windowEnd is before windowStart" do
       let
-        draft :: IntentionDraft
+        draft :: TaskDraft
         draft =
-          { itemType: Intention
+          { itemType: Task
           , title: "Focus"
           , windowStart: "2026-02-19T10:00"
           , windowEnd: "2026-02-19T09:00"
@@ -139,13 +108,13 @@ spec = do
           , actualDurationMinutes: ""
           , recurrence: defaultRecurrenceDraft
           }
-      validateIntention draft `shouldEqual` Left WindowOrderInvalid
+      validateTask draft `shouldEqual` Left WindowOrderInvalid
 
     it "fails validation when duration is < 5 minutes" do
       let
-        draft :: IntentionDraft
+        draft :: TaskDraft
         draft =
-          { itemType: Intention
+          { itemType: Task
           , title: "Court"
           , windowStart: "2026-02-19T10:00"
           , windowEnd: "2026-02-19T10:04"
@@ -154,13 +123,13 @@ spec = do
           , actualDurationMinutes: ""
           , recurrence: defaultRecurrenceDraft
           }
-      validateIntention draft `shouldEqual` Left WindowTooShort
+      validateTask draft `shouldEqual` Left WindowTooShort
 
     it "accepts draft when title and window are valid" do
       let
-        draft :: IntentionDraft
+        draft :: TaskDraft
         draft =
-          { itemType: Intention
+          { itemType: Task
           , title: "Sprint"
           , windowStart: "2026-02-19T09:00"
           , windowEnd: "2026-02-19T10:00"
@@ -169,13 +138,13 @@ spec = do
           , actualDurationMinutes: ""
           , recurrence: defaultRecurrenceDraft
           }
-      validateIntention draft `shouldEqual` Right draft
+      validateTask draft `shouldEqual` Right draft
 
   describe "Calendar edit" do
     it "applyEditDraft updates title, actualDurationMinutes, and recurrence fields" do
       let
         content =
-          (calendarContent Intention "Intention" "2026-02-19T09:00" "2026-02-19T10:00")
+          (calendarContent Task "Task" "2026-02-19T09:00" "2026-02-19T10:00")
             { actualDurationMinutes = Just 25
             , recurrenceRule = Just Weekly
             , recurrenceExceptionDates = [ unsafeDate "2026-02-26" ]
@@ -201,7 +170,7 @@ spec = do
 
     it "applyEditDraft rejects non-positive actual duration" do
       let
-        content = calendarContent Intention "Intention" "2026-02-19T09:00" "2026-02-19T10:00"
+        content = calendarContent Task "Task" "2026-02-19T09:00" "2026-02-19T10:00"
         item = serverCalendarItem "edit-2" content
       case buildEditDraft item of
         Nothing -> fail "Expected edit draft"
@@ -210,48 +179,29 @@ spec = do
           applyEditDraft updatedDraft item `shouldEqual` Left (EditDuration "Durée réelle invalide.")
 
   describe "Calendar primary actions" do
-    it "primaryActionFor returns Planify for Intention items" do
+    it "primaryActionFor returns Validate for non-done tasks" do
       let
-        item = serverCalendarItem "a" (calendarContent Intention "Intention" "2026-02-19T09:00" "2026-02-19T10:00")
-      primaryActionFor item `shouldEqual` PrimaryPlanify
-
-    it "primaryActionFor returns Validate for scheduled blocks in non-done status" do
-      let
-        item = serverCalendarItem "b" (calendarContent ScheduledBlock "Bloc" "2026-02-19T09:00" "2026-02-19T10:00")
+        item = serverCalendarItem "a" (calendarContent Task "Task" "2026-02-19T09:00" "2026-02-19T10:00")
       primaryActionFor item `shouldEqual` PrimaryValidate
 
-    it "primaryActionFor returns None for done scheduled blocks" do
+    it "primaryActionFor returns None for done tasks" do
       let
-        content = (calendarContent ScheduledBlock "Bloc" "2026-02-19T09:00" "2026-02-19T10:00") { status = Done }
+        content = (calendarContent Task "Task" "2026-02-19T09:00" "2026-02-19T10:00") { status = Done }
         item = serverCalendarItem "c" content
       primaryActionFor item `shouldEqual` PrimaryNone
-
-  describe "Calendar conflicts" do
-    it "detectConflictIds returns both ids for overlapping scheduled blocks" do
-      let
-        itemA = serverCalendarItem "a" (calendarContent ScheduledBlock "A" "2026-02-19T09:00" "2026-02-19T10:00")
-        itemB = serverCalendarItem "b" (calendarContent ScheduledBlock "B" "2026-02-19T09:30" "2026-02-19T10:30")
-      detectConflictIds [ itemA, itemB ] `shouldEqual` [ "a", "b" ]
-
-    it "detectConflictGroups chains overlapping blocks into a single group" do
-      let
-        itemA = serverCalendarItem "a" (calendarContent ScheduledBlock "A" "2026-02-19T09:00" "2026-02-19T10:00")
-        itemB = serverCalendarItem "b" (calendarContent ScheduledBlock "B" "2026-02-19T09:30" "2026-02-19T10:30")
-        itemC = serverCalendarItem "c" (calendarContent ScheduledBlock "C" "2026-02-19T10:15" "2026-02-19T11:00")
-      detectConflictGroups [ itemA, itemB, itemC ] `shouldEqual` [ [ "a", "b", "c" ] ]
 
   describe "Calendar timeline layout" do
     it "clamps end time when it is before the start" do
       let
-        item = serverCalendarItem "t1" (calendarContent Intention "Late" "2026-02-19T23:00" "2026-02-19T22:00")
+        item = serverCalendarItem "t1" (calendarContent Task "Late" "2026-02-19T23:00" "2026-02-19T22:00")
       toTimelineBlock item
         `shouldEqual`
           Just { item, startMin: 1380, endMin: 1440 }
 
     it "assigns distinct columns for overlapping items" do
       let
-        itemA = serverCalendarItem "t2" (calendarContent ScheduledBlock "A" "2026-02-19T09:00" "2026-02-19T10:00")
-        itemB = serverCalendarItem "t3" (calendarContent ScheduledBlock "B" "2026-02-19T09:30" "2026-02-19T10:30")
+        itemA = serverCalendarItem "t2" (calendarContent Task "A" "2026-02-19T09:00" "2026-02-19T10:00")
+        itemB = serverCalendarItem "t3" (calendarContent Task "B" "2026-02-19T09:30" "2026-02-19T10:30")
         layout = buildTimelineLayout [ itemA, itemB ]
       length layout `shouldEqual` 2
       case layout of
@@ -261,68 +211,16 @@ spec = do
           (first.columnIndex == second.columnIndex) `shouldEqual` false
         _ -> fail "Expected exactly two timeline items"
 
-  describe "Calendar offline" do
-    it "applyOfflineMutation enqueues items and pending when offline" do
-      let
-        item = NewCalendarItem { content: calendarContent Intention "Offline" "2026-02-19T09:00" "2026-02-19T10:00" }
-        result = applyOfflineMutation true item [] []
-      result.items `shouldEqual` [ item ]
-      result.pending `shouldEqual` [ item ]
-
   describe "Calendar time helpers" do
     it "durationMinutesBetween returns minutes between start and end" do
       durationMinutesBetween (unsafeDateTime "2026-02-19T09:00") (unsafeDateTime "2026-02-19T10:30") `shouldEqual` 90
-
-  describe "Calendar templates" do
-    it "applyTemplateToDraft sets title/category/window from template" do
-      let
-        template =
-          { id: "tpl-1"
-          , title: "Template"
-          , durationMinutes: 45
-          , category: "Deep"
-          }
-        draft = applyTemplateToDraft template "2026-02-19T09:00" "2026-02-19T09:45"
-      draft.title `shouldEqual` "Template"
-      draft.category `shouldEqual` "Deep"
-      draft.windowStart `shouldEqual` "2026-02-19T09:00"
-      draft.windowEnd `shouldEqual` "2026-02-19T09:45"
-
-    it "template helpers add, update, and remove entries" do
-      let
-        template =
-          { id: ""
-          , title: "Morning"
-          , durationMinutes: 30
-          , category: "Rituel"
-          }
-        added = addTemplate template []
-      case head added of
-        Just first -> do
-          first.id `shouldEqual` "tpl-1"
-          let updated = updateTemplate (first { title = "Updated" }) added
-          case head updated of
-            Just updatedFirst -> updatedFirst.title `shouldEqual` "Updated"
-            Nothing -> fail "Expected updated template"
-          removeTemplate first.id updated `shouldEqual` []
-        Nothing -> fail "Expected added template"
-
-    it "templateSummary includes duration and category when present" do
-      let
-        template =
-          { id: "tpl-1"
-          , title: "Summary"
-          , durationMinutes: 90
-          , category: "Focus"
-          }
-      templateSummary template `shouldEqual` "90 min • Focus"
 
   describe "Calendar imports" do
     it "parseCsv returns one item and no errors for valid input" do
       let
         csv =
-          "type,titre,fenetre_debut,fenetre_fin,categorie,statut,source_item_id,actual_duration_minutes,recurrence_rule_type,recurrence_rule_interval_days,recurrence_exception_dates\n" <>
-            "INTENTION,Focus,2026-02-19T09:00,2026-02-19T10:00,Deep,TODO,,,,,"
+            "type,titre,fenetre_debut,fenetre_fin,categorie,statut,source_item_id,actual_duration_minutes,recurrence_rule_type,recurrence_rule_interval_days,recurrence_exception_dates\n" <>
+            "TASK,Focus,2026-02-19T09:00,2026-02-19T10:00,Deep,TODO,,,,,"
         result = parseCsv csv
       length result.items `shouldEqual` 1
       length result.errors `shouldEqual` 0
@@ -331,7 +229,7 @@ spec = do
       let
         csv =
           "type,titre,fenetre_debut,fenetre_fin\n" <>
-            "INTENTION,,2026-02-19T09:00,2026-02-19T08:00"
+            "TASK,,2026-02-19T09:00,2026-02-19T08:00"
         result = parseCsv csv
       length result.items `shouldEqual` 0
       length result.errors `shouldEqual` 1
@@ -344,7 +242,7 @@ spec = do
             <> "SUMMARY:Meeting\n"
             <> "DTSTART:20260219T090000\n"
             <> "DTEND:20260219T100000\n"
-            <> "X-FAVS-TYPE:INTENTION\n"
+            <> "X-FAVS-TYPE:TASK\n"
             <> "X-FAVS-STATUS:TODO\n"
             <> "X-FAVS-SOURCE-ITEM-ID:\n"
             <> "X-FAVS-ACTUAL-DURATION-MINUTES:\n"
@@ -362,7 +260,7 @@ spec = do
             <> "BEGIN:VEVENT\n"
             <> "DTSTART:20260219T090000\n"
             <> "DTEND:20260219T100000\n"
-            <> "X-FAVS-TYPE:INTENTION\n"
+            <> "X-FAVS-TYPE:TASK\n"
             <> "X-FAVS-STATUS:TODO\n"
             <> "X-FAVS-SOURCE-ITEM-ID:\n"
             <> "X-FAVS-ACTUAL-DURATION-MINUTES:\n"
@@ -378,12 +276,12 @@ spec = do
       let
         itemA =
           Export.Item
-            { itemType: Export.Intention
+            { itemType: Export.Task
             , title: "A"
             , windowStart: unsafeDateTime "2026-02-19T09:00"
             , windowEnd: unsafeDateTime "2026-02-19T10:00"
             , status: Export.Todo
-            , category: Nothing
+            , category: Just "Focus"
             , sourceItemId: Nothing
             , actualDurationMinutes: Nothing
             , recurrenceRule: Nothing
@@ -391,7 +289,7 @@ spec = do
             }
         itemB =
           Export.Item
-            { itemType: Export.ScheduledBlock
+            { itemType: Export.Task
             , title: "B"
             , windowStart: unsafeDateTime "2026-02-20T11:00"
             , windowEnd: unsafeDateTime "2026-02-20T12:00"
@@ -403,9 +301,8 @@ spec = do
             , recurrenceExceptionDates: []
             }
         filter =
-          { itemType: Just Export.Intention
-          , status: Just Export.Todo
-          , category: Nothing
+          { status: Nothing
+          , category: Just "Focus"
           , startDate: Nothing
           , endDate: Nothing
           }
@@ -415,7 +312,7 @@ spec = do
       let
         item =
           Export.Item
-            { itemType: Export.Intention
+            { itemType: Export.Task
             , title: "A"
             , windowStart: unsafeDateTime "2026-02-19T09:00"
             , windowEnd: unsafeDateTime "2026-02-19T10:00"
@@ -434,48 +331,18 @@ spec = do
   describe "Calendar sorting" do
     it "sortItems SortByStatus orders Todo before Done" do
       let
-        itemTodo = serverCalendarItem "todo" (calendarContent ScheduledBlock "Todo" "2026-02-19T09:00" "2026-02-19T10:00")
+        itemTodo = serverCalendarItem "todo" (calendarContent Task "Todo" "2026-02-19T09:00" "2026-02-19T10:00")
         itemDone =
           ServerCalendarItem
             { id: "done"
             , content:
-                (calendarContent ScheduledBlock "Done" "2026-02-19T11:00" "2026-02-19T12:00")
+                (calendarContent Task "Done" "2026-02-19T11:00" "2026-02-19T12:00")
                   { status = Done }
             }
-      sortItems SortByStatus [] [ itemDone, itemTodo ] `shouldEqual` [ itemTodo, itemDone ]
+      sortItems SortByStatus [ itemDone, itemTodo ] `shouldEqual` [ itemTodo, itemDone ]
 
   describe "Calendar recurrence" do
     it "generateOccurrencesForMonth excludes exception dates" do
       let
         occurrences = generateOccurrencesForMonth Weekly [ "2026-02-19" ] "2026-02-05T09:00"
       occurrences `shouldEqual` [ "2026-02-05", "2026-02-12", "2026-02-26" ]
-
-  describe "Calendar routines" do
-    it "instantiateRoutine applies StartAfterEnd offsets" do
-      let
-        template :: RoutineTemplate
-        template =
-          { id: "r1"
-          , name: "Routine"
-          , steps:
-              [ { id: "a"
-                , title: "Etape A"
-                , windowStart: "2026-02-19T09:00"
-                , windowEnd: "2026-02-19T10:00"
-                , dependsOn: Nothing
-                }
-              , { id: "b"
-                , title: "Etape B"
-                , windowStart: "2026-02-19T10:00"
-                , windowEnd: "2026-02-19T10:30"
-                , dependsOn: Just (StartAfterEnd { stepId: "a", offsetMinutes: 15 })
-                }
-              ]
-          }
-        routineInstance = instantiateRoutine template
-      case routineInstance.steps of
-        [ stepA, stepB ] -> do
-          stepA.windowStart `shouldEqual` "2026-02-19T09:00"
-          stepB.windowStart `shouldEqual` "2026-02-19T10:15"
-          stepB.windowEnd `shouldEqual` "2026-02-19T10:45"
-        _ -> fail "Expected two routine steps"

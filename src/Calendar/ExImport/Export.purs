@@ -44,8 +44,7 @@ instance exportFormatShow :: Show ExportFormat where
   show = genericShow
 
 type ExportFilter =
-  { itemType :: Maybe ItemType
-  , status :: Maybe ItemStatus
+  { status :: Maybe ItemStatus
   , category :: Maybe String
   , startDate :: Maybe Date
   , endDate :: Maybe Date
@@ -59,8 +58,7 @@ type ExportState =
   }
 
 type ExportFormState =
-  { typeFilter :: Maybe ItemType
-  , statusFilter :: Maybe ItemStatus
+  { statusFilter :: Maybe ItemStatus
   , categoryFilter :: Maybe String
   , startDate :: Maybe Date
   , endDate :: Maybe Date
@@ -70,16 +68,14 @@ exportInitialState :: ExportState
 exportInitialState =
   { format: ExportCSV
   , form:
-      { typeFilter: Nothing
-      , statusFilter: Nothing
+      { statusFilter: Nothing
       , categoryFilter: Nothing
       , startDate: Nothing
       , endDate: Nothing
       }
   , filter:
       buildFilter
-        { typeFilter: Nothing
-        , statusFilter: Nothing
+        { statusFilter: Nothing
         , categoryFilter: Nothing
         , startDate: Nothing
         , endDate: Nothing
@@ -114,7 +110,6 @@ _exportOutput =
 data Action
   = Receive ExportInput
   | FormatChanged String
-  | TypeFilterChanged String
   | StatusFilterChanged String
   | CategoryFilterChanged String
   | StartDateChanged String
@@ -134,7 +129,6 @@ handleAction :: Action -> H.HalogenM { export :: ExportState, items :: Array Ite
 handleAction = case _ of
   Receive input -> H.modify_ (_ { items = input.items })
   FormatChanged raw -> H.modify_ $ updateExport (\st -> st # _exportFormat .~ parseExportFormat raw)
-  TypeFilterChanged raw -> H.modify_ $ updateForm (_ { typeFilter = parseTypeFilter raw })
   StatusFilterChanged raw -> H.modify_ $ updateForm (_ { statusFilter = parseStatusFilter raw })
   CategoryFilterChanged raw -> H.modify_ $ updateForm (_ { categoryFilter = toOptionalString raw })
   StartDateChanged raw -> H.modify_ $ updateForm (_ { startDate = parseDateInput raw })
@@ -172,7 +166,7 @@ render
     [ renderPanelHeader
         { baseClass: "calendar-export"
         , title: "Export"
-        , subtitle: "Filtres: type, catégorie, statut, période."
+        , subtitle: "Filters: category, status, date range."
         }
         []
     , div [ class_ "calendar-export-controls" ]
@@ -185,18 +179,6 @@ render
                 ]
                 [ option [ value "csv" ] [ text "CSV" ]
                 , option [ value "ics" ] [ text "ICS" ]
-                ]
-            ]
-        , div [ class_ "calendar-export-control" ]
-            [ div [ class_ "calendar-notifications-label" ] [ text "Type" ]
-            , select
-                [ class_ "form-select calendar-sort-select"
-                , onValueChange TypeFilterChanged
-                , value (typeFilterValue form.typeFilter)
-                ]
-                [ option [ value "" ] [ text "Tous" ]
-                , option [ value "INTENTION" ] [ text "Intention" ]
-                , option [ value "BLOC_PLANIFIE" ] [ text "Bloc planifié" ]
                 ]
             ]
         , div [ class_ "calendar-export-control" ]
@@ -263,8 +245,7 @@ parseExportFormat raw =
 
 buildFilter :: ExportFormState -> ExportFilter
 buildFilter form =
-  { itemType: form.typeFilter
-  , status: form.statusFilter
+  { status: form.statusFilter
   , category: form.categoryFilter
   , startDate: form.startDate
   , endDate: form.endDate
@@ -273,11 +254,10 @@ buildFilter form =
 filterItemsForExport :: ExportFilter -> Array Item -> Array Item
 filterItemsForExport criteria items = filter (matchesFilter criteria) items
 
-matchesFilter :: { itemType :: Maybe ItemType, status :: Maybe ItemStatus, category :: Maybe String, startDate :: Maybe Date, endDate :: Maybe Date } -> Item -> Boolean
+matchesFilter :: { status :: Maybe ItemStatus, category :: Maybe String, startDate :: Maybe Date, endDate :: Maybe Date } -> Item -> Boolean
 matchesFilter criteria (Item item) =
-  matchesType && matchesStatus && matchesCategory && matchesStart && matchesEnd
+  matchesStatus && matchesCategory && matchesStart && matchesEnd
   where
-  matchesType = maybe true (\target -> item.itemType == target) criteria.itemType
   matchesStatus = maybe true (\target -> item.status == target) criteria.status
   matchesCategory = criteria.category # maybe true \target ->
     item.category # maybe false \categoryValue -> normalizeHeader categoryValue == normalizeHeader target
@@ -391,8 +371,7 @@ toIcsRrule Yearly = "FREQ=YEARLY"
 toIcsRrule (EveryXDays interval) = "FREQ=DAILY;INTERVAL=" <> show interval
 
 exportItemType :: ItemType -> String
-exportItemType Intention = "INTENTION"
-exportItemType ScheduledBlock = "BLOC_PLANIFIE"
+exportItemType Task = "TASK"
 
 exportItemStatus :: ItemStatus -> String
 exportItemStatus Todo = "TODO"
@@ -405,11 +384,6 @@ toOptionalString raw = if trimmed == "" then Nothing else Just trimmed
   where
   trimmed = StringCommon.trim raw
 
-parseTypeFilter :: String -> Maybe ItemType
-parseTypeFilter "INTENTION" = Just Intention
-parseTypeFilter "BLOC_PLANIFIE" = Just ScheduledBlock
-parseTypeFilter _ = Nothing
-
 parseStatusFilter :: String -> Maybe ItemStatus
 parseStatusFilter "TODO" = Just Todo
 parseStatusFilter "IN_PROGRESS" = Just InProgress
@@ -421,11 +395,6 @@ parseDateInput :: String -> Maybe Date
 parseDateInput raw = do
   trimmed <- toOptionalString raw
   DateTime.parseLocalDate trimmed
-
-typeFilterValue :: Maybe ItemType -> String
-typeFilterValue Nothing = ""
-typeFilterValue (Just Intention) = "INTENTION"
-typeFilterValue (Just ScheduledBlock) = "BLOC_PLANIFIE"
 
 statusFilterValue :: Maybe ItemStatus -> String
 statusFilterValue Nothing = ""

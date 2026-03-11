@@ -14,8 +14,7 @@ import Data.Maybe (Maybe)
 import Data.Show.Generic (genericShow)
 
 data ItemType
-  = Intention
-  | ScheduledBlock
+  = Task
 
 derive instance itemTypeEq :: Eq ItemType
 derive instance itemTypeGeneric :: Generic ItemType _
