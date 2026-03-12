@@ -20,6 +20,8 @@ module Pages.Calendar
   , sortItems
   , validateTask
   , computeDropMinuteIndex
+  , DayFocusTarget(..)
+  , computeDayFocusTarget
   , indexToTimeLabel
   ) where
 
@@ -45,7 +47,7 @@ import Data.Lens.Record (prop)
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.Monoid (guard)
 import Data.Newtype (unwrap, wrap)
-import Effect.Aff (Aff)
+import Effect.Aff (Aff, delay)
 import Effect.Aff.Class (liftAff)
 import Effect.Class (liftEffect)
 import Effect.Console as Console
@@ -54,8 +56,8 @@ import Halogen (Component, ComponentHTML, HalogenM, Slot, defaultEval, getRef, m
 import Halogen (subscribe)
 import Halogen.HTML (HTML, button, div, h2, i, input, li, option, section, select, slot, span, text, ul)
 import Halogen.HTML.Core (AttrName(..))
-import Halogen.HTML.Events (onClick, onDragEnter, onDragOver, onDrop, onMouseDown, onValueChange, onKeyDown, onDragEnd, onDragStart)
-import Halogen.HTML.Properties (attr, style, IProp, value, placeholder, type_, draggable)
+import Halogen.HTML.Events (onClick, onDragEnter, onDragOver, onDrop, onMouseDown, onValueChange, onKeyDown, onDragEnd, onDragStart, onScroll)
+import Halogen.HTML.Properties (attr, style, IProp, value, placeholder, type_, draggable, ref)
 import Halogen.Query.Event as HQE
 import Type.Proxy (Proxy(..))
 import Ui.Errors (FatalError, handleError, toFatalError)
@@ -73,14 +75,14 @@ import DOM.HTML.Indexed.InputType (InputType(..))
 import Data.Generic.Rep (class Generic)
 import Data.Show.Generic (genericShow)
 import Control.Alt ((<|>))
-import Data.Time.Duration (Days(..), Minutes(..))
+import Data.Time.Duration (Days(..), Minutes(..), Milliseconds(..))
 import Effect (Effect)
 import Web.Event.Event (currentTarget, target) as Event
 import Web.HTML.Event.DragEvent (DragEvent, dataTransfer, toEvent)
 import Data.MediaType (MediaType(..))
 import Web.HTML.Event.DataTransfer (setData)
 import Web.HTML.HTMLElement as HTMLElement
-import Web.DOM.Element (getBoundingClientRect)
+import Web.DOM.Element (getBoundingClientRect, setScrollTop)
 import Helpers.DateTime as DateTime
 import Data.Date (Date, canonicalDate, month, year)
 import Data.DateTime (DateTime(..), adjust, date, diff, time)
@@ -95,6 +97,17 @@ import Data.Int as Int
 type NoOutput = Void
 type AgendaAppM = H.HalogenM State Action Slots NoOutput Aff
 type ErrorAgendaAppM = ExceptT FatalError AgendaAppM
+
+data DayFocusTarget
+  = FocusCurrentTime
+  | FocusFirstTask
+  | FocusTop
+
+derive instance eqDayFocusTarget :: Eq DayFocusTarget
+derive instance genericDayFocusTarget :: Generic DayFocusTarget _
+
+instance showDayFocusTarget :: Show DayFocusTarget where
+  show = genericShow
 
 type State =
   { calendar :: CalendarState
@@ -346,6 +359,8 @@ handleAction action = handleError $
           modify_ ((_calendarDraft .~ nextDraft) <<< (_calendarValidationError .~ Nothing))
         ViewOpenEdit _ -> focusModal
         ViewOpenEditFromDoubleClick _ -> focusModal
+        ViewChangedAction _ -> scheduleDayTimelineFocus
+        ViewFocusDateChanged _ -> scheduleDayTimelineFocus
         ViewCloseCreate -> do
           st <- get
           let
@@ -471,12 +486,66 @@ initAction = do
   subscribeToGlobalKeyDown
   subscribeToGlobalResize
   refreshItems
+  scheduleDayTimelineFocus
 
 refreshItems :: ErrorAgendaAppM Unit
 refreshItems = do
   jsonResponse <- withExceptT toFatalError $ ExceptT $ liftAff getItemsResponse
   items <- decodeCalendarItemsResponse jsonResponse # pure >>> ExceptT
   modify_ (_calendarItems .~ items)
+
+scheduleDayTimelineFocus :: ErrorAgendaAppM Unit
+scheduleDayTimelineFocus = do
+  st <- get
+  let
+    viewMode = st ^. (_view <<< _viewMode)
+    focusDate = st ^. _viewFocusDatePage
+    contextKey = "day:" <> focusDate
+    currentContext = st ^. (_view <<< _viewDayFocusContext)
+  case viewMode of
+    ViewDay -> do
+      when (currentContext /= Just contextKey) do
+        modify_
+          ( _view
+              %~
+                ( (_viewDayFocusContext .~ Just contextKey)
+                    <<< (_viewDayFocusApplied .~ false)
+                    <<< (_viewDayFocusUserScrolled .~ false)
+                    <<< (_viewDayFocusIgnoreScroll .~ false)
+                )
+          )
+      stReady <- get
+      let
+        alreadyApplied = stReady ^. (_view <<< _viewDayFocusApplied)
+        userScrolled = stReady ^. (_view <<< _viewDayFocusUserScrolled)
+      when (not alreadyApplied && not userScrolled) do
+        liftAff $ delay (Milliseconds 0.0)
+        stCurrent <- get
+        let sameContext = stCurrent ^. (_view <<< _viewDayFocusContext) == Just contextKey
+        when sameContext do
+          now <- liftEffect nowDateTime
+          let
+            itemsForDate = sortItems SortByTime (filter (isItemOnDate focusDate) (stCurrent ^. _calendarItems))
+            target = computeDayFocusTarget focusDate now itemsForDate
+            minuteOffset = focusMinuteForTarget now itemsForDate target
+            scrollTop = focusScrollTopForMinute (stCurrent ^. (_view <<< _viewIsMobile)) minuteOffset
+          timelineRef <- lift $ H.getRef (wrap "day-timeline-scroll")
+          case timelineRef of
+            Nothing -> pure unit
+            Just timeline -> do
+              modify_
+                ( _view
+                    %~
+                      ( (_viewDayFocusIgnoreScroll .~ true)
+                          <<< (_viewDayFocusApplied .~ true)
+                      )
+                )
+              liftEffect $ setScrollTop scrollTop timeline
+              liftAff $ delay (Milliseconds 50.0)
+              stAfter <- get
+              when (stAfter ^. (_view <<< _viewDayFocusContext) == Just contextKey) do
+                modify_ (_view <<< _viewDayFocusIgnoreScroll .~ false)
+    _ -> pure unit
 
 decodeCalendarItemsResponse :: Response Json -> Either FatalError (Array CalendarItem)
 decodeCalendarItemsResponse jsonResponse =
@@ -680,7 +749,11 @@ renderDayCalendar focusDate items isMobile draggingId dragHoverIndex =
             [ div [ class_ "calendar-calendar-title" ] [ text focusDate ]
             , div [ class_ "calendar-calendar-count" ] [ text $ show (length itemsForDate) <> " items" ]
             ]
-        , div [ class_ "calendar-calendar-body" ]
+        , div
+            [ class_ "calendar-calendar-body"
+            , ref (wrap "day-timeline-scroll")
+            , onScroll (const (ViewAction ViewTimelineScrolled))
+            ]
             [ div [ class_ "calendar-calendar-hours" ]
                 (map renderHourLabel (enumFromTo 0 23) <> [ renderHourLabelEnd ])
             , div
@@ -1261,6 +1334,10 @@ type ViewState =
   , validationPanel :: Maybe ValidationPanel
   , editPanel :: Maybe EditPanel
   , isMobile :: Boolean
+  , dayFocusContext :: Maybe String
+  , dayFocusApplied :: Boolean
+  , dayFocusUserScrolled :: Boolean
+  , dayFocusIgnoreScroll :: Boolean
   }
 
 viewInitialState :: ViewState
@@ -1271,6 +1348,10 @@ viewInitialState =
   , validationPanel: Nothing
   , editPanel: Nothing
   , isMobile: false
+  , dayFocusContext: Nothing
+  , dayFocusApplied: false
+  , dayFocusUserScrolled: false
+  , dayFocusIgnoreScroll: false
   }
 
 _viewMode :: Lens' ViewState CalendarView
@@ -1308,6 +1389,30 @@ _viewIsMobile =
     _.isMobile
     (_ { isMobile = _ })
 
+_viewDayFocusContext :: Lens' ViewState (Maybe String)
+_viewDayFocusContext =
+  lens
+    _.dayFocusContext
+    (_ { dayFocusContext = _ })
+
+_viewDayFocusApplied :: Lens' ViewState Boolean
+_viewDayFocusApplied =
+  lens
+    _.dayFocusApplied
+    (_ { dayFocusApplied = _ })
+
+_viewDayFocusUserScrolled :: Lens' ViewState Boolean
+_viewDayFocusUserScrolled =
+  lens
+    _.dayFocusUserScrolled
+    (_ { dayFocusUserScrolled = _ })
+
+_viewDayFocusIgnoreScroll :: Lens' ViewState Boolean
+_viewDayFocusIgnoreScroll =
+  lens
+    _.dayFocusIgnoreScroll
+    (_ { dayFocusIgnoreScroll = _ })
+
 type EditPanel =
   { item :: CalendarItem
   , draft :: EditDraft
@@ -1321,6 +1426,7 @@ data ViewAction
   | ViewCancelValidation
   | ViewChangedAction String
   | ViewFocusDateChanged String
+  | ViewTimelineScrolled
   | ViewOpenModal AgendaModal
   | ViewCloseModal
   | ViewOpenCreate
@@ -1359,9 +1465,33 @@ handleViewAction = case _ of
   ViewCancelValidation ->
     modify_ (_view <<< _viewValidationPanel .~ Nothing)
   ViewChangedAction raw ->
-    modify_ (_view <<< _viewMode .~ parseAgendaView raw)
+    modify_
+      ( _view
+          %~
+            ( (_viewMode .~ parseAgendaView raw)
+                <<< (_viewDayFocusContext .~ Nothing)
+                <<< (_viewDayFocusApplied .~ false)
+                <<< (_viewDayFocusUserScrolled .~ false)
+                <<< (_viewDayFocusIgnoreScroll .~ false)
+            )
+      )
   ViewFocusDateChanged raw ->
-    modify_ (_view <<< _viewFocusDateState .~ raw)
+    modify_
+      ( _view
+          %~
+            ( (_viewFocusDateState .~ raw)
+                <<< (_viewDayFocusContext .~ Nothing)
+                <<< (_viewDayFocusApplied .~ false)
+                <<< (_viewDayFocusUserScrolled .~ false)
+                <<< (_viewDayFocusIgnoreScroll .~ false)
+            )
+      )
+  ViewTimelineScrolled -> do
+    st <- get
+    if st ^. (_view <<< _viewDayFocusIgnoreScroll) then
+      modify_ (_view <<< _viewDayFocusIgnoreScroll .~ false)
+    else
+      modify_ (_view <<< _viewDayFocusUserScrolled .~ true)
   ViewOpenModal modal ->
     modify_ (_view <<< _viewActiveModal .~ Just modal)
   ViewCloseModal ->
@@ -1943,6 +2073,32 @@ formatDateOnly = DateTime.formatLocalDate
 
 formatDateTimeLocal :: DateTime -> String
 formatDateTimeLocal = DateTime.formatLocalDateTime
+
+computeDayFocusTarget :: String -> DateTime -> Array CalendarItem -> DayFocusTarget
+computeDayFocusTarget selectedDate now itemsForDate
+  | selectedDate == formatDate now = FocusCurrentTime
+  | null itemsForDate = FocusTop
+  | otherwise = FocusFirstTask
+
+focusMinuteForTarget :: DateTime -> Array CalendarItem -> DayFocusTarget -> Int
+focusMinuteForTarget now itemsForDate target =
+  case target of
+    FocusCurrentTime ->
+      max 0 (minuteOfDay now - 120)
+    FocusFirstTask ->
+      case uncons (sortItems SortByTime itemsForDate) of
+        Nothing -> 0
+        Just { head } ->
+          max 0 (minuteOfDay (calendarItemContent head).windowStart - 30)
+    FocusTop ->
+      0
+
+focusScrollTopForMinute :: Boolean -> Int -> Number
+focusScrollTopForMinute isMobile minuteOffset =
+  let
+    minuteHeight = if isMobile then 52.0 / 60.0 else 1.0
+  in
+    Int.toNumber minuteOffset * minuteHeight
 
 timeLabel :: DateTime -> String
 timeLabel raw =

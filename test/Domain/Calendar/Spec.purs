@@ -22,6 +22,8 @@ import Pages.Calendar
   , durationMinutesBetween
   , sortItems
   , validateTask
+  , DayFocusTarget(..)
+  , computeDayFocusTarget
   )
 import Calendar.Recurrence (RecurrenceRule(..), defaultRecurrenceDraft, generateOccurrencesForMonth)
 import Data.Argonaut.Decode (decodeJson)
@@ -214,6 +216,31 @@ spec = do
   describe "Calendar time helpers" do
     it "durationMinutesBetween returns minutes between start and end" do
       durationMinutesBetween (unsafeDateTime "2026-02-19T09:00") (unsafeDateTime "2026-02-19T10:30") `shouldEqual` 90
+
+  describe "Calendar day initial focus" do
+    it "targets current time for today with tasks" do
+      let
+        now = unsafeDateTime "2026-02-19T14:30"
+        items =
+          [ serverCalendarItem "focus-1" (calendarContent Task "Task" "2026-02-19T09:00" "2026-02-19T10:00") ]
+      computeDayFocusTarget "2026-02-19" now items `shouldEqual` FocusCurrentTime
+
+    it "targets current time for today without tasks" do
+      let
+        now = unsafeDateTime "2026-02-19T14:30"
+      computeDayFocusTarget "2026-02-19" now [] `shouldEqual` FocusCurrentTime
+
+    it "targets first task for another day with tasks" do
+      let
+        now = unsafeDateTime "2026-02-19T14:30"
+        items =
+          [ serverCalendarItem "focus-2" (calendarContent Task "Task" "2026-02-20T09:00" "2026-02-20T10:00") ]
+      computeDayFocusTarget "2026-02-20" now items `shouldEqual` FocusFirstTask
+
+    it "targets the top for another day without tasks" do
+      let
+        now = unsafeDateTime "2026-02-19T14:30"
+      computeDayFocusTarget "2026-02-20" now [] `shouldEqual` FocusTop
 
   describe "Calendar imports" do
     it "parseCsv returns one item and no errors for valid input" do

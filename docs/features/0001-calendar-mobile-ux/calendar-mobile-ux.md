@@ -14,9 +14,11 @@ Improve the mobile calendar experience so the most useful actions and informatio
 - [009 Mobile View Navigation](to-refine/009-mobile-view-navigation.md) - Rework mobile view switching and direct date access into a more compact navigation model.
 
 ### TODO
-- [002 Initial Focus](todo/002-initial-focus.md) - Bring the user directly to the most relevant part of the day when the screen opens.
 - [003 Date Context](todo/003-date-context.md) - Make the visible date easier to understand at a glance on mobile.
 - [004 Overlap Readability](todo/004-overlap-readability.md) - Keep overlapping items readable on a narrow viewport.
+
+### DONE
+- [002 Initial Focus](done/002-initial-focus.md) - Bring the user directly to the most relevant part of the day when the screen opens.
 
 ## Canceled Stories
 - [001 Header Compaction](canceled/001-header-compaction.md) - Replaced by more focused stories covering top-area density, mobile view navigation, and mobile secondary actions.

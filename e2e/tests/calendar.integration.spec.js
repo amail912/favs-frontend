@@ -26,6 +26,12 @@ async function openCreateModal(page) {
   return modal;
 }
 
+async function dayTimelineScrollTop(page) {
+  const body = page.locator(".calendar-calendar-body");
+  await expect(body).toBeVisible();
+  return body.evaluate(element => element.scrollTop);
+}
+
 test("calendar integration: create task and show completion action", async ({ authenticatedPage: page }) => {
   const now = new Date();
   const start = new Date(now.getTime() + 60 * 60 * 1000);
@@ -177,6 +183,13 @@ test("calendar integration: create item on a later day", async ({ authenticatedP
   }).first();
 
   await expect(row).toBeVisible();
+
+  await page.getByRole("button", { name: "Semaine" }).click();
+  await page.getByRole("button", { name: "Jour" }).click();
+  await page.locator(".calendar-view-date").fill(focusDate);
+
+  await expect(row).toBeVisible();
+  await expect.poll(() => dayTimelineScrollTop(page)).toBeGreaterThan(0);
 });
 
 test("calendar: create modal resets on cancel", async ({ authenticatedPage: page }) => {
