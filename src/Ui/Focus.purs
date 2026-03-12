@@ -3,6 +3,7 @@ module Ui.Focus
   , findElementByClassName
   , findElementByClassNames
   , focusElement
+  , openDateInputPicker
   , selectInputElement
   ) where
 
@@ -57,3 +58,5 @@ selectInputElement elem =
   case InputElement.fromElement elem of
     Nothing -> pure false
     Just inputElem -> select inputElem *> pure true
+
+foreign import openDateInputPicker :: Element -> Effect Boolean

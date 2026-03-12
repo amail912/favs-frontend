@@ -19,6 +19,16 @@ function toLocalDateInput(date) {
   ].join("-");
 }
 
+function toFrenchDayLabel(date) {
+  const currentYear = new Date().getFullYear();
+  return new Intl.DateTimeFormat("fr-FR", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    ...(date.getFullYear() !== currentYear ? { year: "numeric" } : {})
+  }).format(date);
+}
+
 async function openCreateModal(page) {
   await page.getByRole("button", { name: "Nouvel item" }).click();
   const modal = page.locator(".app-modal__dialog", { hasText: "Créer un item" });
@@ -30,6 +40,14 @@ async function dayTimelineScrollTop(page) {
   const body = page.locator(".calendar-calendar-body");
   await expect(body).toBeVisible();
   return body.evaluate(element => element.scrollTop);
+}
+
+async function setCalendarViewDate(page, value) {
+  await page.locator(".calendar-view-date").evaluate((input, nextValue) => {
+    input.value = nextValue;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, value);
 }
 
 test("calendar integration: create task and show completion action", async ({ authenticatedPage: page }) => {
@@ -149,7 +167,7 @@ test("calendar integration: create item on a later day", async ({ authenticatedP
   await calendarTab(page).click();
   await expect(page).toHaveURL(/\/calendar$/);
 
-  await page.locator(".calendar-view-date").fill(focusDate);
+  await setCalendarViewDate(page, focusDate);
 
   const start = new Date(`${focusDate}T10:00`);
   const end = new Date(`${focusDate}T11:00`);
@@ -186,7 +204,7 @@ test("calendar integration: create item on a later day", async ({ authenticatedP
 
   await page.getByRole("button", { name: "Semaine" }).click();
   await page.getByRole("button", { name: "Jour" }).click();
-  await page.locator(".calendar-view-date").fill(focusDate);
+  await setCalendarViewDate(page, focusDate);
 
   await expect(row).toBeVisible();
   await expect.poll(() => dayTimelineScrollTop(page)).toBeGreaterThan(0);
@@ -399,6 +417,46 @@ test("calendar desktop: double click does not open edit modal", async ({ authent
 
 test.describe("calendar mobile touch", () => {
   test.use({ hasTouch: true });
+
+test("calendar mobile: localized date chip stays aligned with the Day header", async ({ authenticatedPage: page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+
+  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const focusDate = toLocalDateInput(tomorrow);
+  const expectedLabel = toFrenchDayLabel(tomorrow);
+  const start = new Date(`${focusDate}T10:00`);
+  const end = new Date(`${focusDate}T11:00`);
+  const title = `Mobile date ${Date.now()}`;
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+
+  const createModal = await openCreateModal(page);
+  await createModal.getByPlaceholder("Titre").fill(title);
+  await createModal.getByPlaceholder("Début").fill(toLocalDatetimeInput(start));
+  await createModal.getByPlaceholder("Fin").fill(toLocalDatetimeInput(end));
+
+  const createResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items") &&
+      response.request().method() === "POST"
+  );
+
+  await createModal.getByRole("button", { name: "Valider" }).click();
+  const createResponse = await createResponsePromise;
+  expect(createResponse.ok()).toBeTruthy();
+
+  await setCalendarViewDate(page, focusDate);
+
+  const trigger = page.locator(".calendar-view-date-trigger");
+  await expect(trigger).toBeVisible();
+  await expect(trigger).toHaveText(expectedLabel);
+  await expect(trigger).not.toHaveText(focusDate);
+  await expect(page.locator(".calendar-calendar-title")).toHaveText(expectedLabel);
+
+  await trigger.click();
+  await expect(page.locator(".calendar-view-date")).toBeFocused();
+});
 
 test("calendar mobile: double tap does not open edit modal", async ({ authenticatedPage: page }) => {
     await page.setViewportSize({ width: 390, height: 844 });

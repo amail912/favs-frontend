@@ -61,7 +61,7 @@ import Halogen.HTML.Properties (attr, style, IProp, value, placeholder, type_, d
 import Halogen.Query.Event as HQE
 import Type.Proxy (Proxy(..))
 import Ui.Errors (FatalError, handleError, toFatalError)
-import Ui.Focus (focusElement)
+import Ui.Focus (focusElement, openDateInputPicker)
 import Ui.Modal (renderModal) as Modal
 import Ui.Utils (class_)
 import Web.Event.Event (EventType(..), preventDefault)
@@ -183,15 +183,16 @@ renderAgendaView
   :: forall w
    . CalendarView
   -> String
+  -> String
   -> Array CalendarItem
   -> Boolean
   -> Maybe String
   -> Maybe Int
   -> HTML w Action
-renderAgendaView viewMode focusDate items isMobile draggingId dragHoverIndex =
+renderAgendaView viewMode focusDate todayDate items isMobile draggingId dragHoverIndex =
   case viewMode of
     ViewDay ->
-      renderDayCalendar focusDate items isMobile draggingId dragHoverIndex
+      renderDayCalendar focusDate todayDate items isMobile draggingId dragHoverIndex
     ViewWeek ->
       renderRangeView "Semaine" (generateDateRange focusDate 7) items isMobile
     ViewMonth ->
@@ -480,7 +481,7 @@ handleDragAction { log, dragAction } = do
 initAction :: ErrorAgendaAppM Unit
 initAction = do
   now <- liftEffect nowDateTime
-  modify_ $ _viewFocusDatePage .~ formatDate now
+  modify_ $ (_viewFocusDatePage .~ formatDate now) <<< (_view <<< _viewTodayDateState .~ formatDate now)
   viewport <- liftEffect $ window >>= Window.innerWidth
   handleViewAction (ViewSetIsMobile (viewport <= 768))
   subscribeToGlobalKeyDown
@@ -640,7 +641,7 @@ render { calendar, sync, mouseDrag, view } =
     { updateError } = sync
     draggingId = mouseDrag.draggingId
     dragHoverIndex = mouseDrag.dragHoverIndex
-    { viewMode, focusDate, validationPanel, isMobile } = view
+    { viewMode, focusDate, todayDate, validationPanel, isMobile } = view
     agendaModalsInput = buildAgendaModalsInput { calendar, sync, mouseDrag, view }
     sortedItems = sortItems SortByTime items
   in
@@ -648,7 +649,7 @@ render { calendar, sync, mouseDrag, view } =
       ( [ section [ class_ "calendar-header" ]
             [ h2 [ class_ "calendar-title" ] [ text (viewTitle viewMode) ]
             , div [ class_ "calendar-subtitle" ] [ text "Capture rapide des tâches à organiser." ]
-            , toAction <$> renderViewSelector viewMode focusDate
+            , toAction <$> renderViewSelector viewMode focusDate todayDate
             , toAction <$> renderMobileTools viewMode
             ]
         , div [ class_ $ "calendar-layout" <> guard (viewMode == ViewDay) " calendar-layout--calendar" ]
@@ -656,7 +657,7 @@ render { calendar, sync, mouseDrag, view } =
                 [ maybe (text "") renderUpdateError updateError
                 , maybe (text "") (map toAction <<< renderValidationPanel) validationPanel
                 , section [ class_ $ "calendar-list-panel" <> guard (viewMode == ViewDay) " calendar-list-panel--calendar" ]
-                    [ renderAgendaView viewMode focusDate sortedItems isMobile draggingId dragHoverIndex ]
+                    [ renderAgendaView viewMode focusDate todayDate sortedItems isMobile draggingId dragHoverIndex ]
                 ]
             , div [ class_ "calendar-side" ]
                 []
@@ -731,22 +732,24 @@ buildAgendaModalsInput { calendar, view } =
 renderDayCalendar
   :: forall w
    . String
+  -> String
   -> Array CalendarItem
   -> Boolean
   -> Maybe String
   -> Maybe Int
   -> HTML w Action
-renderDayCalendar focusDate items isMobile draggingId dragHoverIndex =
+renderDayCalendar focusDate todayDate items isMobile draggingId dragHoverIndex =
   let
     itemsForDate = filter (isItemOnDate focusDate) items
     sorted = sortItems SortByTime itemsForDate
     layout = buildTimelineLayout sorted
+    dayLabel = DateTime.formatCalendarDayDateLabelWithReference focusDate todayDate
   in
     if null itemsForDate then emptyAgenda
     else
       div [ class_ "calendar-calendar" ]
         [ div [ class_ "calendar-calendar-header" ]
-            [ div [ class_ "calendar-calendar-title" ] [ text focusDate ]
+            [ div [ class_ "calendar-calendar-title" ] [ text dayLabel ]
             , div [ class_ "calendar-calendar-count" ] [ text $ show (length itemsForDate) <> " items" ]
             ]
         , div
@@ -1330,6 +1333,7 @@ type ValidationPanel =
 type ViewState =
   { viewMode :: CalendarView
   , focusDate :: String
+  , todayDate :: String
   , activeModal :: Maybe AgendaModal
   , validationPanel :: Maybe ValidationPanel
   , editPanel :: Maybe EditPanel
@@ -1344,6 +1348,7 @@ viewInitialState :: ViewState
 viewInitialState =
   { viewMode: ViewDay
   , focusDate: ""
+  , todayDate: ""
   , activeModal: Nothing
   , validationPanel: Nothing
   , editPanel: Nothing
@@ -1364,6 +1369,12 @@ _viewFocusDateState =
   lens
     _.focusDate
     (_ { focusDate = _ })
+
+_viewTodayDateState :: Lens' ViewState String
+_viewTodayDateState =
+  lens
+    _.todayDate
+    (_ { todayDate = _ })
 
 _viewActiveModal :: Lens' ViewState (Maybe AgendaModal)
 _viewActiveModal =
@@ -1424,6 +1435,7 @@ data ViewAction
   | ViewValidationMinutesChanged String
   | ViewConfirmValidation
   | ViewCancelValidation
+  | ViewOpenDayDatePicker
   | ViewChangedAction String
   | ViewFocusDateChanged String
   | ViewTimelineScrolled
@@ -1464,6 +1476,11 @@ handleViewAction = case _ of
             refreshItems
   ViewCancelValidation ->
     modify_ (_view <<< _viewValidationPanel .~ Nothing)
+  ViewOpenDayDatePicker -> do
+    ref <- lift $ H.getRef (wrap "day-view-date-input")
+    case ref of
+      Nothing -> pure unit
+      Just elem -> liftEffect $ void (openDateInputPicker elem)
   ViewChangedAction raw ->
     modify_
       ( _view
@@ -1565,8 +1582,19 @@ parseAgendaView raw =
     "month" -> ViewMonth
     _ -> ViewDay
 
-renderViewSelector :: forall w. CalendarView -> String -> HTML w ViewAction
-renderViewSelector viewMode focusDate =
+renderViewSelector :: forall w. CalendarView -> String -> String -> HTML w ViewAction
+renderViewSelector viewMode focusDate todayDate =
+  let
+    dayLabel = DateTime.formatCalendarDayDateLabelWithReference focusDate todayDate
+    dateInput =
+      input
+        [ class_ "form-control calendar-input calendar-view-date"
+        , type_ InputDate
+        , attr (AttrName "lang") "fr"
+        , value focusDate
+        , onValueChange ViewFocusDateChanged
+        ]
+  in
   div [ class_ "calendar-view-selector" ]
     [ div [ class_ "calendar-view-buttons" ]
         [ button
@@ -1586,14 +1614,29 @@ renderViewSelector viewMode focusDate =
             [ text "Mois" ]
         ]
     , div [ class_ "calendar-view-date-field" ]
-        [ div [ class_ "calendar-notifications-label" ] [ text "Date de référence" ]
-        , input
-            [ class_ "form-control calendar-input calendar-view-date"
-            , type_ InputDate
-            , attr (AttrName "lang") "fr"
-            , value focusDate
-            , onValueChange ViewFocusDateChanged
-            ]
+        [ div [ class_ "calendar-notifications-label" ] [ text "Date" ]
+        , case viewMode of
+            ViewDay ->
+              div [ class_ "calendar-view-date-trigger-wrap" ]
+                [ button
+                    [ class_ "calendar-view-date-trigger"
+                    , attr (AttrName "type") "button"
+                    , attr (AttrName "aria-label") "Choisir la date du jour"
+                    , onClick (const ViewOpenDayDatePicker)
+                    ]
+                    [ text dayLabel ]
+                , input
+                    [ class_ "calendar-view-date calendar-view-date--overlay"
+                    , type_ InputDate
+                    , attr (AttrName "lang") "fr"
+                    , attr (AttrName "aria-label") "Date du jour"
+                    , ref (wrap "day-view-date-input")
+                    , value focusDate
+                    , onValueChange ViewFocusDateChanged
+                    ]
+                ]
+            _ ->
+              dateInput
         ]
     ]
 

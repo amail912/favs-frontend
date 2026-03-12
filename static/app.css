@@ -716,6 +716,41 @@ a.nav-link:hover {
   max-width: 200px;
 }
 
+.calendar-view-date-trigger-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.calendar-view-date-trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid var(--app-border);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 10px 24px rgba(20, 37, 68, 0.08);
+  color: var(--app-text);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.calendar-view-date--overlay {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .calendar-title {
   font-weight: 760;
   margin-bottom: 0.15rem;
@@ -1290,6 +1325,12 @@ a.nav-link:hover {
     height: 34px;
     font-size: 0.9rem;
     margin: 0 auto;
+  }
+
+  .calendar-view-date-trigger {
+    min-height: 34px;
+    padding: 0.35rem 0.75rem;
+    font-size: 0.95rem;
   }
 
   .calendar-layout,

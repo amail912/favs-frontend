@@ -3,6 +3,8 @@ module Helpers.DateTime
   , formatLocalDateTime
   , parseLocalDate
   , formatLocalDate
+  , formatCalendarDayDateLabel
+  , formatCalendarDayDateLabelWithReference
   , parseLocalTime
   , formatLocalTime
   , timeFromParts
@@ -14,7 +16,7 @@ module Helpers.DateTime
 
 import Prelude
 
-import Data.Date (Date)
+import Data.Date (Date, year)
 import Data.DateTime (DateTime(..), date, time)
 import Data.Either (either)
 import Data.Enum (toEnum)
@@ -53,6 +55,18 @@ formatLocalDate date' =
     pure $ formatDateTime localDatePattern (DateTime date' midnight)
       # either (const "") identity
 
+formatCalendarDayDateLabel :: String -> String
+formatCalendarDayDateLabel raw =
+  formatCalendarDayDateLabelWithReference raw currentLocalDate
+
+formatCalendarDayDateLabelWithReference :: String -> String -> String
+formatCalendarDayDateLabelWithReference raw referenceRaw =
+  case { selected: parseLocalDate raw, reference: parseLocalDate referenceRaw } of
+    { selected: Just selectedDate, reference: Just referenceDate } ->
+      formatFrenchDayLabelImpl (year selectedDate /= year referenceDate) raw
+    _ ->
+      raw
+
 parseLocalTime :: String -> Maybe Time
 parseLocalTime raw =
   unformatDateTime localTimePattern raw
@@ -88,3 +102,7 @@ isLocalDate raw = isJust (parseLocalDate raw)
 
 isLocalTime :: String -> Boolean
 isLocalTime raw = isJust (parseLocalTime raw)
+
+foreign import currentLocalDate :: String
+
+foreign import formatFrenchDayLabelImpl :: Boolean -> String -> String
