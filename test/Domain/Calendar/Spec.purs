@@ -222,9 +222,13 @@ spec = do
       case stacks of
         [ stack ] -> do
           stack.topItem `shouldEqual` itemA
-          stack.hiddenItems `shouldEqual` [ itemB ]
+          map _.item stack.hiddenCards `shouldEqual` [ itemB ]
+          map _.startMin stack.hiddenCards `shouldEqual` [ 570 ]
+          map _.duration stack.hiddenCards `shouldEqual` [ 60 ]
           stack.startMin `shouldEqual` 540
-          stack.duration `shouldEqual` 60
+          stack.topStartMin `shouldEqual` 540
+          stack.topDuration `shouldEqual` 60
+          stack.duration `shouldEqual` 90
           stack.hiddenCount `shouldEqual` 1
         _ -> fail "Expected exactly one mobile overlap stack"
 
@@ -243,7 +247,9 @@ spec = do
       case stacks of
         [ stack ] -> do
           stack.topItem `shouldEqual` shortItem
-          stack.hiddenItems `shouldEqual` [ longItem ]
+          map _.item stack.hiddenCards `shouldEqual` [ longItem ]
+          map _.duration stack.hiddenCards `shouldEqual` [ 90 ]
+          stack.duration `shouldEqual` 90
         _ -> fail "Expected exactly one mobile overlap stack"
 
     it "uses a stable identity fallback when start and end times match" do
@@ -254,7 +260,23 @@ spec = do
       case stacks of
         [ stack ] -> do
           stack.topItem `shouldEqual` itemA
-          stack.hiddenItems `shouldEqual` [ itemB ]
+          map _.item stack.hiddenCards `shouldEqual` [ itemB ]
+        _ -> fail "Expected exactly one mobile overlap stack"
+
+    it "preserves hidden card start and end geometry for staggered overlaps" do
+      let
+        topItem = serverCalendarItem "stack-g" (calendarContent Task "Top" "2026-02-19T09:00" "2026-02-19T09:45")
+        hiddenEarly = serverCalendarItem "stack-h" (calendarContent Task "Hidden 1" "2026-02-19T09:10" "2026-02-19T10:10")
+        hiddenLate = serverCalendarItem "stack-i" (calendarContent Task "Hidden 2" "2026-02-19T09:20" "2026-02-19T09:50")
+        stacks = buildMobileOverlapStacks [ hiddenLate, hiddenEarly, topItem ]
+      case stacks of
+        [ stack ] -> do
+          stack.topItem `shouldEqual` topItem
+          map _.startMin stack.hiddenCards `shouldEqual` [ 550, 560 ]
+          map _.duration stack.hiddenCards `shouldEqual` [ 60, 30 ]
+          map _.stackIndex stack.hiddenCards `shouldEqual` [ 1, 2 ]
+          stack.startMin `shouldEqual` 540
+          stack.duration `shouldEqual` 70
         _ -> fail "Expected exactly one mobile overlap stack"
 
   describe "Calendar time helpers" do

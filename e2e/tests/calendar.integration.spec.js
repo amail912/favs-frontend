@@ -29,6 +29,11 @@ function toFrenchDayLabel(date) {
   }).format(date);
 }
 
+function isolatedFutureDate(baseOffsetDays) {
+  const dayOffset = baseOffsetDays + (Date.now() % 300);
+  return new Date(Date.now() + dayOffset * 24 * 60 * 60 * 1000);
+}
+
 async function openCreateModal(page) {
   await page.getByRole("button", { name: "Nouvel item" }).click();
   const modal = page.locator(".app-modal__dialog", { hasText: "Créer un item" });
@@ -424,7 +429,8 @@ test("calendar mobile: overlapping items render as a stacked deck", async ({ aut
   await page.evaluate(() => window.dispatchEvent(new Event("resize")));
   await page.reload();
 
-  const focusDate = toLocalDateInput(new Date());
+  const targetDate = isolatedFutureDate(30);
+  const focusDate = toLocalDateInput(targetDate);
   const firstTitle = `Mobile overlap A ${Date.now()}`;
   const secondTitle = `Mobile overlap B ${Date.now()}`;
   const startHour = 6 + (Math.floor(Date.now() / 60000) % 12);
@@ -478,6 +484,66 @@ test("calendar mobile: overlapping items render as a stacked deck", async ({ aut
   }
 
   expect(stackBox.width).toBeGreaterThan(gridBox.width * 0.7);
+});
+
+test("calendar mobile: hidden cards communicate different start and end times", async ({ authenticatedPage: page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForFunction(() => window.innerWidth <= 768);
+  await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+  await page.reload();
+
+  const targetDate = isolatedFutureDate(330);
+  const focusDate = toLocalDateInput(targetDate);
+  const topTitle = `Mobile geometry top ${Date.now()}`;
+  const hiddenEarlyTitle = `Mobile geometry hidden early ${Date.now()}`;
+  const hiddenLateTitle = `Mobile geometry hidden late ${Date.now()}`;
+  const startHour = 6 + (Math.floor(Date.now() / 60000) % 12);
+  const hour = String(startHour).padStart(2, "0");
+  const nextHour = String(startHour + 1).padStart(2, "0");
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const createItems = [
+    { title: topTitle, start: `${focusDate}T${hour}:00`, end: `${focusDate}T${hour}:45` },
+    { title: hiddenEarlyTitle, start: `${focusDate}T${hour}:10`, end: `${focusDate}T${nextHour}:10` },
+    { title: hiddenLateTitle, start: `${focusDate}T${hour}:20`, end: `${focusDate}T${hour}:50` }
+  ];
+
+  for (const item of createItems) {
+    const modal = await openCreateModal(page);
+    await modal.getByPlaceholder("Titre").fill(item.title);
+    await modal.getByPlaceholder("Début").fill(item.start);
+    await modal.getByPlaceholder("Fin").fill(item.end);
+    const createResponsePromise = page.waitForResponse(
+      response =>
+        response.url().includes("/api/v1/calendar-items") &&
+        response.request().method() === "POST"
+    );
+    await modal.getByRole("button", { name: "Valider" }).click();
+    expect((await createResponsePromise).ok()).toBeTruthy();
+  }
+
+  const stack = page.locator(".calendar-calendar-stack", {
+    has: page.locator(".calendar-calendar-item-title", { hasText: topTitle })
+  }).first();
+  await expect(stack).toBeVisible();
+  await expect(stack.locator(".calendar-calendar-card--shadow")).toHaveCount(2);
+
+  const shadows = stack.locator(".calendar-calendar-card--shadow");
+  const firstShadowBox = await shadows.nth(0).boundingBox();
+  const secondShadowBox = await shadows.nth(1).boundingBox();
+  const topCardBox = await stack.locator(".calendar-calendar-stack-top").boundingBox();
+
+  if (!firstShadowBox || !secondShadowBox || !topCardBox) {
+    throw new Error("Missing mobile overlap geometry metrics");
+  }
+
+  expect(firstShadowBox.y).toBeGreaterThan(topCardBox.y);
+  expect(secondShadowBox.y).toBeGreaterThan(firstShadowBox.y);
+  expect(firstShadowBox.height).toBeGreaterThan(secondShadowBox.height);
+  expect(firstShadowBox.y + firstShadowBox.height).toBeGreaterThan(topCardBox.y + topCardBox.height);
 });
 
 test("calendar mobile: localized date chip stays aligned with the Day header", async ({ authenticatedPage: page }) => {

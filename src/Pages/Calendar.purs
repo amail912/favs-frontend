@@ -13,6 +13,7 @@ module Pages.Calendar
   , PrimaryAction(..)
   , buildTimelineLayout
   , MobileOverlapStack
+  , MobileHiddenCard
   , buildMobileOverlapStacks
   , toTimelineBlock
   , EditError(..)
@@ -855,18 +856,23 @@ renderMobileOverlapStack draggingId stack =
         , " --duration:"
         , show stack.duration
         , ";"
+        , " --card-start:"
+        , show (stack.topStartMin - stack.startMin)
+        , ";"
+        , " --card-duration:"
+        , show stack.topDuration
+        , ";"
         , " --stack-depth:"
         , show stack.hiddenCount
         , ";"
         ]
     dragProps = dragCalendarHandlers stack.topItem
-    shadowCount = length stack.hiddenItems
   in
     div
       [ class_ "calendar-calendar-stack"
       , style inlineStyle
       ]
-      ( mapWithIndex (\index _ -> renderMobileOverlapShadow shadowCount index) stack.hiddenItems
+      ( map (renderMobileOverlapShadow stack.hiddenCount stack.startMin) stack.hiddenCards
           <>
             [ div
                 ([ class_ $ "calendar-calendar-card calendar-calendar-item--task calendar-calendar-stack-top" <> draggingClass ] <> dragProps)
@@ -874,17 +880,22 @@ renderMobileOverlapStack draggingId stack =
             ]
       )
 
-renderMobileOverlapShadow :: forall w. Int -> Int -> HTML w Action
-renderMobileOverlapShadow shadowCount index =
+renderMobileOverlapShadow :: forall w. Int -> Int -> MobileHiddenCard -> HTML w Action
+renderMobileOverlapShadow shadowCount groupStartMin hiddenCard =
   let
-    stackIndex = index + 1
-    zIndex = shadowCount - index
+    zIndex = shadowCount - hiddenCard.stackIndex + 1
   in
     div
       [ class_ "calendar-calendar-card calendar-calendar-card--shadow"
       , attr (AttrName "aria-hidden") "true"
       , style $
-          " --stack-index:" <> show stackIndex <> ";"
+          " --stack-index:" <> show hiddenCard.stackIndex <> ";"
+            <> " --card-start:"
+            <> show (hiddenCard.startMin - groupStartMin)
+            <> ";"
+            <> " --card-duration:"
+            <> show hiddenCard.duration
+            <> ";"
             <> " z-index:"
             <> show zIndex
             <> ";"
@@ -1291,10 +1302,19 @@ type TimelineLayout =
 
 type MobileOverlapStack =
   { topItem :: CalendarItem
-  , hiddenItems :: Array CalendarItem
+  , topStartMin :: Int
+  , topDuration :: Int
+  , hiddenCards :: Array MobileHiddenCard
   , startMin :: Int
   , duration :: Int
   , hiddenCount :: Int
+  }
+
+type MobileHiddenCard =
+  { item :: CalendarItem
+  , startMin :: Int
+  , duration :: Int
+  , stackIndex :: Int
   }
 
 buildTimelineLayout :: Array CalendarItem -> Array TimelineLayout
@@ -1325,13 +1345,29 @@ toMobileStack group =
     case uncons sorted of
       Nothing -> Nothing
       Just { head, tail } ->
-        Just
-          { topItem: head.item
-          , hiddenItems: map _.item tail
-          , startMin: head.startMin
-          , duration: max 1 (head.endMin - head.startMin)
-          , hiddenCount: length tail
-          }
+        let
+          groupStartMin = foldl (\acc block -> min acc block.startMin) head.startMin tail
+          groupEndMin = foldl (\acc block -> max acc block.endMin) head.endMin tail
+          hiddenCards =
+            mapWithIndex
+              ( \index block ->
+                  { item: block.item
+                  , startMin: block.startMin
+                  , duration: max 1 (block.endMin - block.startMin)
+                  , stackIndex: index + 1
+                  }
+              )
+              tail
+        in
+          Just
+            { topItem: head.item
+            , topStartMin: head.startMin
+            , topDuration: max 1 (head.endMin - head.startMin)
+            , hiddenCards
+            , startMin: groupStartMin
+            , duration: max 1 (groupEndMin - groupStartMin)
+            , hiddenCount: length tail
+            }
 
 compareMobilePriority :: TimelineBlock -> TimelineBlock -> Ordering
 compareMobilePriority a b =
