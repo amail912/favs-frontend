@@ -546,6 +546,68 @@ test("calendar mobile: hidden cards communicate different start and end times", 
   expect(firstShadowBox.y + firstShadowBox.height).toBeGreaterThan(topCardBox.y + topCardBox.height);
 });
 
+test("calendar mobile: overlap summary opens a bottom sheet in chronological order", async ({ authenticatedPage: page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForFunction(() => window.innerWidth <= 768);
+  await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+  await page.reload();
+
+  const targetDate = isolatedFutureDate(630);
+  const focusDate = toLocalDateInput(targetDate);
+  const firstTitle = `Mobile sheet A ${Date.now()}`;
+  const secondTitle = `Mobile sheet B ${Date.now()}`;
+  const thirdTitle = `Mobile sheet C ${Date.now()}`;
+  const startHour = 6 + (Math.floor(Date.now() / 60000) % 12);
+  const hour = String(startHour).padStart(2, "0");
+  const nextHour = String(startHour + 1).padStart(2, "0");
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const createItems = [
+    { title: firstTitle, start: `${focusDate}T${hour}:00`, end: `${focusDate}T${hour}:45` },
+    { title: secondTitle, start: `${focusDate}T${hour}:10`, end: `${focusDate}T${nextHour}:00` },
+    { title: thirdTitle, start: `${focusDate}T${hour}:20`, end: `${focusDate}T${hour}:50` }
+  ];
+
+  for (const item of createItems) {
+    const modal = await openCreateModal(page);
+    await modal.getByPlaceholder("Titre").fill(item.title);
+    await modal.getByPlaceholder("Début").fill(item.start);
+    await modal.getByPlaceholder("Fin").fill(item.end);
+    const createResponsePromise = page.waitForResponse(
+      response =>
+        response.url().includes("/api/v1/calendar-items") &&
+        response.request().method() === "POST"
+    );
+    await modal.getByRole("button", { name: "Valider" }).click();
+    expect((await createResponsePromise).ok()).toBeTruthy();
+  }
+
+  const stack = page.locator(".calendar-calendar-stack", {
+    has: page.locator(".calendar-calendar-item-title", { hasText: firstTitle })
+  }).first();
+  await expect(stack).toBeVisible();
+
+  const summaryButton = stack.getByRole("button", { name: /Afficher 2 elements superposes/ });
+  await expect(summaryButton).toBeVisible();
+  await summaryButton.click();
+
+  const sheet = page.locator(".app-bottom-sheet__dialog");
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByText("Elements superposes")).toBeVisible();
+
+  const items = sheet.locator(".calendar-overlap-sheet__item");
+  await expect(items).toHaveCount(3);
+  await expect(items.nth(0)).toContainText(firstTitle);
+  await expect(items.nth(1)).toContainText(secondTitle);
+  await expect(items.nth(2)).toContainText(thirdTitle);
+
+  await sheet.getByRole("button", { name: "Fermer" }).click();
+  await expect(page.locator(".app-bottom-sheet__dialog")).toHaveCount(0);
+});
+
 test("calendar mobile: localized date chip stays aligned with the Day header", async ({ authenticatedPage: page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
 

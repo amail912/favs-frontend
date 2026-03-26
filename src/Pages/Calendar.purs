@@ -65,7 +65,7 @@ import Halogen.Query.Event as HQE
 import Type.Proxy (Proxy(..))
 import Ui.Errors (FatalError, handleError, toFatalError)
 import Ui.Focus (focusElement, openDateInputPicker)
-import Ui.Modal (renderModal) as Modal
+import Ui.Modal (renderBottomSheet, renderModal) as Modal
 import Ui.Utils (class_)
 import Web.Event.Event (EventType(..), preventDefault)
 import Web.HTML (window)
@@ -673,6 +673,7 @@ render { calendar, sync, mouseDrag, view } =
 
 type AgendaModalsInput =
   { activeModal :: Maybe AgendaModal
+  , overlapSheet :: Maybe OverlapSheet
   , exportItems :: Array Export.Item
   , draft :: TaskDraft
   , validationError :: Maybe String
@@ -680,7 +681,7 @@ type AgendaModalsInput =
   }
 
 renderAgendaModals :: AgendaModalsInput -> H.ComponentHTML Action Slots Aff
-renderAgendaModals { activeModal, exportItems, draft, validationError, editPanel } =
+renderAgendaModals { activeModal, overlapSheet, exportItems, draft, validationError, editPanel } =
   let
     renderModal title content = Modal.renderModal title content (ViewAction ViewCloseModal) (ViewAction ViewCloseModal)
     renderExportModal items =
@@ -703,6 +704,12 @@ renderAgendaModals { activeModal, exportItems, draft, validationError, editPanel
                 (\(Import.ApplyItems items) -> ImportApplyItems (map toCalendarItemContent items))
             ]
         ModalExport -> renderModal "Export" [ renderExportModal exportItems ]
+        ModalOverlapGroup -> case overlapSheet of
+          Nothing -> text ""
+          Just overlap ->
+            Modal.renderBottomSheet "Elements superposes"
+              [ renderOverlapSheetContent overlap ]
+              (ViewAction ViewCloseModal)
         ModalEditItem -> case editPanel of
           Nothing -> text ""
           Just panel ->
@@ -716,9 +723,10 @@ buildAgendaModalsInput :: State -> AgendaModalsInput
 buildAgendaModalsInput { calendar, view } =
   let
     { items, draft, validationError } = calendar
-    { activeModal, editPanel } = view
+    { activeModal, overlapSheet, editPanel } = view
   in
     { activeModal
+    , overlapSheet
     , exportItems: map toExportItem items
     , draft
     , validationError
@@ -867,6 +875,11 @@ renderMobileOverlapStack draggingId stack =
         , ";"
         ]
     dragProps = dragCalendarHandlers stack.topItem
+    overlapSheet =
+      { groupKey: stack.groupKey
+      , items: stack.items
+      , hiddenCount: stack.hiddenCount
+      }
   in
     div
       [ class_ "calendar-calendar-stack"
@@ -876,7 +889,9 @@ renderMobileOverlapStack draggingId stack =
           <>
             [ div
                 ([ class_ $ "calendar-calendar-card calendar-calendar-item--task calendar-calendar-stack-top" <> draggingClass ] <> dragProps)
-                [ renderTimelineCardContent stack.topItem ]
+                [ renderTimelineCardContent stack.topItem
+                , renderOverlapSummaryButton overlapSheet
+                ]
             ]
       )
 
@@ -919,6 +934,39 @@ renderTimelineCardContent item =
           , div [ class_ "calendar-calendar-actions" ]
               [ renderPrimaryAction item content ]
           ]
+      ]
+
+renderOverlapSummaryButton :: forall w. OverlapSheet -> HTML w Action
+renderOverlapSummaryButton overlapSheet =
+  if overlapSheet.hiddenCount <= 0 then
+    text ""
+  else
+    button
+      [ class_ "calendar-calendar-stack-summary"
+      , attr (AttrName "aria-label") $ "Afficher " <> show overlapSheet.hiddenCount <> " elements superposes"
+      , onClick (const (ViewAction (ViewOpenOverlapSheet overlapSheet)))
+      ]
+      [ text $ "+" <> show overlapSheet.hiddenCount ]
+
+renderOverlapSheetContent :: forall w. OverlapSheet -> HTML w Action
+renderOverlapSheetContent overlapSheet =
+  div [ class_ "calendar-overlap-sheet" ]
+    [ div [ class_ "calendar-overlap-sheet__hint" ]
+        [ text $ show (length overlapSheet.items) <> " elements sur ce creneau" ]
+    , ul [ class_ "calendar-overlap-sheet__list" ]
+        (map renderOverlapSheetItem overlapSheet.items)
+    ]
+
+renderOverlapSheetItem :: forall w. CalendarItem -> HTML w Action
+renderOverlapSheetItem item =
+  let
+    content = calendarItemContent item
+  in
+    li [ class_ "calendar-overlap-sheet__item" ]
+      [ div [ class_ "calendar-overlap-sheet__time" ]
+          [ text $ timeLabel content.windowStart <> " → " <> timeLabel content.windowEnd ]
+      , div [ class_ "calendar-overlap-sheet__title" ] [ text content.title ]
+      , renderCategory content.category
       ]
 
 renderTimelineEditButton :: forall w. Boolean -> CalendarItem -> HTML w Action
@@ -1301,7 +1349,9 @@ type TimelineLayout =
   }
 
 type MobileOverlapStack =
-  { topItem :: CalendarItem
+  { groupKey :: String
+  , items :: Array CalendarItem
+  , topItem :: CalendarItem
   , topStartMin :: Int
   , topDuration :: Int
   , hiddenCards :: Array MobileHiddenCard
@@ -1346,6 +1396,7 @@ toMobileStack group =
       Nothing -> Nothing
       Just { head, tail } ->
         let
+          items = map _.item sorted
           groupStartMin = foldl (\acc block -> min acc block.startMin) head.startMin tail
           groupEndMin = foldl (\acc block -> max acc block.endMin) head.endMin tail
           hiddenCards =
@@ -1360,7 +1411,9 @@ toMobileStack group =
               tail
         in
           Just
-            { topItem: head.item
+            { groupKey: overlapGroupKey items
+            , items
+            , topItem: head.item
             , topStartMin: head.startMin
             , topDuration: max 1 (head.endMin - head.startMin)
             , hiddenCards
@@ -1374,6 +1427,11 @@ compareMobilePriority a b =
   compare a.startMin b.startMin
     <> compare a.endMin b.endMin
     <> compare (calendarItemIdentity a.item) (calendarItemIdentity b.item)
+
+overlapGroupKey :: Array CalendarItem -> String
+overlapGroupKey items =
+  StringCommon.joinWith "|"
+    (map calendarItemIdentity items)
 
 groupTimelineBlocks :: Array TimelineBlock -> Array (Array TimelineBlock)
 groupTimelineBlocks blocks =
@@ -1478,6 +1536,7 @@ data AgendaModal
   | ModalTools
   | ModalCreateItem
   | ModalEditItem
+  | ModalOverlapGroup
 
 derive instance eqAgendaModal :: Eq AgendaModal
 
@@ -1487,11 +1546,18 @@ type ValidationPanel =
   , inputValue :: String
   }
 
+type OverlapSheet =
+  { groupKey :: String
+  , items :: Array CalendarItem
+  , hiddenCount :: Int
+  }
+
 type ViewState =
   { viewMode :: CalendarView
   , focusDate :: String
   , todayDate :: String
   , activeModal :: Maybe AgendaModal
+  , overlapSheet :: Maybe OverlapSheet
   , validationPanel :: Maybe ValidationPanel
   , editPanel :: Maybe EditPanel
   , isMobile :: Boolean
@@ -1507,6 +1573,7 @@ viewInitialState =
   , focusDate: ""
   , todayDate: ""
   , activeModal: Nothing
+  , overlapSheet: Nothing
   , validationPanel: Nothing
   , editPanel: Nothing
   , isMobile: false
@@ -1538,6 +1605,12 @@ _viewActiveModal =
   lens
     _.activeModal
     (_ { activeModal = _ })
+
+_viewOverlapSheet :: Lens' ViewState (Maybe OverlapSheet)
+_viewOverlapSheet =
+  lens
+    _.overlapSheet
+    (_ { overlapSheet = _ })
 
 _viewValidationPanel :: Lens' ViewState (Maybe ValidationPanel)
 _viewValidationPanel =
@@ -1597,6 +1670,7 @@ data ViewAction
   | ViewFocusDateChanged String
   | ViewTimelineScrolled
   | ViewOpenModal AgendaModal
+  | ViewOpenOverlapSheet OverlapSheet
   | ViewCloseModal
   | ViewOpenCreate
   | ViewCloseCreate
@@ -1668,8 +1742,16 @@ handleViewAction = case _ of
       modify_ (_view <<< _viewDayFocusUserScrolled .~ true)
   ViewOpenModal modal ->
     modify_ (_view <<< _viewActiveModal .~ Just modal)
+  ViewOpenOverlapSheet overlapSheet ->
+    modify_
+      ( _view
+          %~
+            ( (_viewOverlapSheet .~ Just overlapSheet)
+                <<< (_viewActiveModal .~ Just ModalOverlapGroup)
+            )
+      )
   ViewCloseModal ->
-    modify_ (_view <<< _viewActiveModal .~ Nothing)
+    modify_ ((_view <<< _viewActiveModal .~ Nothing) <<< (_view <<< _viewOverlapSheet .~ Nothing))
   ViewOpenCreate ->
     modify_ (_view <<< _viewActiveModal .~ Just ModalCreateItem)
   ViewCloseCreate ->

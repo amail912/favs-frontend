@@ -221,6 +221,8 @@ spec = do
         stacks = buildMobileOverlapStacks [ itemA, itemB ]
       case stacks of
         [ stack ] -> do
+          stack.groupKey `shouldEqual` "server:stack-a|server:stack-b"
+          stack.items `shouldEqual` [ itemA, itemB ]
           stack.topItem `shouldEqual` itemA
           map _.item stack.hiddenCards `shouldEqual` [ itemB ]
           map _.startMin stack.hiddenCards `shouldEqual` [ 570 ]
@@ -238,6 +240,11 @@ spec = do
         itemB = serverCalendarItem "stack-d" (calendarContent Task "B" "2026-02-19T10:00" "2026-02-19T11:00")
         stacks = buildMobileOverlapStacks [ itemA, itemB ]
       length stacks `shouldEqual` 2
+      case stacks of
+        [ first, second ] -> do
+          first.hiddenCount `shouldEqual` 0
+          second.hiddenCount `shouldEqual` 0
+        _ -> fail "Expected exactly two mobile overlap stacks"
 
     it "chooses the earliest end time when overlapping items start together" do
       let
@@ -261,6 +268,18 @@ spec = do
         [ stack ] -> do
           stack.topItem `shouldEqual` itemA
           map _.item stack.hiddenCards `shouldEqual` [ itemB ]
+        _ -> fail "Expected exactly one mobile overlap stack"
+
+    it "keeps chronological full-group ordering for overlap sheet display" do
+      let
+        itemB = serverCalendarItem "stack-k" (calendarContent Task "B" "2026-02-19T09:10" "2026-02-19T10:00")
+        itemA = serverCalendarItem "stack-j" (calendarContent Task "A" "2026-02-19T09:00" "2026-02-19T09:45")
+        itemC = serverCalendarItem "stack-l" (calendarContent Task "C" "2026-02-19T09:20" "2026-02-19T09:50")
+        stacks = buildMobileOverlapStacks [ itemC, itemB, itemA ]
+      case stacks of
+        [ stack ] -> do
+          stack.items `shouldEqual` [ itemA, itemB, itemC ]
+          stack.hiddenCount `shouldEqual` 2
         _ -> fail "Expected exactly one mobile overlap stack"
 
     it "preserves hidden card start and end geometry for staggered overlaps" do
