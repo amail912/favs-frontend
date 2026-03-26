@@ -418,6 +418,68 @@ test("calendar desktop: double click does not open edit modal", async ({ authent
 test.describe("calendar mobile touch", () => {
   test.use({ hasTouch: true });
 
+test("calendar mobile: overlapping items render as a stacked deck", async ({ authenticatedPage: page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForFunction(() => window.innerWidth <= 768);
+  await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+  await page.reload();
+
+  const focusDate = toLocalDateInput(new Date());
+  const firstTitle = `Mobile overlap A ${Date.now()}`;
+  const secondTitle = `Mobile overlap B ${Date.now()}`;
+  const startHour = 6 + (Math.floor(Date.now() / 60000) % 12);
+  const startLabel = `${String(startHour).padStart(2, "0")}:00`;
+  const overlapLabel = `${String(startHour).padStart(2, "0")}:15`;
+  const endLabel = `${String(startHour + 1).padStart(2, "0")}:00`;
+  const overlapEndLabel = `${String(startHour + 1).padStart(2, "0")}:15`;
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const firstModal = await openCreateModal(page);
+  await firstModal.getByPlaceholder("Titre").fill(firstTitle);
+  await firstModal.getByPlaceholder("Début").fill(`${focusDate}T${startLabel}`);
+  await firstModal.getByPlaceholder("Fin").fill(`${focusDate}T${endLabel}`);
+  let createResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items") &&
+      response.request().method() === "POST"
+  );
+  await firstModal.getByRole("button", { name: "Valider" }).click();
+  expect((await createResponsePromise).ok()).toBeTruthy();
+
+  const secondModal = await openCreateModal(page);
+  await secondModal.getByPlaceholder("Titre").fill(secondTitle);
+  await secondModal.getByPlaceholder("Début").fill(`${focusDate}T${overlapLabel}`);
+  await secondModal.getByPlaceholder("Fin").fill(`${focusDate}T${overlapEndLabel}`);
+  createResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items") &&
+      response.request().method() === "POST"
+  );
+  await secondModal.getByRole("button", { name: "Valider" }).click();
+  expect((await createResponsePromise).ok()).toBeTruthy();
+
+  const stack = page.locator(".calendar-calendar-stack", {
+    has: page.locator(".calendar-calendar-item-title", { hasText: firstTitle })
+  }).first();
+  await expect(stack).toBeVisible();
+  await expect(stack.locator(".calendar-calendar-card--shadow")).toHaveCount(1);
+  await expect(stack.locator(".calendar-calendar-item-title", { hasText: firstTitle })).toBeVisible();
+
+  const [stackBox, gridBox] = await Promise.all([
+    stack.boundingBox(),
+    page.locator(".calendar-calendar-grid").boundingBox()
+  ]);
+
+  if (!stackBox || !gridBox) {
+    throw new Error("Missing mobile overlap layout metrics");
+  }
+
+  expect(stackBox.width).toBeGreaterThan(gridBox.width * 0.7);
+});
+
 test("calendar mobile: localized date chip stays aligned with the Day header", async ({ authenticatedPage: page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
 

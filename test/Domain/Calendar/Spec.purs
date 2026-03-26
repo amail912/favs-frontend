@@ -15,6 +15,7 @@ import Pages.Calendar
   , primaryActionFor
   , PrimaryAction(..)
   , buildTimelineLayout
+  , buildMobileOverlapStacks
   , toTimelineBlock
   , EditError(..)
   , applyEditDraft
@@ -213,6 +214,49 @@ spec = do
           (first.columnIndex == second.columnIndex) `shouldEqual` false
         _ -> fail "Expected exactly two timeline items"
 
+    it "builds a single mobile stack for overlapping items" do
+      let
+        itemA = serverCalendarItem "stack-a" (calendarContent Task "A" "2026-02-19T09:00" "2026-02-19T10:00")
+        itemB = serverCalendarItem "stack-b" (calendarContent Task "B" "2026-02-19T09:30" "2026-02-19T10:30")
+        stacks = buildMobileOverlapStacks [ itemA, itemB ]
+      case stacks of
+        [ stack ] -> do
+          stack.topItem `shouldEqual` itemA
+          stack.hiddenItems `shouldEqual` [ itemB ]
+          stack.startMin `shouldEqual` 540
+          stack.duration `shouldEqual` 60
+          stack.hiddenCount `shouldEqual` 1
+        _ -> fail "Expected exactly one mobile overlap stack"
+
+    it "keeps non-overlapping items in separate mobile stacks" do
+      let
+        itemA = serverCalendarItem "stack-c" (calendarContent Task "A" "2026-02-19T09:00" "2026-02-19T10:00")
+        itemB = serverCalendarItem "stack-d" (calendarContent Task "B" "2026-02-19T10:00" "2026-02-19T11:00")
+        stacks = buildMobileOverlapStacks [ itemA, itemB ]
+      length stacks `shouldEqual` 2
+
+    it "chooses the earliest end time when overlapping items start together" do
+      let
+        longItem = serverCalendarItem "stack-e" (calendarContent Task "Long" "2026-02-19T09:00" "2026-02-19T10:30")
+        shortItem = serverCalendarItem "stack-f" (calendarContent Task "Short" "2026-02-19T09:00" "2026-02-19T09:45")
+        stacks = buildMobileOverlapStacks [ longItem, shortItem ]
+      case stacks of
+        [ stack ] -> do
+          stack.topItem `shouldEqual` shortItem
+          stack.hiddenItems `shouldEqual` [ longItem ]
+        _ -> fail "Expected exactly one mobile overlap stack"
+
+    it "uses a stable identity fallback when start and end times match" do
+      let
+        itemB = serverCalendarItem "stack-z" (calendarContent Task "B" "2026-02-19T09:00" "2026-02-19T10:00")
+        itemA = serverCalendarItem "stack-a" (calendarContent Task "A" "2026-02-19T09:00" "2026-02-19T10:00")
+        stacks = buildMobileOverlapStacks [ itemB, itemA ]
+      case stacks of
+        [ stack ] -> do
+          stack.topItem `shouldEqual` itemA
+          stack.hiddenItems `shouldEqual` [ itemB ]
+        _ -> fail "Expected exactly one mobile overlap stack"
+
   describe "Calendar time helpers" do
     it "durationMinutesBetween returns minutes between start and end" do
       durationMinutesBetween (unsafeDateTime "2026-02-19T09:00") (unsafeDateTime "2026-02-19T10:30") `shouldEqual` 90
@@ -246,7 +290,7 @@ spec = do
     it "parseCsv returns one item and no errors for valid input" do
       let
         csv =
-            "type,titre,fenetre_debut,fenetre_fin,categorie,statut,source_item_id,actual_duration_minutes,recurrence_rule_type,recurrence_rule_interval_days,recurrence_exception_dates\n" <>
+          "type,titre,fenetre_debut,fenetre_fin,categorie,statut,source_item_id,actual_duration_minutes,recurrence_rule_type,recurrence_rule_interval_days,recurrence_exception_dates\n" <>
             "TASK,Focus,2026-02-19T09:00,2026-02-19T10:00,Deep,TODO,,,,,"
         result = parseCsv csv
       length result.items `shouldEqual` 1

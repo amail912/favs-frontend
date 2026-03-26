@@ -12,6 +12,8 @@ module Pages.Calendar
   , primaryActionFor
   , PrimaryAction(..)
   , buildTimelineLayout
+  , MobileOverlapStack
+  , buildMobileOverlapStacks
   , toTimelineBlock
   , EditError(..)
   , applyEditDraft
@@ -505,7 +507,7 @@ scheduleDayTimelineFocus = do
     currentContext = st ^. (_view <<< _viewDayFocusContext)
   case viewMode of
     ViewDay -> do
-      when (currentContext /= Just contextKey) do
+      when (currentContext /= Just contextKey) $
         modify_
           ( _view
               %~
@@ -544,7 +546,7 @@ scheduleDayTimelineFocus = do
               liftEffect $ setScrollTop scrollTop timeline
               liftAff $ delay (Milliseconds 50.0)
               stAfter <- get
-              when (stAfter ^. (_view <<< _viewDayFocusContext) == Just contextKey) do
+              when (stAfter ^. (_view <<< _viewDayFocusContext) == Just contextKey) $
                 modify_ (_view <<< _viewDayFocusIgnoreScroll .~ false)
     _ -> pure unit
 
@@ -742,7 +744,11 @@ renderDayCalendar focusDate todayDate items isMobile draggingId dragHoverIndex =
   let
     itemsForDate = filter (isItemOnDate focusDate) items
     sorted = sortItems SortByTime itemsForDate
-    layout = buildTimelineLayout sorted
+    timelineItems =
+      if isMobile then
+        map (renderMobileOverlapStack draggingId) (buildMobileOverlapStacks sorted)
+      else
+        map (renderTimelineItem isMobile draggingId) (buildTimelineLayout sorted)
     dayLabel = DateTime.formatCalendarDayDateLabelWithReference focusDate todayDate
   in
     if null itemsForDate then emptyAgenda
@@ -770,7 +776,7 @@ renderDayCalendar focusDate todayDate items isMobile draggingId dragHoverIndex =
                 , maybe (text "") renderDropIndicator dragHoverIndex
                 , div
                     [ class_ $ "calendar-calendar-items" <> if draggingId == Nothing then "" else " calendar-calendar-items--dragging" ]
-                    (map (renderTimelineItem isMobile draggingId) layout)
+                    timelineItems
                 ]
             ]
         ]
@@ -795,7 +801,6 @@ renderTimelineItem
   -> HTML w Action
 renderTimelineItem isMobile draggingId layout =
   let
-    content = calendarItemContent layout.item
     draggingClass =
       case { draggingId, item: layout.item } of
         { draggingId: Just activeId, item: ServerCalendarItem { id } } | activeId == id ->
@@ -826,19 +831,82 @@ renderTimelineItem isMobile draggingId layout =
       )
       [ renderTimelineEditButton isMobile layout.item
       , div
-          ( [ class_ $ "calendar-calendar-card calendar-calendar-item--task" <> draggingClass
-            ] <> dragProps
-          )
-          [ div [ class_ "calendar-calendar-meta" ]
-              [ div [ class_ "calendar-calendar-item-time" ]
-                  [ text $ timeLabel content.windowStart <> " → " <> timeLabel content.windowEnd ]
-              , div [ class_ "calendar-calendar-item-title" ] [ text content.title ]
-              , div [ class_ "calendar-calendar-footer" ]
-                  [ renderCategory content.category
-                  , div [ class_ "calendar-calendar-actions" ]
-                      [ renderPrimaryAction layout.item content ]
-                  ]
-              ]
+          ([ class_ $ "calendar-calendar-card calendar-calendar-item--task" <> draggingClass ] <> dragProps)
+          [ renderTimelineCardContent layout.item ]
+      ]
+
+renderMobileOverlapStack
+  :: forall w
+   . Maybe String
+  -> MobileOverlapStack
+  -> HTML w Action
+renderMobileOverlapStack draggingId stack =
+  let
+    draggingClass =
+      case { draggingId, item: stack.topItem } of
+        { draggingId: Just activeId, item: ServerCalendarItem { id } } | activeId == id ->
+          " calendar-calendar-item--dragging"
+        _ -> ""
+    inlineStyle =
+      fold
+        [ " --start:"
+        , show stack.startMin
+        , ";"
+        , " --duration:"
+        , show stack.duration
+        , ";"
+        , " --stack-depth:"
+        , show stack.hiddenCount
+        , ";"
+        ]
+    dragProps = dragCalendarHandlers stack.topItem
+    shadowCount = length stack.hiddenItems
+  in
+    div
+      [ class_ "calendar-calendar-stack"
+      , style inlineStyle
+      ]
+      ( mapWithIndex (\index _ -> renderMobileOverlapShadow shadowCount index) stack.hiddenItems
+          <>
+            [ div
+                ([ class_ $ "calendar-calendar-card calendar-calendar-item--task calendar-calendar-stack-top" <> draggingClass ] <> dragProps)
+                [ renderTimelineCardContent stack.topItem ]
+            ]
+      )
+
+renderMobileOverlapShadow :: forall w. Int -> Int -> HTML w Action
+renderMobileOverlapShadow shadowCount index =
+  let
+    stackIndex = index + 1
+    zIndex = shadowCount - index
+  in
+    div
+      [ class_ "calendar-calendar-card calendar-calendar-card--shadow"
+      , attr (AttrName "aria-hidden") "true"
+      , style $
+          " --stack-index:" <> show stackIndex <> ";"
+            <> " z-index:"
+            <> show zIndex
+            <> ";"
+      ]
+      []
+
+renderTimelineCardContent
+  :: forall w
+   . CalendarItem
+  -> HTML w Action
+renderTimelineCardContent item =
+  let
+    content = calendarItemContent item
+  in
+    div [ class_ "calendar-calendar-meta" ]
+      [ div [ class_ "calendar-calendar-item-time" ]
+          [ text $ timeLabel content.windowStart <> " → " <> timeLabel content.windowEnd ]
+      , div [ class_ "calendar-calendar-item-title" ] [ text content.title ]
+      , div [ class_ "calendar-calendar-footer" ]
+          [ renderCategory content.category
+          , div [ class_ "calendar-calendar-actions" ]
+              [ renderPrimaryAction item content ]
           ]
       ]
 
@@ -1221,6 +1289,14 @@ type TimelineLayout =
   , columnCount :: Int
   }
 
+type MobileOverlapStack =
+  { topItem :: CalendarItem
+  , hiddenItems :: Array CalendarItem
+  , startMin :: Int
+  , duration :: Int
+  , hiddenCount :: Int
+  }
+
 buildTimelineLayout :: Array CalendarItem -> Array TimelineLayout
 buildTimelineLayout items =
   let
@@ -1230,6 +1306,38 @@ buildTimelineLayout items =
     foldl (\acc group -> acc <> assignColumns group) [] groups
   where
   compareStart a b = compare a.startMin b.startMin
+
+buildMobileOverlapStacks :: Array CalendarItem -> Array MobileOverlapStack
+buildMobileOverlapStacks items =
+  let
+    blocks = sortBy compareStart (mapMaybe toTimelineBlock items)
+    groups = groupTimelineBlocks blocks
+  in
+    mapMaybe toMobileStack groups
+  where
+  compareStart a b = compare a.startMin b.startMin
+
+toMobileStack :: Array TimelineBlock -> Maybe MobileOverlapStack
+toMobileStack group =
+  let
+    sorted = sortBy compareMobilePriority group
+  in
+    case uncons sorted of
+      Nothing -> Nothing
+      Just { head, tail } ->
+        Just
+          { topItem: head.item
+          , hiddenItems: map _.item tail
+          , startMin: head.startMin
+          , duration: max 1 (head.endMin - head.startMin)
+          , hiddenCount: length tail
+          }
+
+compareMobilePriority :: TimelineBlock -> TimelineBlock -> Ordering
+compareMobilePriority a b =
+  compare a.startMin b.startMin
+    <> compare a.endMin b.endMin
+    <> compare (calendarItemIdentity a.item) (calendarItemIdentity b.item)
 
 groupTimelineBlocks :: Array TimelineBlock -> Array (Array TimelineBlock)
 groupTimelineBlocks blocks =
@@ -1289,6 +1397,19 @@ toTimelineBlock item =
   in
     if endClamped <= 0 || startClamped >= 1440 then Nothing
     else Just { item, startMin: startClamped, endMin: endClamped }
+
+calendarItemIdentity :: CalendarItem -> String
+calendarItemIdentity = case _ of
+  ServerCalendarItem { id } -> "server:" <> id
+  NewCalendarItem { content } ->
+    fold
+      [ "new:"
+      , content.title
+      , ":"
+      , show content.windowStart
+      , ":"
+      , show content.windowEnd
+      ]
 
 -- END src/Calendar/Calendar/Timeline.purs
 
@@ -1595,50 +1716,50 @@ renderViewSelector viewMode focusDate todayDate =
         , onValueChange ViewFocusDateChanged
         ]
   in
-  div [ class_ "calendar-view-selector" ]
-    [ div [ class_ "calendar-view-buttons" ]
-        [ button
-            [ class_ $ "btn btn-sm " <> if viewMode == ViewDay then "btn-primary" else "btn-outline-secondary"
-            , onClick (const (ViewChangedAction "day"))
-            ]
-            [ text "Jour" ]
-        , button
-            [ class_ $ "btn btn-sm " <> if viewMode == ViewWeek then "btn-primary" else "btn-outline-secondary"
-            , onClick (const (ViewChangedAction "week"))
-            ]
-            [ text "Semaine" ]
-        , button
-            [ class_ $ "btn btn-sm " <> if viewMode == ViewMonth then "btn-primary" else "btn-outline-secondary"
-            , onClick (const (ViewChangedAction "month"))
-            ]
-            [ text "Mois" ]
-        ]
-    , div [ class_ "calendar-view-date-field" ]
-        [ div [ class_ "calendar-notifications-label" ] [ text "Date" ]
-        , case viewMode of
-            ViewDay ->
-              div [ class_ "calendar-view-date-trigger-wrap" ]
-                [ button
-                    [ class_ "calendar-view-date-trigger"
-                    , attr (AttrName "type") "button"
-                    , attr (AttrName "aria-label") "Choisir la date du jour"
-                    , onClick (const ViewOpenDayDatePicker)
-                    ]
-                    [ text dayLabel ]
-                , input
-                    [ class_ "calendar-view-date calendar-view-date--overlay"
-                    , type_ InputDate
-                    , attr (AttrName "lang") "fr"
-                    , attr (AttrName "aria-label") "Date du jour"
-                    , ref (wrap "day-view-date-input")
-                    , value focusDate
-                    , onValueChange ViewFocusDateChanged
-                    ]
-                ]
-            _ ->
-              dateInput
-        ]
-    ]
+    div [ class_ "calendar-view-selector" ]
+      [ div [ class_ "calendar-view-buttons" ]
+          [ button
+              [ class_ $ "btn btn-sm " <> if viewMode == ViewDay then "btn-primary" else "btn-outline-secondary"
+              , onClick (const (ViewChangedAction "day"))
+              ]
+              [ text "Jour" ]
+          , button
+              [ class_ $ "btn btn-sm " <> if viewMode == ViewWeek then "btn-primary" else "btn-outline-secondary"
+              , onClick (const (ViewChangedAction "week"))
+              ]
+              [ text "Semaine" ]
+          , button
+              [ class_ $ "btn btn-sm " <> if viewMode == ViewMonth then "btn-primary" else "btn-outline-secondary"
+              , onClick (const (ViewChangedAction "month"))
+              ]
+              [ text "Mois" ]
+          ]
+      , div [ class_ "calendar-view-date-field" ]
+          [ div [ class_ "calendar-notifications-label" ] [ text "Date" ]
+          , case viewMode of
+              ViewDay ->
+                div [ class_ "calendar-view-date-trigger-wrap" ]
+                  [ button
+                      [ class_ "calendar-view-date-trigger"
+                      , attr (AttrName "type") "button"
+                      , attr (AttrName "aria-label") "Choisir la date du jour"
+                      , onClick (const ViewOpenDayDatePicker)
+                      ]
+                      [ text dayLabel ]
+                  , input
+                      [ class_ "calendar-view-date calendar-view-date--overlay"
+                      , type_ InputDate
+                      , attr (AttrName "lang") "fr"
+                      , attr (AttrName "aria-label") "Date du jour"
+                      , ref (wrap "day-view-date-input")
+                      , value focusDate
+                      , onValueChange ViewFocusDateChanged
+                      ]
+                  ]
+              _ ->
+                dateInput
+          ]
+      ]
 
 renderMobileTools :: forall w. CalendarView -> HTML w ViewAction
 renderMobileTools _ =

@@ -14,12 +14,12 @@ Improve the mobile calendar experience so the most useful actions and informatio
 - [009 Mobile View Navigation](to-refine/009-mobile-view-navigation.md) - Rework mobile view switching and direct date access into a more compact navigation model.
 
 ### TODO
-- [004A Mobile Overlap Stack](todo/004a-mobile-overlap-stack.md) - Replace mobile overlap columns with a readable stacked deck.
 - [004B Hidden Cards Show End Position](todo/004b-hidden-cards-show-end-position.md) - Keep lower cards partially visible so their end positions remain understandable.
 - [004C Overlap Bottom Sheet](todo/004c-overlap-bottom-sheet.md) - Let mobile users inspect all items in a dense overlap group.
 - [004D Promote Hidden Item](todo/004d-promote-hidden-item.md) - Let users bring a hidden overlap item to the top card for action.
 
 ### DONE
+- [004A Mobile Overlap Stack](done/004a-mobile-overlap-stack.md) - Replace mobile overlap columns with a readable stacked deck.
 - [002 Initial Focus](done/002-initial-focus.md) - Bring the user directly to the most relevant part of the day when the screen opens.
 - [003 Date Context](done/003-date-context.md) - Make the visible date easier to understand at a glance on mobile.
 

@@ -13,8 +13,7 @@ import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe)
 import Data.Show.Generic (genericShow)
 
-data ItemType
-  = Task
+data ItemType = Task
 
 derive instance itemTypeEq :: Eq ItemType
 derive instance itemTypeGeneric :: Generic ItemType _
