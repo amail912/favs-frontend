@@ -14,7 +14,10 @@ Improve the mobile calendar experience so the most useful actions and informatio
 - [009 Mobile View Navigation](to-refine/009-mobile-view-navigation.md) - Rework mobile view switching and direct date access into a more compact navigation model.
 
 ### TODO
-- [004 Overlap Readability](todo/004-overlap-readability.md) - Keep overlapping items readable on a narrow viewport.
+- [004A Mobile Overlap Stack](todo/004a-mobile-overlap-stack.md) - Replace mobile overlap columns with a readable stacked deck.
+- [004B Hidden Cards Show End Position](todo/004b-hidden-cards-show-end-position.md) - Keep lower cards partially visible so their end positions remain understandable.
+- [004C Overlap Bottom Sheet](todo/004c-overlap-bottom-sheet.md) - Let mobile users inspect all items in a dense overlap group.
+- [004D Promote Hidden Item](todo/004d-promote-hidden-item.md) - Let users bring a hidden overlap item to the top card for action.
 
 ### DONE
 - [002 Initial Focus](done/002-initial-focus.md) - Bring the user directly to the most relevant part of the day when the screen opens.
@@ -22,6 +25,7 @@ Improve the mobile calendar experience so the most useful actions and informatio
 
 ## Canceled Stories
 - [001 Header Compaction](canceled/001-header-compaction.md) - Replaced by more focused stories covering top-area density, mobile view navigation, and mobile secondary actions.
+- [004 Overlap Readability](canceled/004-overlap-readability.md) - Split into focused INVEST stories for mobile overlap rendering and interaction.
 - [006 Mobile Actions Sheet](canceled/006-mobile-actions-sheet.md) - Not useful anymore after cleanup.
 
 ## Screenshots

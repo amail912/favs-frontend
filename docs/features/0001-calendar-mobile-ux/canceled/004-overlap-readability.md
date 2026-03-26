@@ -21,3 +21,16 @@ The bottom sheet opened from the summary entrypoint should list all items in the
 - Integration tests ensuring mobile Day view uses the summary-stack strategy while desktop keeps the current parallel-column layout.
 - Integration tests ensuring the summary entrypoint appears only when hidden overlap items exist and that the bottom sheet lists all overlap-group items in chronological order.
 - E2E tests validating that dense overlap groups no longer render as multiple unreadably thin side-by-side cards on a mobile viewport, that tapping the `+N` entrypoint opens the overlap bottom sheet, and that the full overlap group remains identifiable there.
+
+## Cancel reason
+This story was canceled because it mixed four separate concerns into one backlog item:
+- mobile stacked overlap rendering
+- hidden-card end visibility
+- overlap inspection through a bottom sheet
+- promotion of a hidden item to the top card
+
+It has been replaced by the following focused stories:
+- [004A Mobile Overlap Stack](../todo/004a-mobile-overlap-stack.md)
+- [004B Hidden Cards Show End Position](../todo/004b-hidden-cards-show-end-position.md)
+- [004C Overlap Bottom Sheet](../todo/004c-overlap-bottom-sheet.md)
+- [004D Promote Hidden Item](../todo/004d-promote-hidden-item.md)
