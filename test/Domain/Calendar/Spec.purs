@@ -12,8 +12,6 @@ import Pages.Calendar
   , SortMode(..)
   , ValidationError(..)
   , toNewTask
-  , primaryActionFor
-  , PrimaryAction(..)
   , buildTimelineLayout
   , buildMobileOverlapStacks
   , applyMobileOverlapPromotions
@@ -181,18 +179,6 @@ spec = do
         Just draft -> do
           let updatedDraft = draft { actualDurationMinutes = "0" }
           applyEditDraft updatedDraft item `shouldEqual` Left (EditDuration "Durée réelle invalide.")
-
-  describe "Calendar primary actions" do
-    it "primaryActionFor returns Validate for non-done tasks" do
-      let
-        item = serverCalendarItem "a" (calendarContent Task "Task" "2026-02-19T09:00" "2026-02-19T10:00")
-      primaryActionFor item `shouldEqual` PrimaryValidate
-
-    it "primaryActionFor returns None for done tasks" do
-      let
-        content = (calendarContent Task "Task" "2026-02-19T09:00" "2026-02-19T10:00") { status = Done }
-        item = serverCalendarItem "c" content
-      primaryActionFor item `shouldEqual` PrimaryNone
 
   describe "Calendar timeline layout" do
     it "clamps end time when it is before the start" do

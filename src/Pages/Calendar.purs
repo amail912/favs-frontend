@@ -9,8 +9,6 @@ module Pages.Calendar
   , SortMode(..)
   , ValidationError(..)
   , toNewTask
-  , primaryActionFor
-  , PrimaryAction(..)
   , buildTimelineLayout
   , MobileOverlapStack
   , MobileHiddenCard
@@ -460,13 +458,14 @@ handleDragAction { log, dragAction } = do
             ( _mouseDrag
                 %~
                   ( (_touchLongPressToken .~ nextToken)
-                      <<< (_touchPending .~ Just
+                      <<<
+                        ( _touchPending .~ Just
                             { token: nextToken
                             , itemId
                             , startIndex: initialIndex
                             , offsetMinutes: offset
                             }
-                         )
+                        )
                       <<< clearActiveDragState
                   )
             )
@@ -706,28 +705,6 @@ createItem item = withExceptT toFatalError $ ExceptT $ liftAff $ createItemRespo
 updateItem :: String -> CalendarItem -> ErrorAgendaAppM (Response Json)
 updateItem itemId item = withExceptT toFatalError $ ExceptT $ liftAff $ updateItemResponse itemId item
 
-validateItem :: String -> Int -> ErrorAgendaAppM Unit
-validateItem itemId minutes = do
-  st <- get
-  case find matchesId (st ^. _calendarItems) of
-    Just (ServerCalendarItem payload) ->
-      void
-        $ updateItem itemId
-            ( ServerCalendarItem
-                payload
-                  { content =
-                      payload.content
-                        { actualDurationMinutes = Just minutes
-                        , status = Done
-                        }
-                  }
-            )
-    _ -> pure unit
-  where
-  matchesId = case _ of
-    ServerCalendarItem { id } -> id == itemId
-    _ -> false
-
 statusOk :: forall a. Response a -> Boolean
 statusOk r = unwrap r.status >= 200 && unwrap r.status < 300
 
@@ -786,7 +763,7 @@ render { calendar, sync, mouseDrag, view } =
     { updateError } = sync
     draggingId = mouseDrag.draggingId
     dragHoverIndex = mouseDrag.dragHoverIndex
-    { viewMode, focusDate, todayDate, validationPanel, isMobile, promotedOverlaps } = view
+    { viewMode, focusDate, todayDate, isMobile, promotedOverlaps } = view
     agendaModalsInput = buildAgendaModalsInput { calendar, sync, mouseDrag, view }
     sortedItems = sortItems SortByTime items
   in
@@ -800,7 +777,6 @@ render { calendar, sync, mouseDrag, view } =
         , div [ class_ $ "calendar-layout" <> guard (viewMode == ViewDay) " calendar-layout--calendar" ]
             [ div [ class_ "calendar-main" ]
                 [ maybe (text "") renderUpdateError updateError
-                , maybe (text "") (map toAction <<< renderValidationPanel) validationPanel
                 , section [ class_ $ "calendar-list-panel" <> guard (viewMode == ViewDay) " calendar-list-panel--calendar" ]
                     [ renderAgendaView viewMode focusDate todayDate sortedItems isMobile promotedOverlaps draggingId dragHoverIndex ]
                 ]
@@ -1129,10 +1105,6 @@ renderTimelineCardContent item =
           , div [ class_ "calendar-calendar-item-title" ] [ text content.title ]
           , renderCategory content.category
           ]
-      , div [ class_ "calendar-calendar-footer" ]
-          [ div [ class_ "calendar-calendar-actions" ]
-              [ renderPrimaryAction item content ]
-          ]
       ]
 
 renderOverlapSummaryButton :: forall w. OverlapSheet -> HTML w Action
@@ -1230,24 +1202,8 @@ renderItem isMobile _ item =
           , div [ class_ "calendar-card-window" ]
               [ text $ formatDateTimeLocal content.windowStart <> " → " <> formatDateTimeLocal content.windowEnd ]
           , renderCategory content.category
-          , renderPrimaryAction item content
           ]
       ]
-
-renderPrimaryAction
-  :: forall w
-   . CalendarItem
-  -> CalendarItemContent
-  -> HTML w Action
-renderPrimaryAction item content =
-  case primaryActionFor item of
-    PrimaryValidate ->
-      case item of
-        ServerCalendarItem { id } ->
-          button [ class_ "btn btn-sm btn-outline-success calendar-primary-action", onClick (const (ViewAction (ViewOpenValidation id content))) ]
-            [ text "Valider" ]
-        _ -> text ""
-    PrimaryNone -> text ""
 
 editHandlers
   :: forall r
@@ -1473,15 +1429,6 @@ toNewTask draft = do
         Nothing -> Left "Durée réelle invalide."
 
 -- END src/Calendar/Calendar/Draft.purs
-
--- BEGIN src/Calendar/Calendar/Primary.purs
-primaryActionFor :: CalendarItem -> PrimaryAction
-primaryActionFor (ServerCalendarItem { content }) =
-  case content.actualDurationMinutes of
-    Just _ -> PrimaryNone
-    Nothing ->
-      if content.status /= Done then PrimaryValidate else PrimaryNone
-primaryActionFor _ = PrimaryNone
 
 -- END src/Calendar/Calendar/Primary.purs
 
@@ -1754,16 +1701,6 @@ calendarItemIdentity = case _ of
 
 -- END src/Calendar/Calendar/Timeline.purs
 
--- BEGIN src/Calendar/Calendar/Types.purs
-data PrimaryAction
-  = PrimaryValidate
-  | PrimaryNone
-
-derive instance eqPrimaryAction :: Eq PrimaryAction
-derive instance primaryActionGeneric :: Generic PrimaryAction _
-instance showPrimaryAction :: Show PrimaryAction where
-  show = genericShow
-
 -- END src/Calendar/Calendar/Types.purs
 
 -- BEGIN src/Calendar/Conflict.purs
@@ -1787,12 +1724,6 @@ data AgendaModal
 
 derive instance eqAgendaModal :: Eq AgendaModal
 
-type ValidationPanel =
-  { itemId :: String
-  , proposedMinutes :: Maybe Int
-  , inputValue :: String
-  }
-
 type OverlapSheet =
   { groupKey :: String
   , items :: Array CalendarItem
@@ -1807,7 +1738,6 @@ type ViewState =
   , activeModal :: Maybe AgendaModal
   , overlapSheet :: Maybe OverlapSheet
   , promotedOverlaps :: Array MobileOverlapPromotion
-  , validationPanel :: Maybe ValidationPanel
   , editPanel :: Maybe EditPanel
   , isMobile :: Boolean
   , dayFocusContext :: Maybe String
@@ -1824,7 +1754,6 @@ viewInitialState =
   , activeModal: Nothing
   , overlapSheet: Nothing
   , promotedOverlaps: []
-  , validationPanel: Nothing
   , editPanel: Nothing
   , isMobile: false
   , dayFocusContext: Nothing
@@ -1867,12 +1796,6 @@ _viewPromotedOverlaps =
   lens
     _.promotedOverlaps
     (_ { promotedOverlaps = _ })
-
-_viewValidationPanel :: Lens' ViewState (Maybe ValidationPanel)
-_viewValidationPanel =
-  lens
-    _.validationPanel
-    (_ { validationPanel = _ })
 
 _viewEditPanel :: Lens' ViewState (Maybe EditPanel)
 _viewEditPanel =
@@ -1917,11 +1840,7 @@ type EditPanel =
   }
 
 data ViewAction
-  = ViewOpenValidation String CalendarItemContent
-  | ViewValidationMinutesChanged String
-  | ViewConfirmValidation
-  | ViewCancelValidation
-  | ViewOpenDayDatePicker
+  = ViewOpenDayDatePicker
   | ViewChangedAction String
   | ViewFocusDateChanged String
   | ViewTimelineScrolled
@@ -1945,25 +1864,6 @@ data ViewAction
 
 handleViewAction :: ViewAction -> ErrorAgendaAppM Unit
 handleViewAction = case _ of
-  ViewOpenValidation itemId content -> do
-    suggested <- liftEffect $ suggestDurationMinutes content.windowStart
-    modify_ (_view <<< _viewValidationPanel .~ Just { itemId, proposedMinutes: suggested, inputValue: "" })
-  ViewValidationMinutesChanged raw ->
-    modify_ (_view <<< _viewValidationPanel %~ map (_ { inputValue = raw }))
-  ViewConfirmValidation -> do
-    st <- get
-    case st ^. (_view <<< _viewValidationPanel) of
-      Nothing -> pure unit
-      Just panel -> do
-        let duration = parsePositiveInt panel.inputValue <|> panel.proposedMinutes
-        case duration of
-          Nothing -> pure unit
-          Just minutes -> do
-            modify_ (_view <<< _viewValidationPanel .~ Nothing)
-            validateItem panel.itemId minutes
-            refreshItems
-  ViewCancelValidation ->
-    modify_ (_view <<< _viewValidationPanel .~ Nothing)
   ViewOpenDayDatePicker -> do
     ref <- lift $ H.getRef (wrap "day-view-date-input")
     case ref of
@@ -2244,25 +2144,6 @@ renderEditContent panel =
       , maybe (text "") (\msg -> div [ class_ "calendar-error" ] [ text msg ]) panel.validationError
       ]
 
-renderValidationPanel :: forall w. ValidationPanel -> HTML w ViewAction
-renderValidationPanel panel =
-  div [ class_ "calendar-validation-panel" ]
-    [ div [ class_ "calendar-validation-title" ] [ text "Valider la tâche" ]
-    , div [ class_ "calendar-validation-subtitle" ]
-        [ text "Saisissez la durée réelle (minutes) ou acceptez la proposition." ]
-    , maybe (text "") (\minutes -> div [ class_ "calendar-validation-proposal" ] [ text $ "Proposition: " <> show minutes <> " min" ]) panel.proposedMinutes
-    , input
-        [ class_ "form-control calendar-input"
-        , placeholder "Durée réelle (minutes)"
-        , onValueChange ViewValidationMinutesChanged
-        , value panel.inputValue
-        ]
-    , div [ class_ "calendar-validation-actions" ]
-        [ button [ class_ "btn btn-sm btn-success", onClick (const ViewConfirmValidation) ] [ text "Confirmer" ]
-        , button [ class_ "btn btn-sm btn-outline-secondary", onClick (const ViewCancelValidation) ] [ text "Annuler" ]
-        ]
-    ]
-
 statusValue :: ItemStatus -> String
 statusValue status =
   case status of
@@ -2525,9 +2406,10 @@ dragMinuteIndexFromElement ev el = do
   pure (computeMinuteIndexFromClientY clientY rect.top rect.height)
 
 touchMinuteIndexFromElement :: TouchEvent.TouchEvent -> Element -> Effect (Maybe Int)
-touchMinuteIndexFromElement ev el = do
-  rect <- getBoundingClientRect el
-  pure (touchClientYFromEvent ev >>= \clientY -> computeMinuteIndexFromClientY clientY rect.top rect.height)
+touchMinuteIndexFromElement ev el =
+  map
+    (\rect -> touchClientYFromEvent ev >>= \clientY -> computeMinuteIndexFromClientY clientY rect.top rect.height)
+    (getBoundingClientRect el)
 
 dragMinuteIndexFromEvent :: DragEvent -> Effect (Maybe Int)
 dragMinuteIndexFromEvent ev = do
@@ -2731,15 +2613,6 @@ durationMinutesBetweenRaw start end = do
   startDt <- parseDateTimeLocal start
   endDt <- parseDateTimeLocal end
   pure $ durationMinutesBetween startDt endDt
-
-durationMinutesBetweenDateTime :: DateTime -> DateTime -> Int
-durationMinutesBetweenDateTime start now =
-  durationMinutesBetween start now
-
-suggestDurationMinutes :: DateTime -> Effect (Maybe Int)
-suggestDurationMinutes start = do
-  now <- nowDateTime
-  pure $ Just (durationMinutesBetweenDateTime start now)
 
 formatDate :: DateTime -> String
 formatDate dt =

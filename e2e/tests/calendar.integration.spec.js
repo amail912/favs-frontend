@@ -79,7 +79,7 @@ async function dragCalendarItemToMinute(page, title, targetMinuteOfDay) {
   await source.dispatchEvent("dragend", { dataTransfer });
 }
 
-test("calendar integration: create task and show completion action", async ({ authenticatedPage: page }) => {
+test("calendar integration: create task in day view", async ({ authenticatedPage: page }) => {
   const now = new Date();
   const start = new Date(now.getTime() + 60 * 60 * 1000);
   const end = new Date(now.getTime() + 2 * 60 * 60 * 1000);
@@ -119,74 +119,7 @@ test("calendar integration: create task and show completion action", async ({ au
   }).first();
 
   await expect(row).toBeVisible();
-  await expect(row.getByRole("button", { name: "Valider" })).toBeVisible();
   await appTitle(page).click();
-});
-
-test("calendar integration: complete task from the validation panel", async ({ authenticatedPage: page }) => {
-  const focusDate = toLocalDateInput(new Date());
-  const start = new Date(`${focusDate}T10:00`);
-  const end = new Date(`${focusDate}T11:00`);
-  const title = `Task complete ${Date.now()}`;
-
-  await calendarTab(page).click();
-  await expect(page).toHaveURL(/\/calendar$/);
-
-  const modal = await openCreateModal(page);
-  await modal.getByPlaceholder("Titre").fill(title);
-  await modal.getByPlaceholder("Début").fill(toLocalDatetimeInput(start));
-  await modal.getByPlaceholder("Fin").fill(toLocalDatetimeInput(end));
-
-  const createResponsePromise = page.waitForResponse(
-    response =>
-      response.url().includes("/api/v1/calendar-items") &&
-      response.request().method() === "POST"
-  );
-  const listResponsePromise = page.waitForResponse(
-    response =>
-      response.url().includes("/api/v1/calendar-items") &&
-      response.request().method() === "GET"
-  );
-
-  await modal.getByRole("button", { name: "Valider" }).click();
-  const createResponse = await createResponsePromise;
-  expect(createResponse.ok()).toBeTruthy();
-
-  const listResponse = await listResponsePromise;
-  expect(listResponse.ok()).toBeTruthy();
-
-  const row = page.locator(".calendar-calendar-card", {
-    has: page.locator(".calendar-calendar-item-title", { hasText: title })
-  }).first();
-
-  await expect(row).toBeVisible();
-  await expect(row.getByRole("button", { name: "Valider" })).toBeVisible();
-
-  const validateResponsePromise = page.waitForResponse(
-    response =>
-      response.url().includes("/api/v1/calendar-items") &&
-      response.request().method() === "POST"
-  );
-  const refreshResponsePromise = page.waitForResponse(
-    response =>
-      response.url().includes("/api/v1/calendar-items") &&
-      response.request().method() === "GET"
-  );
-
-  await row.getByRole("button", { name: "Valider" }).click();
-
-  const validationPanel = page.locator(".calendar-validation-panel");
-  await expect(validationPanel.getByText("Valider la tâche")).toBeVisible();
-  await validationPanel.getByPlaceholder("Durée réelle (minutes)").fill("45");
-  await validationPanel.getByRole("button", { name: "Confirmer" }).click();
-
-  const validateResponse = await validateResponsePromise;
-  expect(validateResponse.ok()).toBeTruthy();
-
-  const refreshResponse = await refreshResponsePromise;
-  expect(refreshResponse.ok()).toBeTruthy();
-
-  await expect(row.getByRole("button", { name: "Valider" })).toHaveCount(0);
 });
 
 test("calendar integration: create item on a later day", async ({ authenticatedPage: page }) => {
@@ -751,8 +684,7 @@ test("calendar mobile: selecting a hidden overlap item promotes it until leaving
     has: page.locator(".calendar-calendar-stack-top .calendar-calendar-item-title", { hasText: thirdTitle })
   }).first();
   await expect(promotedStack).toBeVisible();
-  await expect(promotedStack.locator(".calendar-calendar-stack-top")).toHaveAttribute("draggable", "true");
-  await expect(promotedStack.getByRole("button", { name: "Valider" })).toBeVisible();
+  await expect(promotedStack.locator(".calendar-calendar-stack-top .calendar-calendar-item-title", { hasText: thirdTitle })).toBeVisible();
 
   await setCalendarViewDate(page, otherDate);
   await setCalendarViewDate(page, focusDate);
