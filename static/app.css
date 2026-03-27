@@ -533,6 +533,10 @@ a.nav-link:hover {
   box-shadow: 0 10px 18px rgba(20, 37, 68, 0.08);
 }
 
+[data-day-focus-item="true"] {
+  scroll-margin-top: 5rem;
+}
+
 .calendar-calendar-stack-top {
   position: absolute;
   top: calc(var(--card-start) * var(--calendar-minute-height));

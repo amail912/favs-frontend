@@ -87,7 +87,7 @@ import Web.HTML.Event.DragEvent (DragEvent, dataTransfer, toEvent)
 import Data.MediaType (MediaType(..))
 import Web.HTML.Event.DataTransfer (setData)
 import Web.HTML.HTMLElement as HTMLElement
-import Web.DOM.Element (Element, getBoundingClientRect, setScrollTop)
+import Web.DOM.Element (Element, getBoundingClientRect)
 import Web.TouchEvent.TouchEvent as TouchEvent
 import Web.TouchEvent.TouchList as TouchList
 import Web.TouchEvent.Touch as Touch
@@ -100,6 +100,8 @@ import Data.Argonaut.Encode (class EncodeJson, encodeJson, (:=), (~>))
 import Data.Int as Int
 
 -- foldl comes from Data.Array in this module
+
+foreign import scrollElementIntoView :: Element -> Effect Unit
 
 -- BEGIN src/Pages/Calendar.purs
 type NoOutput = Void
@@ -668,16 +670,10 @@ scheduleDayTimelineFocus = do
         stCurrent <- get
         let sameContext = stCurrent ^. (_view <<< _viewDayFocusContext) == Just contextKey
         when sameContext do
-          now <- liftEffect nowDateTime
-          let
-            itemsForDate = sortItems SortByTime (filter (isItemOnDate focusDate) (stCurrent ^. _calendarItems))
-            target = computeDayFocusTarget focusDate now itemsForDate
-            minuteOffset = focusMinuteForTarget now itemsForDate target
-            scrollTop = focusScrollTopForMinute (stCurrent ^. (_view <<< _viewIsMobile)) minuteOffset
-          timelineRef <- lift $ H.getRef (wrap "day-timeline-scroll")
-          case timelineRef of
+          focusItemRef <- lift $ H.getRef (wrap "day-focus-item")
+          case focusItemRef of
             Nothing -> pure unit
-            Just timeline -> do
+            Just focusItem -> do
               modify_
                 ( _view
                     %~
@@ -685,7 +681,7 @@ scheduleDayTimelineFocus = do
                           <<< (_viewDayFocusApplied .~ true)
                       )
                 )
-              liftEffect $ setScrollTop scrollTop timeline
+              liftEffect $ scrollElementIntoView focusItem
               liftAff $ delay (Milliseconds 50.0)
               stAfter <- get
               when (stAfter ^. (_view <<< _viewDayFocusContext) == Just contextKey) $
@@ -872,12 +868,13 @@ renderDayCalendar focusDate todayDate items isMobile promotedOverlaps draggingId
   let
     itemsForDate = filter (isItemOnDate focusDate) items
     sorted = sortItems SortByTime itemsForDate
+    focusTargetIdentity = map calendarItemIdentity (uncons sorted <#> _.head)
     dragPreview = renderDayDragPreview isMobile draggingId dragHoverIndex itemsForDate
     timelineItems =
       if isMobile then
-        map (renderMobileOverlapStack draggingId) (applyMobileOverlapPromotions promotedOverlaps (buildMobileOverlapStacks sorted))
+        map (renderMobileOverlapStack draggingId focusTargetIdentity) (applyMobileOverlapPromotions promotedOverlaps (buildMobileOverlapStacks sorted))
       else
-        map (renderTimelineItem isMobile draggingId) (buildTimelineLayout sorted)
+        map (renderTimelineItem isMobile draggingId focusTargetIdentity) (buildTimelineLayout sorted)
     dayLabel = DateTime.formatCalendarDayDateLabelWithReference focusDate todayDate
   in
     if null itemsForDate then emptyAgenda
@@ -976,15 +973,23 @@ renderTimelineItem
   :: forall w
    . Boolean
   -> Maybe String
+  -> Maybe String
   -> TimelineLayout
   -> HTML w Action
-renderTimelineItem isMobile draggingId layout =
+renderTimelineItem isMobile draggingId focusTargetIdentity layout =
   let
     draggingClass =
       case { draggingId, item: layout.item } of
         { draggingId: Just activeId, item: ServerCalendarItem { id } } | activeId == id ->
           " calendar-calendar-item--dragging"
         _ -> ""
+    focusTargetProps =
+      if focusTargetIdentity == Just (calendarItemIdentity layout.item) then
+        [ ref (wrap "day-focus-item")
+        , attr (AttrName "data-day-focus-item") "true"
+        ]
+      else
+        []
     inlineStyle =
       fold
         [ " --start:"
@@ -1007,7 +1012,7 @@ renderTimelineItem isMobile draggingId layout =
     div
       ( [ class_ "calendar-calendar-item"
         , style inlineStyle
-        ] <> editProps
+        ] <> focusTargetProps <> editProps
       )
       [ renderTimelineEditButton isMobile layout.item
       , div
@@ -1018,15 +1023,23 @@ renderTimelineItem isMobile draggingId layout =
 renderMobileOverlapStack
   :: forall w
    . Maybe String
+  -> Maybe String
   -> MobileOverlapStack
   -> HTML w Action
-renderMobileOverlapStack draggingId stack =
+renderMobileOverlapStack draggingId focusTargetIdentity stack =
   let
     draggingClass =
       case { draggingId, item: stack.topItem } of
         { draggingId: Just activeId, item: ServerCalendarItem { id } } | activeId == id ->
           " calendar-calendar-item--dragging"
         _ -> ""
+    focusTargetProps =
+      if any (\item -> focusTargetIdentity == Just (calendarItemIdentity item)) stack.items then
+        [ ref (wrap "day-focus-item")
+        , attr (AttrName "data-day-focus-item") "true"
+        ]
+      else
+        []
     inlineStyle =
       fold
         [ " --start:"
@@ -1055,9 +1068,9 @@ renderMobileOverlapStack draggingId stack =
       }
   in
     div
-      [ class_ "calendar-calendar-stack"
-      , style inlineStyle
-      ]
+      ([ class_ "calendar-calendar-stack"
+       , style inlineStyle
+       ] <> focusTargetProps)
       ( map (renderMobileOverlapShadow stack.hiddenCount stack.startMin) stack.hiddenCards
           <>
             [ div
@@ -2642,13 +2655,6 @@ focusMinuteForTarget now itemsForDate target =
           max 0 (minuteOfDay (calendarItemContent head).windowStart - 30)
     FocusTop ->
       0
-
-focusScrollTopForMinute :: Boolean -> Int -> Number
-focusScrollTopForMinute isMobile minuteOffset =
-  let
-    minuteHeight = if isMobile then 52.0 / 60.0 else 1.0
-  in
-    Int.toNumber minuteOffset * minuteHeight
 
 timeLabel :: DateTime -> String
 timeLabel raw =
