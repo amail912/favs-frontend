@@ -608,6 +608,90 @@ test("calendar mobile: overlap summary opens a bottom sheet in chronological ord
   await expect(page.locator(".app-bottom-sheet__dialog")).toHaveCount(0);
 });
 
+test("calendar mobile: selecting a hidden overlap item promotes it until leaving Day view", async ({ authenticatedPage: page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForFunction(() => window.innerWidth <= 768);
+  await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+  await page.reload();
+
+  const targetDate = isolatedFutureDate(930);
+  const focusDate = toLocalDateInput(targetDate);
+  const otherDate = toLocalDateInput(isolatedFutureDate(1230));
+  const firstTitle = `Mobile promote A ${Date.now()}`;
+  const secondTitle = `Mobile promote B ${Date.now()}`;
+  const thirdTitle = `Mobile promote C ${Date.now()}`;
+  const startHour = 6 + (Math.floor(Date.now() / 60000) % 12);
+  const hour = String(startHour).padStart(2, "0");
+  const nextHour = String(startHour + 1).padStart(2, "0");
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const createItems = [
+    { title: firstTitle, start: `${focusDate}T${hour}:00`, end: `${focusDate}T${hour}:45` },
+    { title: secondTitle, start: `${focusDate}T${hour}:10`, end: `${focusDate}T${nextHour}:00` },
+    { title: thirdTitle, start: `${focusDate}T${hour}:20`, end: `${focusDate}T${hour}:50` }
+  ];
+
+  for (const item of createItems) {
+    const modal = await openCreateModal(page);
+    await modal.getByPlaceholder("Titre").fill(item.title);
+    await modal.getByPlaceholder("Début").fill(item.start);
+    await modal.getByPlaceholder("Fin").fill(item.end);
+    const createResponsePromise = page.waitForResponse(
+      response =>
+        response.url().includes("/api/v1/calendar-items") &&
+        response.request().method() === "POST"
+    );
+    await modal.getByRole("button", { name: "Valider" }).click();
+    expect((await createResponsePromise).ok()).toBeTruthy();
+  }
+
+  const defaultStack = page.locator(".calendar-calendar-stack", {
+    has: page.locator(".calendar-calendar-item-title", { hasText: firstTitle })
+  }).first();
+  await expect(defaultStack).toBeVisible();
+
+  await defaultStack.getByRole("button", { name: /Afficher 2 elements superposes/ }).click();
+
+  let sheet = page.locator(".app-bottom-sheet__dialog");
+  await expect(sheet).toBeVisible();
+  await expect(sheet.locator(".calendar-overlap-sheet__item--active")).toContainText(firstTitle);
+  await expect(sheet.locator(".calendar-overlap-sheet__item--active")).toBeDisabled();
+
+  const promotedRow = sheet.locator(".calendar-overlap-sheet__item", { hasText: thirdTitle });
+  await expect(promotedRow).toBeEnabled();
+  await promotedRow.click();
+  await expect(page.locator(".app-bottom-sheet__dialog")).toHaveCount(0);
+
+  const promotedStack = page.locator(".calendar-calendar-stack", {
+    has: page.locator(".calendar-calendar-stack-top .calendar-calendar-item-title", { hasText: thirdTitle })
+  }).first();
+  await expect(promotedStack).toBeVisible();
+  await expect(promotedStack.locator(".calendar-calendar-stack-top")).toHaveAttribute("draggable", "true");
+  await expect(promotedStack.getByRole("button", { name: "Valider" })).toBeVisible();
+
+  await setCalendarViewDate(page, otherDate);
+  await setCalendarViewDate(page, focusDate);
+  await expect(promotedStack.locator(".calendar-calendar-stack-top .calendar-calendar-item-title", { hasText: thirdTitle })).toBeVisible();
+
+  await promotedStack.getByRole("button", { name: /Afficher 2 elements superposes/ }).click();
+  sheet = page.locator(".app-bottom-sheet__dialog");
+  await expect(sheet).toBeVisible();
+  await expect(sheet.locator(".calendar-overlap-sheet__item--active")).toContainText(thirdTitle);
+  await expect(sheet.locator(".calendar-overlap-sheet__item--active")).toBeDisabled();
+  await sheet.getByRole("button", { name: "Fermer" }).click();
+
+  await page.getByRole("button", { name: "Semaine" }).click();
+  await page.getByRole("button", { name: "Jour" }).click();
+
+  const resetStack = page.locator(".calendar-calendar-stack", {
+    has: page.locator(".calendar-calendar-stack-top .calendar-calendar-item-title", { hasText: firstTitle })
+  }).first();
+  await expect(resetStack).toBeVisible();
+});
+
 test("calendar mobile: localized date chip stays aligned with the Day header", async ({ authenticatedPage: page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
 
@@ -649,15 +733,20 @@ test("calendar mobile: localized date chip stays aligned with the Day header", a
 });
 
 test("calendar mobile: double tap does not open edit modal", async ({ authenticatedPage: page }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForFunction(() => window.innerWidth <= 768);
+  await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+  await page.reload();
 
-  const now = new Date();
-  const start = new Date(now.getTime() + 60 * 60 * 1000);
-  const end = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+  const targetDate = isolatedFutureDate(1530);
+  const focusDate = toLocalDateInput(targetDate);
+  const start = new Date(`${focusDate}T10:00`);
+  const end = new Date(`${focusDate}T11:00`);
   const title = `Mobile tap ${Date.now()}`;
 
   await calendarTab(page).click();
   await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
 
   const createModal = await openCreateModal(page);
   await createModal.getByPlaceholder("Titre").fill(title);
@@ -692,8 +781,8 @@ test("calendar mobile: double tap does not open edit modal", async ({ authentica
   await page.waitForTimeout(120);
   await page.touchscreen.tap(x, y);
 
-    await expect(page.getByText("Modifier l'item")).toHaveCount(0);
-  });
+  await expect(page.getByText("Modifier l'item")).toHaveCount(0);
+});
 });
 
 test("calendar mobile actions: secondary actions stay reachable across views", async ({ authenticatedPage: page }) => {
@@ -722,14 +811,19 @@ test("calendar mobile actions: secondary actions stay reachable across views", a
 
 test("calendar mobile: edit button is not rendered", async ({ authenticatedPage: page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForFunction(() => window.innerWidth <= 768);
+  await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+  await page.reload();
 
-  const now = new Date();
-  const start = new Date(now.getTime() + 60 * 60 * 1000);
-  const end = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+  const targetDate = isolatedFutureDate(1830);
+  const focusDate = toLocalDateInput(targetDate);
+  const start = new Date(`${focusDate}T10:00`);
+  const end = new Date(`${focusDate}T11:00`);
   const title = `Mobile edit ${Date.now()}`;
 
   await calendarTab(page).click();
   await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
 
   const createModal = await openCreateModal(page);
   await createModal.getByPlaceholder("Titre").fill(title);

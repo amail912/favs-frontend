@@ -16,6 +16,7 @@ import Pages.Calendar
   , PrimaryAction(..)
   , buildTimelineLayout
   , buildMobileOverlapStacks
+  , applyMobileOverlapPromotions
   , toTimelineBlock
   , EditError(..)
   , applyEditDraft
@@ -297,6 +298,61 @@ spec = do
           stack.startMin `shouldEqual` 540
           stack.duration `shouldEqual` 70
         _ -> fail "Expected exactly one mobile overlap stack"
+
+    it "promotes a selected hidden item to the top of its mobile stack" do
+      let
+        itemA = serverCalendarItem "stack-promote-a" (calendarContent Task "A" "2026-02-19T09:00" "2026-02-19T09:45")
+        itemB = serverCalendarItem "stack-promote-b" (calendarContent Task "B" "2026-02-19T09:10" "2026-02-19T10:00")
+        itemC = serverCalendarItem "stack-promote-c" (calendarContent Task "C" "2026-02-19T09:20" "2026-02-19T09:50")
+        stacks =
+          applyMobileOverlapPromotions
+            [ { groupKey: "server:stack-promote-a|server:stack-promote-b|server:stack-promote-c"
+              , itemIdentity: "server:stack-promote-c"
+              }
+            ]
+            (buildMobileOverlapStacks [ itemA, itemB, itemC ])
+      case stacks of
+        [ stack ] -> do
+          stack.topItem `shouldEqual` itemC
+          map _.item stack.hiddenCards `shouldEqual` [ itemA, itemB ]
+          map _.stackIndex stack.hiddenCards `shouldEqual` [ 1, 2 ]
+        _ -> fail "Expected exactly one promoted mobile overlap stack"
+
+    it "keeps promotions scoped to their overlap group" do
+      let
+        groupOneA = serverCalendarItem "stack-group-1a" (calendarContent Task "Group 1A" "2026-02-19T09:00" "2026-02-19T09:45")
+        groupOneB = serverCalendarItem "stack-group-1b" (calendarContent Task "Group 1B" "2026-02-19T09:10" "2026-02-19T10:00")
+        groupTwoA = serverCalendarItem "stack-group-2a" (calendarContent Task "Group 2A" "2026-02-19T11:00" "2026-02-19T11:45")
+        groupTwoB = serverCalendarItem "stack-group-2b" (calendarContent Task "Group 2B" "2026-02-19T11:10" "2026-02-19T12:00")
+        stacks =
+          applyMobileOverlapPromotions
+            [ { groupKey: "server:stack-group-1a|server:stack-group-1b"
+              , itemIdentity: "server:stack-group-1b"
+              }
+            ]
+            (buildMobileOverlapStacks [ groupOneA, groupOneB, groupTwoA, groupTwoB ])
+      case stacks of
+        [ first, second ] -> do
+          first.topItem `shouldEqual` groupOneB
+          second.topItem `shouldEqual` groupTwoA
+        _ -> fail "Expected exactly two mobile overlap stacks"
+
+    it "falls back to default ordering when the promoted identity is missing" do
+      let
+        itemA = serverCalendarItem "stack-fallback-a" (calendarContent Task "A" "2026-02-19T09:00" "2026-02-19T09:45")
+        itemB = serverCalendarItem "stack-fallback-b" (calendarContent Task "B" "2026-02-19T09:10" "2026-02-19T10:00")
+        stacks =
+          applyMobileOverlapPromotions
+            [ { groupKey: "server:stack-fallback-a|server:stack-fallback-b"
+              , itemIdentity: "server:missing"
+              }
+            ]
+            (buildMobileOverlapStacks [ itemA, itemB ])
+      case stacks of
+        [ stack ] -> do
+          stack.topItem `shouldEqual` itemA
+          map _.item stack.hiddenCards `shouldEqual` [ itemB ]
+        _ -> fail "Expected exactly one fallback mobile overlap stack"
 
   describe "Calendar time helpers" do
     it "durationMinutesBetween returns minutes between start and end" do

@@ -15,6 +15,7 @@ module Pages.Calendar
   , MobileOverlapStack
   , MobileHiddenCard
   , buildMobileOverlapStacks
+  , applyMobileOverlapPromotions
   , toTimelineBlock
   , EditError(..)
   , applyEditDraft
@@ -60,7 +61,7 @@ import Halogen (subscribe)
 import Halogen.HTML (HTML, button, div, h2, i, input, li, option, section, select, slot, span, text, ul)
 import Halogen.HTML.Core (AttrName(..))
 import Halogen.HTML.Events (onClick, onDragEnter, onDragOver, onDrop, onMouseDown, onValueChange, onKeyDown, onDragEnd, onDragStart, onScroll)
-import Halogen.HTML.Properties (attr, style, IProp, value, placeholder, type_, draggable, ref)
+import Halogen.HTML.Properties (attr, style, IProp, value, placeholder, type_, draggable, ref, disabled)
 import Halogen.Query.Event as HQE
 import Type.Proxy (Proxy(..))
 import Ui.Errors (FatalError, handleError, toFatalError)
@@ -189,13 +190,14 @@ renderAgendaView
   -> String
   -> Array CalendarItem
   -> Boolean
+  -> Array MobileOverlapPromotion
   -> Maybe String
   -> Maybe Int
   -> HTML w Action
-renderAgendaView viewMode focusDate todayDate items isMobile draggingId dragHoverIndex =
+renderAgendaView viewMode focusDate todayDate items isMobile promotedOverlaps draggingId dragHoverIndex =
   case viewMode of
     ViewDay ->
-      renderDayCalendar focusDate todayDate items isMobile draggingId dragHoverIndex
+      renderDayCalendar focusDate todayDate items isMobile promotedOverlaps draggingId dragHoverIndex
     ViewWeek ->
       renderRangeView "Semaine" (generateDateRange focusDate 7) items isMobile
     ViewMonth ->
@@ -644,7 +646,7 @@ render { calendar, sync, mouseDrag, view } =
     { updateError } = sync
     draggingId = mouseDrag.draggingId
     dragHoverIndex = mouseDrag.dragHoverIndex
-    { viewMode, focusDate, todayDate, validationPanel, isMobile } = view
+    { viewMode, focusDate, todayDate, validationPanel, isMobile, promotedOverlaps } = view
     agendaModalsInput = buildAgendaModalsInput { calendar, sync, mouseDrag, view }
     sortedItems = sortItems SortByTime items
   in
@@ -660,7 +662,7 @@ render { calendar, sync, mouseDrag, view } =
                 [ maybe (text "") renderUpdateError updateError
                 , maybe (text "") (map toAction <<< renderValidationPanel) validationPanel
                 , section [ class_ $ "calendar-list-panel" <> guard (viewMode == ViewDay) " calendar-list-panel--calendar" ]
-                    [ renderAgendaView viewMode focusDate todayDate sortedItems isMobile draggingId dragHoverIndex ]
+                    [ renderAgendaView viewMode focusDate todayDate sortedItems isMobile promotedOverlaps draggingId dragHoverIndex ]
                 ]
             , div [ class_ "calendar-side" ]
                 []
@@ -746,16 +748,17 @@ renderDayCalendar
   -> String
   -> Array CalendarItem
   -> Boolean
+  -> Array MobileOverlapPromotion
   -> Maybe String
   -> Maybe Int
   -> HTML w Action
-renderDayCalendar focusDate todayDate items isMobile draggingId dragHoverIndex =
+renderDayCalendar focusDate todayDate items isMobile promotedOverlaps draggingId dragHoverIndex =
   let
     itemsForDate = filter (isItemOnDate focusDate) items
     sorted = sortItems SortByTime itemsForDate
     timelineItems =
       if isMobile then
-        map (renderMobileOverlapStack draggingId) (buildMobileOverlapStacks sorted)
+        map (renderMobileOverlapStack draggingId) (applyMobileOverlapPromotions promotedOverlaps (buildMobileOverlapStacks sorted))
       else
         map (renderTimelineItem isMobile draggingId) (buildTimelineLayout sorted)
     dayLabel = DateTime.formatCalendarDayDateLabelWithReference focusDate todayDate
@@ -878,6 +881,7 @@ renderMobileOverlapStack draggingId stack =
     overlapSheet =
       { groupKey: stack.groupKey
       , items: stack.items
+      , topItem: stack.topItem
       , hiddenCount: stack.hiddenCount
       }
   in
@@ -954,19 +958,38 @@ renderOverlapSheetContent overlapSheet =
     [ div [ class_ "calendar-overlap-sheet__hint" ]
         [ text $ show (length overlapSheet.items) <> " elements sur ce creneau" ]
     , ul [ class_ "calendar-overlap-sheet__list" ]
-        (map renderOverlapSheetItem overlapSheet.items)
+        (map (renderOverlapSheetItem overlapSheet) overlapSheet.items)
     ]
 
-renderOverlapSheetItem :: forall w. CalendarItem -> HTML w Action
-renderOverlapSheetItem item =
+renderOverlapSheetItem :: forall w. OverlapSheet -> CalendarItem -> HTML w Action
+renderOverlapSheetItem overlapSheet item =
   let
     content = calendarItemContent item
+    isCurrentTop = calendarItemIdentity item == calendarItemIdentity overlapSheet.topItem
+    itemClasses =
+      "calendar-overlap-sheet__item"
+        <> guard isCurrentTop " calendar-overlap-sheet__item--active"
+    itemProps =
+      [ class_ itemClasses
+      , disabled isCurrentTop
+      ]
+        <>
+          if isCurrentTop then
+            []
+          else
+            [ onClick (const (ViewAction (ViewPromoteOverlapItem overlapSheet item))) ]
   in
-    li [ class_ "calendar-overlap-sheet__item" ]
-      [ div [ class_ "calendar-overlap-sheet__time" ]
-          [ text $ timeLabel content.windowStart <> " → " <> timeLabel content.windowEnd ]
-      , div [ class_ "calendar-overlap-sheet__title" ] [ text content.title ]
-      , renderCategory content.category
+    li []
+      [ button itemProps
+          [ div [ class_ "calendar-overlap-sheet__time" ]
+              [ text $ timeLabel content.windowStart <> " → " <> timeLabel content.windowEnd ]
+          , div [ class_ "calendar-overlap-sheet__title" ] [ text content.title ]
+          , renderCategory content.category
+          , if isCurrentTop then
+              div [ class_ "calendar-overlap-sheet__state" ] [ text "Visible" ]
+            else
+              text ""
+          ]
       ]
 
 renderTimelineEditButton :: forall w. Boolean -> CalendarItem -> HTML w Action
@@ -1367,6 +1390,11 @@ type MobileHiddenCard =
   , stackIndex :: Int
   }
 
+type MobileOverlapPromotion =
+  { groupKey :: String
+  , itemIdentity :: String
+  }
+
 buildTimelineLayout :: Array CalendarItem -> Array TimelineLayout
 buildTimelineLayout items =
   let
@@ -1387,6 +1415,22 @@ buildMobileOverlapStacks items =
   where
   compareStart a b = compare a.startMin b.startMin
 
+applyMobileOverlapPromotions :: Array MobileOverlapPromotion -> Array MobileOverlapStack -> Array MobileOverlapStack
+applyMobileOverlapPromotions promotions =
+  map (applyMobileOverlapPromotion promotions)
+
+applyMobileOverlapPromotion :: Array MobileOverlapPromotion -> MobileOverlapStack -> MobileOverlapStack
+applyMobileOverlapPromotion promotions stack =
+  case find (\promotion -> promotion.groupKey == stack.groupKey) promotions of
+    Nothing -> stack
+    Just promotion -> fromMaybe stack (promoteMobileOverlapStack promotion.itemIdentity stack)
+
+promoteMobileOverlapStack :: String -> MobileOverlapStack -> Maybe MobileOverlapStack
+promoteMobileOverlapStack promotedIdentity stack =
+  map (buildMobileOverlapStackFromBlocks sorted) (find (\block -> calendarItemIdentity block.item == promotedIdentity) sorted)
+  where
+  sorted = sortBy compareMobilePriority (mapMaybe toTimelineBlock stack.items)
+
 toMobileStack :: Array TimelineBlock -> Maybe MobileOverlapStack
 toMobileStack group =
   let
@@ -1394,33 +1438,37 @@ toMobileStack group =
   in
     case uncons sorted of
       Nothing -> Nothing
-      Just { head, tail } ->
-        let
-          items = map _.item sorted
-          groupStartMin = foldl (\acc block -> min acc block.startMin) head.startMin tail
-          groupEndMin = foldl (\acc block -> max acc block.endMin) head.endMin tail
-          hiddenCards =
-            mapWithIndex
-              ( \index block ->
-                  { item: block.item
-                  , startMin: block.startMin
-                  , duration: max 1 (block.endMin - block.startMin)
-                  , stackIndex: index + 1
-                  }
-              )
-              tail
-        in
-          Just
-            { groupKey: overlapGroupKey items
-            , items
-            , topItem: head.item
-            , topStartMin: head.startMin
-            , topDuration: max 1 (head.endMin - head.startMin)
-            , hiddenCards
-            , startMin: groupStartMin
-            , duration: max 1 (groupEndMin - groupStartMin)
-            , hiddenCount: length tail
+      Just { head } ->
+        Just (buildMobileOverlapStackFromBlocks sorted head)
+
+buildMobileOverlapStackFromBlocks :: Array TimelineBlock -> TimelineBlock -> MobileOverlapStack
+buildMobileOverlapStackFromBlocks sorted topBlock =
+  let
+    items = map _.item sorted
+    hiddenBlocks = filter (\block -> calendarItemIdentity block.item /= calendarItemIdentity topBlock.item) sorted
+    groupStartMin = foldl (\acc block -> min acc block.startMin) topBlock.startMin hiddenBlocks
+    groupEndMin = foldl (\acc block -> max acc block.endMin) topBlock.endMin hiddenBlocks
+    hiddenCards =
+      mapWithIndex
+        ( \index block ->
+            { item: block.item
+            , startMin: block.startMin
+            , duration: max 1 (block.endMin - block.startMin)
+            , stackIndex: index + 1
             }
+        )
+        hiddenBlocks
+  in
+    { groupKey: overlapGroupKey items
+    , items
+    , topItem: topBlock.item
+    , topStartMin: topBlock.startMin
+    , topDuration: max 1 (topBlock.endMin - topBlock.startMin)
+    , hiddenCards
+    , startMin: groupStartMin
+    , duration: max 1 (groupEndMin - groupStartMin)
+    , hiddenCount: length hiddenBlocks
+    }
 
 compareMobilePriority :: TimelineBlock -> TimelineBlock -> Ordering
 compareMobilePriority a b =
@@ -1432,6 +1480,10 @@ overlapGroupKey :: Array CalendarItem -> String
 overlapGroupKey items =
   StringCommon.joinWith "|"
     (map calendarItemIdentity items)
+
+upsertMobileOverlapPromotion :: MobileOverlapPromotion -> Array MobileOverlapPromotion -> Array MobileOverlapPromotion
+upsertMobileOverlapPromotion promotion promotions =
+  [ promotion ] <> filter (\entry -> entry.groupKey /= promotion.groupKey) promotions
 
 groupTimelineBlocks :: Array TimelineBlock -> Array (Array TimelineBlock)
 groupTimelineBlocks blocks =
@@ -1549,6 +1601,7 @@ type ValidationPanel =
 type OverlapSheet =
   { groupKey :: String
   , items :: Array CalendarItem
+  , topItem :: CalendarItem
   , hiddenCount :: Int
   }
 
@@ -1558,6 +1611,7 @@ type ViewState =
   , todayDate :: String
   , activeModal :: Maybe AgendaModal
   , overlapSheet :: Maybe OverlapSheet
+  , promotedOverlaps :: Array MobileOverlapPromotion
   , validationPanel :: Maybe ValidationPanel
   , editPanel :: Maybe EditPanel
   , isMobile :: Boolean
@@ -1574,6 +1628,7 @@ viewInitialState =
   , todayDate: ""
   , activeModal: Nothing
   , overlapSheet: Nothing
+  , promotedOverlaps: []
   , validationPanel: Nothing
   , editPanel: Nothing
   , isMobile: false
@@ -1611,6 +1666,12 @@ _viewOverlapSheet =
   lens
     _.overlapSheet
     (_ { overlapSheet = _ })
+
+_viewPromotedOverlaps :: Lens' ViewState (Array MobileOverlapPromotion)
+_viewPromotedOverlaps =
+  lens
+    _.promotedOverlaps
+    (_ { promotedOverlaps = _ })
 
 _viewValidationPanel :: Lens' ViewState (Maybe ValidationPanel)
 _viewValidationPanel =
@@ -1671,6 +1732,7 @@ data ViewAction
   | ViewTimelineScrolled
   | ViewOpenModal AgendaModal
   | ViewOpenOverlapSheet OverlapSheet
+  | ViewPromoteOverlapItem OverlapSheet CalendarItem
   | ViewCloseModal
   | ViewOpenCreate
   | ViewCloseCreate
@@ -1713,16 +1775,25 @@ handleViewAction = case _ of
       Nothing -> pure unit
       Just elem -> liftEffect $ void (openDateInputPicker elem)
   ViewChangedAction raw ->
-    modify_
-      ( _view
-          %~
-            ( (_viewMode .~ parseAgendaView raw)
-                <<< (_viewDayFocusContext .~ Nothing)
-                <<< (_viewDayFocusApplied .~ false)
-                <<< (_viewDayFocusUserScrolled .~ false)
-                <<< (_viewDayFocusIgnoreScroll .~ false)
-            )
-      )
+    let
+      nextView = parseAgendaView raw
+      resetPromotions =
+        if nextView == ViewDay then
+          identity
+        else
+          (_viewPromotedOverlaps .~ [])
+    in
+      modify_
+        ( _view
+            %~
+              ( (_viewMode .~ nextView)
+                  <<< resetPromotions
+                  <<< (_viewDayFocusContext .~ Nothing)
+                  <<< (_viewDayFocusApplied .~ false)
+                  <<< (_viewDayFocusUserScrolled .~ false)
+                  <<< (_viewDayFocusIgnoreScroll .~ false)
+              )
+        )
   ViewFocusDateChanged raw ->
     modify_
       ( _view
@@ -1748,6 +1819,15 @@ handleViewAction = case _ of
           %~
             ( (_viewOverlapSheet .~ Just overlapSheet)
                 <<< (_viewActiveModal .~ Just ModalOverlapGroup)
+            )
+      )
+  ViewPromoteOverlapItem overlapSheet item ->
+    modify_
+      ( _view
+          %~
+            ( (_viewPromotedOverlaps %~ upsertMobileOverlapPromotion { groupKey: overlapSheet.groupKey, itemIdentity: calendarItemIdentity item })
+                <<< (_viewActiveModal .~ Nothing)
+                <<< (_viewOverlapSheet .~ Nothing)
             )
       )
   ViewCloseModal ->

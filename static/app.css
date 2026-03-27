@@ -573,12 +573,27 @@ a.nav-link:hover {
 }
 
 .calendar-overlap-sheet__item {
+  appearance: none;
   border: 1px solid var(--app-border);
   border-radius: 14px;
   padding: 0.75rem 0.85rem;
   background: rgba(255, 255, 255, 0.96);
+  color: inherit;
   display: grid;
+  font: inherit;
   gap: 0.35rem;
+  width: 100%;
+  text-align: left;
+}
+
+.calendar-overlap-sheet__item--active {
+  border-color: rgba(29, 82, 179, 0.35);
+  background: rgba(223, 234, 252, 0.96);
+}
+
+.calendar-overlap-sheet__item:disabled {
+  opacity: 1;
+  cursor: default;
 }
 
 .calendar-overlap-sheet__time {
@@ -588,6 +603,12 @@ a.nav-link:hover {
 }
 
 .calendar-overlap-sheet__title {
+  font-weight: 700;
+}
+
+.calendar-overlap-sheet__state {
+  color: #1d52b3;
+  font-size: 0.78rem;
   font-weight: 700;
 }
 
