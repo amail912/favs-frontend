@@ -569,13 +569,13 @@ handleDragAction { log, dragAction } = do
                     refreshItems
                     modify_ (_mouseDrag %~ resetDragState)
     TouchDrop ev -> do
-      liftEffect $ preventDefault (TouchEvent.toEvent ev)
       st <- get
       let items = st ^. _calendarItems
       case st ^. (_mouseDrag <<< _draggingId) of
         Nothing ->
           modify_ (_mouseDrag %~ clearTouchPendingState)
         Just draggingId -> do
+          liftEffect $ preventDefault (TouchEvent.toEvent ev)
           gridRef <- lift $ H.getRef (wrap "day-calendar-grid")
           fallbackIndex <-
             case gridRef of

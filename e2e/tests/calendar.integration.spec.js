@@ -79,6 +79,64 @@ async function dragCalendarItemToMinute(page, title, targetMinuteOfDay) {
   await source.dispatchEvent("dragend", { dataTransfer });
 }
 
+async function dispatchTouch(locator, type, x, y) {
+  await locator.evaluate((element, payload) => {
+    const touch = new Touch({
+      identifier: 1,
+      target: element,
+      clientX: payload.x,
+      clientY: payload.y,
+      pageX: payload.x,
+      pageY: payload.y,
+      screenX: payload.x,
+      screenY: payload.y
+    });
+    const activeTouches = payload.type === "touchend" || payload.type === "touchcancel" ? [] : [touch];
+    element.dispatchEvent(new TouchEvent(payload.type, {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      touches: activeTouches,
+      targetTouches: activeTouches,
+      changedTouches: [touch]
+    }));
+  }, { type, x, y });
+}
+
+async function longPressDragCalendarItemToMinute(page, title, targetMinuteOfDay) {
+  const sourceCard = page.locator(".calendar-calendar-card", {
+    has: page.locator(".calendar-calendar-item-title", { hasText: title })
+  }).first();
+  const touchSurface = sourceCard.locator(".calendar-calendar-content").first();
+  const grid = page.locator(".calendar-calendar-items");
+
+  await expect(sourceCard).toBeVisible();
+  await expect(touchSurface).toBeVisible();
+  await expect(grid).toBeVisible();
+
+  const [sourceBox, gridBox] = await Promise.all([
+    touchSurface.boundingBox(),
+    grid.boundingBox()
+  ]);
+
+  if (!sourceBox || !gridBox) {
+    throw new Error("Missing mobile drag bounding boxes");
+  }
+
+  const sourceX = sourceBox.x + sourceBox.width / 2;
+  const sourceY = sourceBox.y + Math.min(2, sourceBox.height / 4);
+  const targetY = gridBox.y + (gridBox.height * targetMinuteOfDay) / 1440 + 1;
+
+  await dispatchTouch(touchSurface, "touchstart", sourceX, sourceY);
+  await page.waitForTimeout(500);
+  await expect(page.locator(".calendar-calendar-drag-preview")).toBeVisible();
+
+  await dispatchTouch(grid, "touchmove", sourceX, targetY);
+
+  await dispatchTouch(grid, "touchend", sourceX, targetY);
+  await expect(page.locator(".calendar-calendar-drag-preview")).toHaveCount(0);
+}
+
 test("calendar integration: create task in day view", async ({ authenticatedPage: page }) => {
   const now = new Date();
   const start = new Date(now.getTime() + 60 * 60 * 1000);
@@ -621,6 +679,86 @@ test("calendar mobile: overlap summary opens a bottom sheet in chronological ord
 
   await sheet.getByRole("button", { name: "Fermer" }).click();
   await expect(page.locator(".app-bottom-sheet__dialog")).toHaveCount(0);
+});
+
+test("calendar mobile: overlap summary tap and long-press drag both work", async ({ authenticatedPage: page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForFunction(() => window.innerWidth <= 768);
+  await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+  await page.reload();
+
+  const targetDate = isolatedFutureDate(780);
+  const focusDate = toLocalDateInput(targetDate);
+  const firstTitle = `Mobile tap drag A ${Date.now()}`;
+  const secondTitle = `Mobile tap drag B ${Date.now()}`;
+  const thirdTitle = `Mobile tap drag C ${Date.now()}`;
+  const dragTitle = `Mobile tap drag item ${Date.now()}`;
+  const startHour = 6 + (Math.floor(Date.now() / 60000) % 12);
+  const hour = String(startHour).padStart(2, "0");
+  const nextHour = String(startHour + 1).padStart(2, "0");
+  const dragHour = String(startHour + 3).padStart(2, "0");
+  const dragNextHour = String(startHour + 4).padStart(2, "0");
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const createItems = [
+    { title: firstTitle, start: `${focusDate}T${hour}:00`, end: `${focusDate}T${hour}:45` },
+    { title: secondTitle, start: `${focusDate}T${hour}:10`, end: `${focusDate}T${nextHour}:00` },
+    { title: thirdTitle, start: `${focusDate}T${hour}:20`, end: `${focusDate}T${hour}:50` },
+    { title: dragTitle, start: `${focusDate}T${dragHour}:00`, end: `${focusDate}T${dragNextHour}:00` }
+  ];
+
+  for (const item of createItems) {
+    const modal = await openCreateModal(page);
+    await modal.getByPlaceholder("Titre").fill(item.title);
+    await modal.getByPlaceholder("Début").fill(item.start);
+    await modal.getByPlaceholder("Fin").fill(item.end);
+    const createResponsePromise = page.waitForResponse(
+      response =>
+        response.url().includes("/api/v1/calendar-items") &&
+        response.request().method() === "POST"
+    );
+    await modal.getByRole("button", { name: "Valider" }).click();
+    expect((await createResponsePromise).ok()).toBeTruthy();
+  }
+
+  const stack = page.locator(".calendar-calendar-stack", {
+    has: page.locator(".calendar-calendar-item-title", { hasText: firstTitle })
+  }).first();
+  await expect(stack).toBeVisible();
+
+  const summaryButton = stack.getByRole("button", { name: /Afficher 2 elements superposes/ });
+  await expect(summaryButton).toBeVisible();
+  await summaryButton.click();
+
+  const sheet = page.locator(".app-bottom-sheet__dialog");
+  await expect(sheet).toBeVisible();
+  await sheet.getByRole("button", { name: "Fermer" }).click();
+  await expect(page.locator(".app-bottom-sheet__dialog")).toHaveCount(0);
+
+  const updateResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items") &&
+      response.request().method() === "POST"
+  );
+  const refreshResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items") &&
+      response.request().method() === "GET"
+  );
+
+  await longPressDragCalendarItemToMinute(page, dragTitle, (startHour + 5) * 60 + 30);
+
+  expect((await updateResponsePromise).ok()).toBeTruthy();
+  expect((await refreshResponsePromise).ok()).toBeTruthy();
+
+  const draggedRow = page.locator(".calendar-calendar-card", {
+    has: page.locator(".calendar-calendar-item-title", { hasText: dragTitle })
+  }).first();
+  await expect(draggedRow).toBeVisible();
+  await expect(draggedRow.locator(".calendar-calendar-item-time")).toHaveText(`${String(startHour + 5).padStart(2, "0")}:30 → ${String(startHour + 6).padStart(2, "0")}:30`);
 });
 
 test("calendar mobile: selecting a hidden overlap item promotes it until leaving Day view", async ({ authenticatedPage: page }) => {
