@@ -55,6 +55,30 @@ async function setCalendarViewDate(page, value) {
   }, value);
 }
 
+async function dragCalendarItemToMinute(page, title, targetMinuteOfDay) {
+  const source = page.locator(".calendar-calendar-card", {
+    has: page.locator(".calendar-calendar-item-title", { hasText: title })
+  }).first();
+  const grid = page.locator(".calendar-calendar-items");
+
+  await expect(source).toBeVisible();
+  await expect(grid).toBeVisible();
+
+  const box = await grid.boundingBox();
+  if (!box) {
+    throw new Error("Missing day grid bounding box");
+  }
+
+  const targetY = box.y + (box.height * targetMinuteOfDay) / 1440 + 1;
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
+
+  await source.dispatchEvent("dragstart", { dataTransfer });
+  await grid.dispatchEvent("dragenter", { dataTransfer, clientY: targetY });
+  await grid.dispatchEvent("dragover", { dataTransfer, clientY: targetY });
+  await grid.dispatchEvent("drop", { dataTransfer, clientY: targetY });
+  await source.dispatchEvent("dragend", { dataTransfer });
+}
+
 test("calendar integration: create task and show completion action", async ({ authenticatedPage: page }) => {
   const now = new Date();
   const start = new Date(now.getTime() + 60 * 60 * 1000);
@@ -213,6 +237,64 @@ test("calendar integration: create item on a later day", async ({ authenticatedP
 
   await expect(row).toBeVisible();
   await expect.poll(() => dayTimelineScrollTop(page)).toBeGreaterThan(0);
+});
+
+test("calendar desktop: drag and drop keeps the focused date and dropped time", async ({ authenticatedPage: page }) => {
+  const targetDate = isolatedFutureDate(2130);
+  const focusDate = toLocalDateInput(targetDate);
+  const todayDate = toLocalDateInput(new Date());
+  const title = `Drag desktop ${Date.now()}`;
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const createModal = await openCreateModal(page);
+  await createModal.getByPlaceholder("Titre").fill(title);
+  await createModal.getByPlaceholder("Début").fill(`${focusDate}T09:00`);
+  await createModal.getByPlaceholder("Fin").fill(`${focusDate}T10:00`);
+
+  const createResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items") &&
+      response.request().method() === "POST"
+  );
+
+  await createModal.getByRole("button", { name: "Valider" }).click();
+  expect((await createResponsePromise).ok()).toBeTruthy();
+
+  const updateResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items") &&
+      response.request().method() === "POST"
+  );
+  const refreshResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items") &&
+      response.request().method() === "GET"
+  );
+
+  await dragCalendarItemToMinute(page, title, 14 * 60 + 30);
+
+  expect((await updateResponsePromise).ok()).toBeTruthy();
+  expect((await refreshResponsePromise).ok()).toBeTruthy();
+
+  const row = page.locator(".calendar-calendar-card", {
+    has: page.locator(".calendar-calendar-item-title", { hasText: title })
+  }).first();
+  await expect(row).toBeVisible();
+  await expect(row.locator(".calendar-calendar-item-time")).toHaveText("14:30 → 15:30");
+
+  await page.getByRole("button", { name: "Semaine" }).click();
+  await page.getByRole("button", { name: "Jour" }).click();
+  await setCalendarViewDate(page, focusDate);
+  await expect(row).toBeVisible();
+  await expect(row.locator(".calendar-calendar-item-time")).toHaveText("14:30 → 15:30");
+
+  await setCalendarViewDate(page, todayDate);
+  await expect(page.locator(".calendar-calendar-card", {
+    has: page.locator(".calendar-calendar-item-title", { hasText: title })
+  })).toHaveCount(0);
 });
 
 test("calendar: create modal resets on cancel", async ({ authenticatedPage: page }) => {

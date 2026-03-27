@@ -486,6 +486,17 @@ a.nav-link:hover {
   min-height: 36px;
 }
 
+.calendar-calendar-drag-preview {
+  position: absolute;
+  top: calc(var(--start) * var(--calendar-minute-height));
+  height: calc(var(--duration) * var(--calendar-minute-height));
+  left: 0;
+  right: 0;
+  min-height: 36px;
+  z-index: 4;
+  pointer-events: none;
+}
+
 .calendar-calendar-stack {
   position: absolute;
   top: calc(var(--start) * var(--calendar-minute-height));
@@ -510,6 +521,12 @@ a.nav-link:hover {
   align-content: start;
   overflow: hidden;
   position: relative;
+}
+
+.calendar-calendar-card--drag-preview {
+  opacity: 0.4;
+  border-style: dashed;
+  box-shadow: 0 10px 18px rgba(20, 37, 68, 0.08);
 }
 
 .calendar-calendar-stack-top {
