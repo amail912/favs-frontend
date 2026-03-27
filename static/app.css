@@ -267,6 +267,12 @@ a.nav-link:hover {
   gap: 1rem;
 }
 
+.calendar-layout--calendar > .calendar-main {
+  width: 100%;
+  min-width: 0;
+  justify-self: stretch;
+}
+
 .calendar-mobile-tools {
   display: none;
   gap: 0.5rem;
@@ -1463,6 +1469,10 @@ a.nav-link:hover {
   .calendar-layout,
   .calendar-main {
     justify-items: center;
+  }
+
+  .calendar-layout--calendar > .calendar-main {
+    justify-items: stretch;
   }
 
   .calendar-list-panel,

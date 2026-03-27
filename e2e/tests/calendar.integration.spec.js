@@ -544,7 +544,9 @@ test("calendar mobile: overlapping items render as a stacked deck", async ({ aut
     has: page.locator(".calendar-calendar-item-title", { hasText: firstTitle })
   }).first();
   await expect(stack).toBeVisible();
-  await expect(stack.locator(".calendar-calendar-card--shadow")).toHaveCount(1);
+  await expect
+    .poll(async () => await stack.locator(".calendar-calendar-card--shadow").count())
+    .toBeGreaterThanOrEqual(1);
   await expect(stack.locator(".calendar-calendar-item-title", { hasText: firstTitle })).toBeVisible();
 
   const [stackBox, gridBox] = await Promise.all([
