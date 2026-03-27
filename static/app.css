@@ -385,10 +385,8 @@ a.nav-link:hover {
   display: grid;
   grid-template-columns: 64px minmax(0, 1fr);
   gap: 0.6rem;
-  max-height: 70vh;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  max-height: none;
+  overflow: visible;
   padding-right: 0;
 }
 
@@ -1394,9 +1392,8 @@ a.nav-link:hover {
   }
 
   .calendar-calendar-body {
-    max-height: 70vh !important;
-    overflow-x: hidden !important;
-    overflow-y: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
   }
 
   .nav.nav-tabs {
@@ -1482,10 +1479,14 @@ a.nav-link:hover {
   }
 
   .calendar-list-panel,
-  .calendar-calendar,
   .calendar-calendar-form-header .calendar-form {
     max-width: 100%;
     overflow-x: hidden;
+  }
+
+  .calendar-calendar {
+    max-width: 100%;
+    overflow: visible;
   }
 
   .calendar-calendar-form-header .calendar-input,
