@@ -17,9 +17,8 @@ Let users share trip information in a controlled way so each person can understa
 ## Stories
 
 ### To Refine
-- [001 Predefined Places Catalog](to-refine/001-predefined-places-catalog.md) - Expose the fixed list of allowed trip places.
-- [002 Trip Calendar Item](to-refine/002-trip-calendar-item.md) - Model trips as first-class calendar items.
-- [003 Trip Validation And Editing](to-refine/003-trip-validation-and-editing.md) - Keep trip creation and updates valid and understandable.
+- [002 Trip Calendar Item](to-refine/002-trip-calendar-item.md) - Model trips as first-class calendar items with coherent place fields in the frontend.
+- [003 Trip Validation And Editing](to-refine/003-trip-validation-and-editing.md) - Keep trip creation and updates valid with constrained place choices and clear feedback.
 - [004 Share Trip Users](to-refine/004-share-trip-users.md) - Let users manage who may see their trips.
 - [005 Subscribe To Trip Users](to-refine/005-subscribe-to-trip-users.md) - Let users manage whose trips they want to follow.
 - [006 Period Trips Query](to-refine/006-period-trips-query.md) - Return the ordered trips needed for frontend presence derivation.
@@ -29,6 +28,9 @@ Let users share trip information in a controlled way so each person can understa
 - [010 Cue Personalization](to-refine/010-cue-personalization.md) - Let the calendar owner customize cue colors per person and place.
 - [011 Unknown Location States](to-refine/011-unknown-location-states.md) - Make missing or not-yet-derivable location states explicit.
 - [012 Shared Users Readability](to-refine/012-shared-users-readability.md) - Keep the Day view understandable with a small set of simultaneous users.
+
+### Canceled
+- [001 Predefined Places Catalog](canceled/001-predefined-places-catalog.md) - Absorbed into the trip item and trip validation stories instead of remaining a standalone frontend outcome.
 
 ### Postponed
 - [013 Week View Presence Cues](postponed/013-week-view-presence-cues.md) - Track Week view presence as a later extension.
