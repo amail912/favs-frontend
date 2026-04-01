@@ -8,21 +8,26 @@ import Pages.Calendar
   ( CalendarItem(..)
   , CalendarItemContent(..)
   , TaskDraft
+  , TripDraft
   , ItemStatus(..)
   , ItemType(..)
   , SortMode(..)
   , ValidationError(..)
+  , TripValidationError(..)
   , toNewTask
+  , toNewTrip
   , buildTimelineLayout
   , buildMobileOverlapStacks
   , applyMobileOverlapPromotions
   , toTimelineBlock
+  , EditDraft(..)
   , EditError(..)
   , applyEditDraft
   , buildEditDraft
   , durationMinutesBetween
   , sortItems
   , validateTask
+  , validateTrip
   , calendarItemPrimaryText
   , calendarItemSecondaryText
   , calendarItemCardClass
@@ -98,7 +103,7 @@ spec = do
       calendarItemSecondaryText trip `shouldEqual` "Départ 08:30 · Arrivée 09:45"
       calendarItemCardClass trip `shouldEqual` "row list-group-item entity-card calendar-card calendar-card--trip"
       calendarItemTimelineCardClass trip `shouldEqual` "calendar-calendar-card calendar-calendar-item--trip"
-      calendarItemSupportsEdit trip `shouldEqual` false
+      calendarItemSupportsEdit trip `shouldEqual` true
 
   describe "Calendar validation" do
     it "fails validation when title is blank" do
@@ -161,6 +166,44 @@ spec = do
           }
       validateTask draft `shouldEqual` Right draft
 
+    it "fails trip validation when departure is missing" do
+      let
+        draft :: TripDraft
+        draft =
+          { departurePlaceId: ""
+          , arrivalPlaceId: "Paris"
+          , windowStart: "2026-02-19T09:00"
+          , windowEnd: "2026-02-19T10:00"
+          }
+      validateTrip draft `shouldEqual` Left TripDeparturePlaceMissing
+
+    it "fails trip validation when places match" do
+      let
+        draft :: TripDraft
+        draft =
+          { departurePlaceId: "Paris"
+          , arrivalPlaceId: "Paris"
+          , windowStart: "2026-02-19T09:00"
+          , windowEnd: "2026-02-19T10:00"
+          }
+      validateTrip draft `shouldEqual` Left TripPlacesMustDiffer
+
+    it "encodes and decodes a trip created from a draft" do
+      let
+        draft :: TripDraft
+        draft =
+          { departurePlaceId: "Paris"
+          , arrivalPlaceId: "Lyon"
+          , windowStart: "2026-02-19T09:00"
+          , windowEnd: "2026-02-19T11:00"
+          }
+      case toNewTrip draft of
+        Left err -> fail $ "Trip creation failed: " <> err
+        Right newItem ->
+          case decodeJson (encodeJson newItem) of
+            Right decoded -> decoded `shouldEqual` newItem
+            Left err -> fail $ "Decoding encoded trip draft failed: " <> show err
+
   describe "Calendar edit" do
     it "applyEditDraft updates title, actualDurationMinutes, and recurrence fields" do
       let
@@ -179,13 +222,16 @@ spec = do
         item = serverCalendarItem "edit-1" content
       case buildEditDraft item of
         Nothing -> fail "Expected edit draft"
-        Just draft -> do
+        Just (EditTaskDraft draft) -> do
           draft.actualDurationMinutes `shouldEqual` "25"
           let
-            updatedDraft = draft
-              { title = "Mise a jour"
-              , actualDurationMinutes = "40"
-              }
+            updatedDraft =
+              EditTaskDraft
+                ( draft
+                    { title = "Mise a jour"
+                    , actualDurationMinutes = "40"
+                    }
+                )
           case applyEditDraft updatedDraft item of
             Left err -> fail $ "Edit failed: " <> show err
             Right (ServerCalendarItem { content: TaskCalendarItemContent updated }) -> do
@@ -194,6 +240,7 @@ spec = do
               updated.recurrenceRule `shouldEqual` Just Weekly
               updated.recurrenceExceptionDates `shouldEqual` [ unsafeDate "2026-02-26" ]
             Right _ -> fail "Expected server item"
+        Just _ -> fail "Expected task edit draft"
 
     it "applyEditDraft rejects non-positive actual duration" do
       let
@@ -202,13 +249,39 @@ spec = do
       case buildEditDraft item of
         Nothing -> fail "Expected edit draft"
         Just draft -> do
-          let updatedDraft = draft { actualDurationMinutes = "0" }
+          let
+            updatedDraft = case draft of
+              EditTaskDraft taskDraft -> EditTaskDraft (taskDraft { actualDurationMinutes = "0" })
+              _ -> draft
           applyEditDraft updatedDraft item `shouldEqual` Left (EditDuration "Durée réelle invalide.")
 
-    it "buildEditDraft does not expose trip items to the task editor" do
+    it "buildEditDraft exposes trip items to the trip editor and applyEditDraft updates route and hours" do
       let
         trip = serverCalendarItem "trip-edit" (tripCalendarContent "Paris" "St Clair" "2026-02-19T09:00" "2026-02-19T10:30")
-      buildEditDraft trip `shouldEqual` Nothing
+      case buildEditDraft trip of
+        Nothing -> fail "Expected trip edit draft"
+        Just (EditTripDraft draft) -> do
+          draft.departurePlaceId `shouldEqual` "Paris"
+          draft.arrivalPlaceId `shouldEqual` "St Clair"
+          let
+            updatedDraft =
+              EditTripDraft
+                ( draft
+                    { departurePlaceId = "Lyon"
+                    , arrivalPlaceId = "Nice"
+                    , windowStart = "2026-02-19T11:00"
+                    , windowEnd = "2026-02-19T13:00"
+                    }
+                )
+          case applyEditDraft updatedDraft trip of
+            Left err -> fail $ "Trip edit failed: " <> show err
+            Right (ServerCalendarItem { content: TripCalendarItemContent updated }) -> do
+              updated.departurePlaceId `shouldEqual` "Lyon"
+              updated.arrivalPlaceId `shouldEqual` "Nice"
+              updated.windowStart `shouldEqual` unsafeDateTime "2026-02-19T11:00"
+              updated.windowEnd `shouldEqual` unsafeDateTime "2026-02-19T13:00"
+            Right _ -> fail "Expected updated trip item"
+        Just _ -> fail "Expected trip edit draft"
 
   describe "Calendar timeline layout" do
     it "clamps end time when it is before the start" do

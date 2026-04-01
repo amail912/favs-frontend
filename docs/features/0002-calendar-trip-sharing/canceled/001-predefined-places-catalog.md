@@ -5,4 +5,4 @@ Predefined places do not represent a standalone frontend user outcome in this ba
 
 ## Where The Scope Went
 - [Trip Calendar Item](../done/002-trip-calendar-item.md) now covers frontend handling and rendering of trip place fields.
-- [Trip Validation And Editing](../to-refine/003-trip-validation-and-editing.md) now covers constrained place selection and validation feedback in create or edit flows.
+- [Trip Validation And Editing](../done/003-trip-validation-and-editing.md) now covers constrained place selection and validation feedback in create or edit flows.

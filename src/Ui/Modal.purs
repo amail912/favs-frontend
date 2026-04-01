@@ -1,5 +1,6 @@
 module Ui.Modal
   ( renderModal
+  , renderModalWithValidateState
   , renderBottomSheet
   ) where
 
@@ -8,7 +9,7 @@ import Prelude hiding (div)
 import Data.Maybe (Maybe(..))
 import Halogen.HTML (HTML, button, div, input, text)
 import Halogen.HTML.Events (handler', onClick)
-import Halogen.HTML.Properties (IProp, autofocus, ref, type_)
+import Halogen.HTML.Properties (IProp, autofocus, disabled, ref, type_)
 import Ui.Utils (class_)
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Web.UIEvent.KeyboardEvent as KE
@@ -23,6 +24,16 @@ renderModal
   -> i
   -> HTML w i
 renderModal title content onCancel onValidate =
+  renderSurface "app-modal__dialog" title content onCancel (Just { action: onValidate, disabled: false })
+
+renderModalWithValidateState
+  :: forall w i
+   . String
+  -> Array (HTML w i)
+  -> i
+  -> { action :: i, disabled :: Boolean }
+  -> HTML w i
+renderModalWithValidateState title content onCancel onValidate =
   renderSurface "app-modal__dialog" title content onCancel (Just onValidate)
 
 renderBottomSheet
@@ -40,7 +51,7 @@ renderSurface
   -> String
   -> Array (HTML w i)
   -> i
-  -> Maybe i
+  -> Maybe { action :: i, disabled :: Boolean }
   -> HTML w i
 renderSurface dialogClass title content onCancel onValidate =
   div
@@ -79,7 +90,8 @@ renderSurface dialogClass title content onCancel onValidate =
                     [ text "Annuler" ]
                 , button
                     [ class_ "btn btn-sm btn-primary app-modal__validate"
-                    , onClick (const onValidate')
+                    , onClick (const onValidate'.action)
+                    , disabled onValidate'.disabled
                     ]
                     [ text "Valider" ]
                 ]

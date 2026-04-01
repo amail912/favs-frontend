@@ -6,23 +6,32 @@ module Pages.Calendar
   , TaskCalendarItemFields
   , TripCalendarItemFields
   , TaskDraft
+  , TripDraft
   , ItemStatus(..)
   , ItemType(..)
   , SortMode(..)
   , ValidationError(..)
+  , TripValidationError(..)
   , toNewTask
+  , toNewTrip
   , buildTimelineLayout
   , MobileOverlapStack
   , MobileHiddenCard
   , buildMobileOverlapStacks
   , applyMobileOverlapPromotions
   , toTimelineBlock
+  , TaskEditDraft
+  , TripEditDraft
+  , EditDraft(..)
   , EditError(..)
   , applyEditDraft
   , buildEditDraft
   , durationMinutesBetween
   , sortItems
   , validateTask
+  , validateTrip
+  , decodeTripPlacesResponse
+  , tripWriteErrorMessage
   , calendarItemPrimaryText
   , calendarItemSecondaryText
   , calendarItemCardClass
@@ -39,7 +48,7 @@ module Pages.Calendar
 
 import Prelude hiding (div)
 import Affjax.Web (Response)
-import Api.Calendar (createItemResponse, getItemsResponse, updateItemResponse)
+import Api.Calendar (TripPlace(..), createItemResponse, getItemsResponse, getTripPlacesResponse, updateItemResponse)
 import Calendar.Recurrence (RecurrenceDraft, RecurrenceRule, defaultRecurrenceDraft, draftFromRecurrence, draftToRecurrence)
 import Calendar.Recurrence as Recurrence
 import Calendar.ExImport.Export as Export
@@ -74,7 +83,7 @@ import Halogen.Query.Event as HQE
 import Type.Proxy (Proxy(..))
 import Ui.Errors (FatalError, handleError, toFatalError)
 import Ui.Focus (focusElement, openDateInputPicker)
-import Ui.Modal (renderBottomSheet, renderModal) as Modal
+import Ui.Modal (renderBottomSheet, renderModal, renderModalWithValidateState) as Modal
 import Ui.Utils (class_)
 import Web.Event.Event (EventType(..), preventDefault)
 import Web.HTML (window)
@@ -114,6 +123,16 @@ foreign import scrollElementIntoView :: Element -> Effect Unit
 type NoOutput = Void
 type AgendaAppM = H.HalogenM State Action Slots NoOutput Aff
 type ErrorAgendaAppM = ExceptT FatalError AgendaAppM
+
+data CreateItemMode
+  = CreateTask
+  | CreateTrip
+
+derive instance eqCreateItemMode :: Eq CreateItemMode
+derive instance genericCreateItemMode :: Generic CreateItemMode _
+
+instance showCreateItemMode :: Show CreateItemMode where
+  show = genericShow
 
 data DayFocusTarget
   = FocusCurrentTime
@@ -234,7 +253,7 @@ renderRecurrenceSlot :: RecurrenceSlot -> RecurrenceDraft -> (Recurrence.Recurre
 renderRecurrenceSlot slotId draft onOutput =
   slot (Proxy :: _ "recurrence") slotId Recurrence.component draft onOutput
 
-prefillCreateDraft :: ItemType -> String -> TaskDraft -> TaskDraft
+prefillCreateDraft :: CreateItemMode -> String -> CreateDraft -> CreateDraft
 prefillCreateDraft _ _ draft = draft
 
 itemTypeIso :: Iso' ItemType Export.ItemType
@@ -344,14 +363,17 @@ _view = prop (Proxy :: _ "view")
 _calendarItems :: Lens' State (Array CalendarItem)
 _calendarItems = _calendar <<< _items
 
-_calendarDraft :: Lens' State TaskDraft
+_calendarDraft :: Lens' State CreateDraft
 _calendarDraft = _calendar <<< _draft
 
 _calendarValidationError :: Lens' State (Maybe String)
 _calendarValidationError = _calendar <<< _validationError
 
-_calendarLastCreateType :: Lens' State ItemType
-_calendarLastCreateType = _calendar <<< _lastCreateType
+_calendarLastCreateMode :: Lens' State CreateItemMode
+_calendarLastCreateMode = _calendar <<< _lastCreateMode
+
+_calendarTripPlaces :: Lens' State TripPlacesState
+_calendarTripPlaces = _calendar <<< _tripPlaces
 
 _syncUpdateErrorState :: Lens' State (Maybe String)
 _syncUpdateErrorState = _sync <<< _syncUpdateError
@@ -381,9 +403,9 @@ handleAction action = handleError $
           focusModal
           st <- get
           let
-            lastType = st ^. _calendarLastCreateType
-            baseDraft = emptyDraft { itemType = lastType }
-            nextDraft = prefillCreateDraft lastType (st ^. _viewFocusDatePage) baseDraft
+            lastMode = st ^. _calendarLastCreateMode
+            baseDraft = emptyCreateDraft lastMode
+            nextDraft = prefillCreateDraft lastMode (st ^. _viewFocusDatePage) baseDraft
           modify_ ((_calendarDraft .~ nextDraft) <<< (_calendarValidationError .~ Nothing))
         ViewOpenEdit _ -> focusModal
         ViewOpenEditFromDoubleClick _ -> focusModal
@@ -392,8 +414,8 @@ handleAction action = handleError $
         ViewCloseCreate -> do
           st <- get
           let
-            lastType = st ^. _calendarLastCreateType
-          modify_ ((_calendarDraft .~ (emptyDraft { itemType = lastType })) <<< (_calendarValidationError .~ Nothing))
+            lastMode = st ^. _calendarLastCreateMode
+          modify_ ((_calendarDraft .~ emptyCreateDraft lastMode) <<< (_calendarValidationError .~ Nothing))
         _ -> pure unit
     GlobalKeyDown key ->
       if key == "Escape" then do
@@ -404,8 +426,8 @@ handleAction action = handleError $
             handleViewAction ViewCloseCreate
             st' <- get
             let
-              lastType = st' ^. _calendarLastCreateType
-            modify_ ((_calendarDraft .~ (emptyDraft { itemType = lastType })) <<< (_calendarValidationError .~ Nothing))
+              lastMode = st' ^. _calendarLastCreateMode
+            modify_ ((_calendarDraft .~ emptyCreateDraft lastMode) <<< (_calendarValidationError .~ Nothing))
           Just _ -> handleViewAction ViewCloseModal
           Nothing -> pure unit
       else pure unit
@@ -414,12 +436,22 @@ handleAction action = handleError $
       handleViewAction (ViewSetIsMobile (viewport <= 768))
     CreateRecurrenceCmd (Recurrence.RecurrenceApplied draft) ->
       modify_
-        ( (_calendar <<< _draftRecurrenceS .~ draft)
-            <<< (_calendarValidationError .~ Nothing)
+        ( _calendar
+            %~
+              ( \calendarState ->
+                  case calendarState.draft of
+                    CreateTaskDraft taskDraft ->
+                      calendarState
+                        { draft = CreateTaskDraft (taskDraft { recurrence = draft })
+                        , validationError = Nothing
+                        }
+                    CreateTripDraft _ ->
+                      calendarState
+              )
         )
     EditRecurrenceCmd (Recurrence.RecurrenceApplied draft) ->
       modify_
-        ((_view <<< _viewEditPanel) %~ map (\panel -> panel { draft = panel.draft { recurrence = draft }, validationError = Nothing }))
+        ((_view <<< _viewEditPanel) %~ map (updateEditPanelRecurrence draft))
     ImportApplyItems contents -> do
       let
         imported = map toCalendarItem contents
@@ -643,6 +675,7 @@ initAction = do
   handleViewAction (ViewSetIsMobile (viewport <= 768))
   subscribeToGlobalKeyDown
   subscribeToGlobalResize
+  lift loadTripPlaces
   refreshItems
   scheduleDayTimelineFocus
 
@@ -651,6 +684,23 @@ refreshItems = do
   jsonResponse <- withExceptT toFatalError $ ExceptT $ liftAff getItemsResponse
   items <- decodeCalendarItemsResponse jsonResponse # pure >>> ExceptT
   modify_ (_calendarItems .~ items)
+
+loadTripPlaces :: AgendaAppM Unit
+loadTripPlaces = do
+  modify_ (_calendarTripPlaces .~ TripPlacesLoading)
+  result <- liftAff getTripPlacesResponse
+  case result of
+    Left _ ->
+      modify_ (_calendarTripPlaces .~ TripPlacesError "Impossible de charger les lieux de trajet.")
+    Right response ->
+      if statusOk response then
+        case decodeTripPlacesResponse response of
+          Right places ->
+            modify_ (_calendarTripPlaces .~ TripPlacesLoaded places)
+          Left _ ->
+            modify_ (_calendarTripPlaces .~ TripPlacesError "Impossible de charger les lieux de trajet.")
+      else
+        modify_ (_calendarTripPlaces .~ TripPlacesError "Impossible de charger les lieux de trajet.")
 
 scheduleDayTimelineFocus :: ErrorAgendaAppM Unit
 scheduleDayTimelineFocus = do
@@ -718,21 +768,46 @@ statusOk r = unwrap r.status >= 200 && unwrap r.status < 300
 submitTask :: ErrorAgendaAppM Unit
 submitTask = do
   st <- get
-  case validateTask (st ^. _calendarDraft) of
-    Left err -> modify_ (_calendarValidationError .~ Just (validationErrorMessage err))
-    Right validDraft ->
-      case toNewTask validDraft of
+  case st ^. _calendarDraft of
+    CreateTaskDraft draft ->
+      case validateTask draft of
+        Left err -> modify_ (_calendarValidationError .~ Just (validationErrorMessage err))
+        Right validDraft ->
+          case toNewTask validDraft of
+            Left err ->
+              modify_ (_calendarValidationError .~ Just err)
+            Right item -> do
+              response <- createItem item
+              if statusOk response then do
+                modify_
+                  ( (_calendarDraft .~ emptyCreateDraft CreateTask)
+                      <<< (_calendarValidationError .~ Nothing)
+                      <<< (_calendarLastCreateMode .~ CreateTask)
+                      <<< ((_view <<< _viewActiveModal) .~ Nothing)
+                  )
+                refreshItems
+              else
+                modify_ (_calendarValidationError .~ Just (createErrorMessage (unwrap response.status)))
+    CreateTripDraft draft ->
+      case validateTrip draft of
         Left err ->
-          modify_ (_calendarValidationError .~ Just err)
-        Right item ->
-          do
-            _ <- createItem item
-            modify_
-              ( (_calendarDraft .~ emptyDraft)
-                  <<< (_calendarValidationError .~ Nothing)
-                  <<< ((_view <<< _viewActiveModal) .~ Nothing)
-              )
-            refreshItems
+          modify_ (_calendarValidationError .~ Just (tripValidationErrorMessage err))
+        Right validDraft ->
+          case toNewTrip validDraft of
+            Left err ->
+              modify_ (_calendarValidationError .~ Just err)
+            Right item -> do
+              response <- createItem item
+              if statusOk response then do
+                modify_
+                  ( (_calendarDraft .~ emptyCreateDraft CreateTrip)
+                      <<< (_calendarValidationError .~ Nothing)
+                      <<< (_calendarLastCreateMode .~ CreateTrip)
+                      <<< ((_view <<< _viewActiveModal) .~ Nothing)
+                  )
+                refreshItems
+              else
+                modify_ (_calendarValidationError .~ Just (tripWriteErrorMessage response))
 
 focusModal :: ErrorAgendaAppM Unit
 focusModal = do
@@ -800,24 +875,33 @@ type AgendaModalsInput =
   { activeModal :: Maybe AgendaModal
   , overlapSheet :: Maybe OverlapSheet
   , exportItems :: Array Export.Item
-  , draft :: TaskDraft
+  , draft :: CreateDraft
+  , tripPlaces :: TripPlacesState
   , validationError :: Maybe String
   , editPanel :: Maybe EditPanel
   }
 
 renderAgendaModals :: AgendaModalsInput -> H.ComponentHTML Action Slots Aff
-renderAgendaModals { activeModal, overlapSheet, exportItems, draft, validationError, editPanel } =
+renderAgendaModals { activeModal, overlapSheet, exportItems, draft, tripPlaces, validationError, editPanel } =
   let
     renderModal title content = Modal.renderModal title content (ViewAction ViewCloseModal) (ViewAction ViewCloseModal)
     renderExportModal items =
       slot (Proxy :: _ "export") ExportModal Export.component { items } absurd
+    createValidateState =
+      { action: SyncSubmitTask
+      , disabled: isCreateSubmitDisabled draft tripPlaces
+      }
+    editValidateState panel =
+      { action: ViewAction ViewEditSave
+      , disabled: isEditSubmitDisabled panel tripPlaces
+      }
   in
     maybe (div [] [])
       case _ of
         ModalTools -> renderModal "Actions" [ map toAction renderToolsContent ]
-        ModalCreateItem -> Modal.renderModal "Créer un item" [ renderCreateContent draft validationError ]
+        ModalCreateItem -> Modal.renderModalWithValidateState "Créer un item" [ renderCreateContent draft tripPlaces validationError ]
           (ViewAction ViewCloseCreate)
-          SyncSubmitTask
+          createValidateState
         ModalImportCsv ->
           renderModal "Import CSV"
             [ slot (Proxy :: _ "importCsv") ImportCsv Import.component { mode: Import.Csv }
@@ -838,22 +922,23 @@ renderAgendaModals { activeModal, overlapSheet, exportItems, draft, validationEr
         ModalEditItem -> case editPanel of
           Nothing -> text ""
           Just panel ->
-            Modal.renderModal "Modifier l'item"
-              [ renderEditContent panel ]
+            Modal.renderModalWithValidateState "Modifier l'item"
+              [ renderEditContent panel tripPlaces ]
               (ViewAction ViewEditCancel)
-              (ViewAction ViewEditSave)
+              (editValidateState panel)
       activeModal
 
 buildAgendaModalsInput :: State -> AgendaModalsInput
 buildAgendaModalsInput { calendar, view } =
   let
-    { items, draft, validationError } = calendar
+    { items, draft, tripPlaces, validationError } = calendar
     { activeModal, overlapSheet, editPanel } = view
   in
     { activeModal
     , overlapSheet
     , exportItems: mapMaybe toExportItem items
     , draft
+    , tripPlaces
     , validationError
     , editPanel
     }
@@ -1297,50 +1382,148 @@ emptyAgendaRange label =
 -- BEGIN src/Calendar/Calendar/CreateForm.purs
 data CreateFormAction
   = CreateFormDraftTitleChanged String
-  | CreateFormDraftTypeChanged ItemType
+  | CreateFormDraftModeChanged String
   | CreateFormDraftStartChanged String
   | CreateFormDraftEndChanged String
   | CreateFormDraftCategoryChanged String
   | CreateFormDraftStatusChanged String
   | CreateFormDraftDurationChanged String
+  | CreateFormDraftDeparturePlaceChanged String
+  | CreateFormDraftArrivalPlaceChanged String
 
 applyCreateFormAction :: CreateFormAction -> AgendaAppM Unit
 applyCreateFormAction action =
   case action of
     CreateFormDraftTitleChanged title ->
-      modify_ (_calendar %~ ((_draftTitleS .~ title) <<< (_validationError .~ Nothing)))
-    CreateFormDraftTypeChanged itemType -> do
-      modify_ (_calendar %~ ((_draftItemTypeS .~ itemType) <<< (_lastCreateType .~ itemType) <<< (_validationError .~ Nothing)))
+      modify_
+        ( _calendar
+            %~
+              ( \calendarState ->
+                  case calendarState.draft of
+                    CreateTaskDraft draft ->
+                      calendarState { draft = CreateTaskDraft (draft { title = title }), validationError = Nothing }
+                    CreateTripDraft _ ->
+                      calendarState
+              )
+        )
+    CreateFormDraftModeChanged rawMode -> do
+      let mode = parseCreateItemMode rawMode
+      modify_ (_calendar %~ ((_draft .~ emptyCreateDraft mode) <<< (_lastCreateMode .~ mode) <<< (_validationError .~ Nothing)))
       st <- get
-      let updatedDraft = prefillCreateDraft itemType (st ^. _viewFocusDatePage) (st ^. _calendarDraft)
+      let updatedDraft = prefillCreateDraft mode (st ^. _viewFocusDatePage) (st ^. _calendarDraft)
       modify_ (_calendarDraft .~ updatedDraft)
     CreateFormDraftStartChanged windowStart ->
-      modify_ (_calendar %~ ((_draftWindowStartS .~ windowStart) <<< (_validationError .~ Nothing)))
+      modify_
+        ( _calendar
+            %~
+              ( \calendarState ->
+                  calendarState
+                    { draft = mapCreateDraftWindowStart windowStart calendarState.draft
+                    , validationError = Nothing
+                    }
+              )
+        )
     CreateFormDraftEndChanged windowEnd ->
-      modify_ (_calendar %~ ((_draftWindowEndS .~ windowEnd) <<< (_validationError .~ Nothing)))
+      modify_
+        ( _calendar
+            %~
+              ( \calendarState ->
+                  calendarState
+                    { draft = mapCreateDraftWindowEnd windowEnd calendarState.draft
+                    , validationError = Nothing
+                    }
+              )
+        )
     CreateFormDraftCategoryChanged category ->
-      modify_ (_calendar %~ ((_draftCategoryS .~ category) <<< (_validationError .~ Nothing)))
+      modify_
+        ( _calendar
+            %~
+              ( \calendarState ->
+                  case calendarState.draft of
+                    CreateTaskDraft draft ->
+                      calendarState { draft = CreateTaskDraft (draft { category = category }), validationError = Nothing }
+                    CreateTripDraft _ ->
+                      calendarState
+              )
+        )
     CreateFormDraftStatusChanged raw ->
-      modify_ (_calendar %~ ((_draftStatusS .~ parseStatus raw) <<< (_validationError .~ Nothing)))
+      modify_
+        ( _calendar
+            %~
+              ( \calendarState ->
+                  case calendarState.draft of
+                    CreateTaskDraft draft ->
+                      calendarState { draft = CreateTaskDraft (draft { status = parseStatus raw }), validationError = Nothing }
+                    CreateTripDraft _ ->
+                      calendarState
+              )
+        )
     CreateFormDraftDurationChanged raw ->
-      modify_ (_calendar %~ ((_draftDurationS .~ raw) <<< (_validationError .~ Nothing)))
+      modify_
+        ( _calendar
+            %~
+              ( \calendarState ->
+                  case calendarState.draft of
+                    CreateTaskDraft draft ->
+                      calendarState { draft = CreateTaskDraft (draft { actualDurationMinutes = raw }), validationError = Nothing }
+                    CreateTripDraft _ ->
+                      calendarState
+              )
+        )
+    CreateFormDraftDeparturePlaceChanged departurePlaceId ->
+      modify_
+        ( _calendar
+            %~
+              ( \calendarState ->
+                  case calendarState.draft of
+                    CreateTripDraft draft ->
+                      calendarState { draft = CreateTripDraft (draft { departurePlaceId = departurePlaceId }), validationError = Nothing }
+                    CreateTaskDraft _ ->
+                      calendarState
+              )
+        )
+    CreateFormDraftArrivalPlaceChanged arrivalPlaceId ->
+      modify_
+        ( _calendar
+            %~
+              ( \calendarState ->
+                  case calendarState.draft of
+                    CreateTripDraft draft ->
+                      calendarState { draft = CreateTripDraft (draft { arrivalPlaceId = arrivalPlaceId }), validationError = Nothing }
+                    CreateTaskDraft _ ->
+                      calendarState
+              )
+        )
 
 renderCreateContent
-  :: TaskDraft
+  :: CreateDraft
+  -> TripPlacesState
   -> Maybe String
   -> H.ComponentHTML Action Slots Aff
-renderCreateContent draft validationError =
-  div [ class_ "calendar-modal-stack" ]
-    [ field "Tâche" taskTypeDisplay
-    , field "Titre" titleInput
-    , dateTimeField "Début" CreateFormDraftStartChanged draft.windowStart
-    , dateTimeField "Fin" CreateFormDraftEndChanged draft.windowEnd
-    , field "Catégorie" categoryInput
-    , field "Statut" statusInput
-    , field "Durée réelle (minutes)" durationInput
-    , recurrenceInput
-    , errorInput
-    ]
+renderCreateContent draft tripPlaces validationError =
+  case draft of
+    CreateTaskDraft taskDraft ->
+      div [ class_ "calendar-modal-stack" ]
+        [ modeField CreateTask
+        , field "Titre" (taskTitleInput taskDraft)
+        , dateTimeField "Début" CreateFormDraftStartChanged taskDraft.windowStart
+        , dateTimeField "Fin" CreateFormDraftEndChanged taskDraft.windowEnd
+        , field "Catégorie" (taskCategoryInput taskDraft)
+        , field "Statut" (taskStatusInput taskDraft)
+        , field "Durée réelle (minutes)" (taskDurationInput taskDraft)
+        , renderRecurrenceSlot RecurrenceCreate taskDraft.recurrence CreateRecurrenceCmd
+        , errorInput validationError
+        ]
+    CreateTripDraft tripDraft ->
+      div [ class_ "calendar-modal-stack" ]
+        [ modeField CreateTrip
+        , renderTripPlacesField "Départ" CreateFormDraftDeparturePlaceChanged tripDraft.departurePlaceId tripPlaces
+        , renderTripPlacesField "Arrivée" CreateFormDraftArrivalPlaceChanged tripDraft.arrivalPlaceId tripPlaces
+        , dateTimeField "Départ" CreateFormDraftStartChanged tripDraft.windowStart
+        , dateTimeField "Arrivée" CreateFormDraftEndChanged tripDraft.windowEnd
+        , renderTripPlacesFeedback tripPlaces
+        , errorInput validationError
+        ]
   where
   field label content =
     div [ class_ "calendar-modal-field" ]
@@ -1359,31 +1542,39 @@ renderCreateContent draft validationError =
         , value currentValue
         ]
 
-  taskTypeDisplay =
-    div [ class_ "badge rounded-pill text-bg-secondary" ] [ text "Tâche" ]
+  modeField currentMode =
+    field "Type" $
+      select
+        [ class_ "form-select calendar-input"
+        , onValueChange (CreateFormAction <<< CreateFormDraftModeChanged)
+        , value (createItemModeValue currentMode)
+        ]
+        [ option [ value "task" ] [ text "Tâche" ]
+        , option [ value "trip" ] [ text "Trajet" ]
+        ]
 
-  titleInput =
+  taskTitleInput taskDraft =
     input
       [ class_ "form-control calendar-input"
       , placeholder "Titre"
       , onValueChange (CreateFormAction <<< CreateFormDraftTitleChanged)
       , onKeyDown (\ev -> SyncDraftTitleKeyDown (KE.key ev))
-      , value draft.title
+      , value taskDraft.title
       ]
 
-  categoryInput =
+  taskCategoryInput taskDraft =
     input
       [ class_ "form-control calendar-input"
       , placeholder "Catégorie"
       , onValueChange (CreateFormAction <<< CreateFormDraftCategoryChanged)
-      , value draft.category
+      , value taskDraft.category
       ]
 
-  statusInput =
+  taskStatusInput taskDraft =
     select
       [ class_ "form-select calendar-input"
       , onValueChange (CreateFormAction <<< CreateFormDraftStatusChanged)
-      , value (statusValue draft.status)
+      , value (statusValue taskDraft.status)
       ]
       [ option [ value "todo" ] [ text "À faire" ]
       , option [ value "in_progress" ] [ text "En cours" ]
@@ -1391,20 +1582,17 @@ renderCreateContent draft validationError =
       , option [ value "canceled" ] [ text "Annulé" ]
       ]
 
-  durationInput =
+  taskDurationInput taskDraft =
     input
       [ class_ "form-control calendar-input"
       , type_ InputNumber
       , placeholder "Ex: 30"
       , onValueChange (CreateFormAction <<< CreateFormDraftDurationChanged)
-      , value draft.actualDurationMinutes
+      , value taskDraft.actualDurationMinutes
       ]
 
-  recurrenceInput =
-    renderRecurrenceSlot RecurrenceCreate draft.recurrence CreateRecurrenceCmd
-
-  errorInput =
-    maybe (text "") (\msg -> div [ class_ "calendar-error" ] [ text msg ]) validationError
+  errorInput message =
+    maybe (text "") (\msg -> div [ class_ "calendar-error" ] [ text msg ]) message
 
 -- END src/Calendar/Calendar/CreateForm.purs
 
@@ -1445,6 +1633,23 @@ toNewTask draft = do
         Just minutes -> Right (Just minutes)
         Nothing -> Left "Durée réelle invalide."
 
+toNewTrip :: TripDraft -> Either String CalendarItem
+toNewTrip draft = do
+  validDraft <- lmap tripValidationErrorMessage (validateTrip draft)
+  windowStart <- maybe (Left "La date de départ est invalide.") Right (parseDateTimeLocal validDraft.windowStart)
+  windowEnd <- maybe (Left "La date d'arrivée est invalide.") Right (parseDateTimeLocal validDraft.windowEnd)
+  pure
+    ( NewCalendarItem
+        { content:
+            TripCalendarItemContent
+              { windowStart
+              , windowEnd
+              , departurePlaceId: validDraft.departurePlaceId
+              , arrivalPlaceId: validDraft.arrivalPlaceId
+              }
+        }
+    )
+
 -- END src/Calendar/Calendar/Draft.purs
 
 -- END src/Calendar/Calendar/Primary.purs
@@ -1452,21 +1657,23 @@ toNewTask draft = do
 -- BEGIN src/Calendar/Calendar/State.purs
 type CalendarState =
   { items :: Array CalendarItem
-  , draft :: TaskDraft
+  , draft :: CreateDraft
   , validationError :: Maybe String
-  , lastCreateType :: ItemType
+  , lastCreateMode :: CreateItemMode
+  , tripPlaces :: TripPlacesState
   }
 
 calendarInitialState :: CalendarState
 calendarInitialState =
   { items: []
-  , draft: emptyDraft
+  , draft: emptyCreateDraft CreateTask
   , validationError: Nothing
-  , lastCreateType: Task
+  , lastCreateMode: CreateTask
+  , tripPlaces: TripPlacesLoading
   }
 
-emptyDraft :: TaskDraft
-emptyDraft =
+emptyTaskDraft :: TaskDraft
+emptyTaskDraft =
   { itemType: Task
   , title: ""
   , windowStart: ""
@@ -1477,41 +1684,33 @@ emptyDraft =
   , recurrence: defaultRecurrenceDraft
   }
 
+emptyTripDraft :: TripDraft
+emptyTripDraft =
+  { departurePlaceId: ""
+  , arrivalPlaceId: ""
+  , windowStart: ""
+  , windowEnd: ""
+  }
+
+emptyCreateDraft :: CreateItemMode -> CreateDraft
+emptyCreateDraft = case _ of
+  CreateTask -> CreateTaskDraft emptyTaskDraft
+  CreateTrip -> CreateTripDraft emptyTripDraft
+
 _items :: Lens' CalendarState (Array CalendarItem)
 _items = prop (Proxy :: _ "items")
 
-_draft :: Lens' CalendarState TaskDraft
+_draft :: Lens' CalendarState CreateDraft
 _draft = prop (Proxy :: _ "draft")
 
 _validationError :: Lens' CalendarState (Maybe String)
 _validationError = prop (Proxy :: _ "validationError")
 
-_draftTitleS :: Lens' CalendarState String
-_draftTitleS = _draft <<< prop (Proxy :: _ "title")
+_lastCreateMode :: Lens' CalendarState CreateItemMode
+_lastCreateMode = prop (Proxy :: _ "lastCreateMode")
 
-_draftItemTypeS :: Lens' CalendarState ItemType
-_draftItemTypeS = _draft <<< prop (Proxy :: _ "itemType")
-
-_draftWindowStartS :: Lens' CalendarState String
-_draftWindowStartS = _draft <<< prop (Proxy :: _ "windowStart")
-
-_draftWindowEndS :: Lens' CalendarState String
-_draftWindowEndS = _draft <<< prop (Proxy :: _ "windowEnd")
-
-_draftCategoryS :: Lens' CalendarState String
-_draftCategoryS = _draft <<< prop (Proxy :: _ "category")
-
-_draftStatusS :: Lens' CalendarState ItemStatus
-_draftStatusS = _draft <<< prop (Proxy :: _ "status")
-
-_draftDurationS :: Lens' CalendarState String
-_draftDurationS = _draft <<< prop (Proxy :: _ "actualDurationMinutes")
-
-_draftRecurrenceS :: Lens' CalendarState RecurrenceDraft
-_draftRecurrenceS = _draft <<< prop (Proxy :: _ "recurrence")
-
-_lastCreateType :: Lens' CalendarState ItemType
-_lastCreateType = prop (Proxy :: _ "lastCreateType")
+_tripPlaces :: Lens' CalendarState TripPlacesState
+_tripPlaces = prop (Proxy :: _ "tripPlaces")
 
 -- END src/Calendar/Calendar/State.purs
 
@@ -1888,6 +2087,8 @@ data ViewAction
   | ViewEditCategoryChanged String
   | ViewEditStatusChanged String
   | ViewEditDurationChanged String
+  | ViewEditDeparturePlaceChanged String
+  | ViewEditArrivalPlaceChanged String
   | ViewEditSave
   | ViewEditCancel
   | ViewSetIsMobile Boolean
@@ -1981,17 +2182,21 @@ handleViewAction = case _ of
     else
       pure unit
   ViewEditTitleChanged raw ->
-    modify_ (_view <<< _viewEditPanel %~ map (\panel -> panel { draft = panel.draft { title = raw }, validationError = Nothing }))
+    modify_ (_view <<< _viewEditPanel %~ map (updateEditPanelTitle raw))
   ViewEditStartChanged raw ->
-    modify_ (_view <<< _viewEditPanel %~ map (\panel -> panel { draft = panel.draft { windowStart = raw }, validationError = Nothing }))
+    modify_ (_view <<< _viewEditPanel %~ map (updateEditPanelWindowStart raw))
   ViewEditEndChanged raw ->
-    modify_ (_view <<< _viewEditPanel %~ map (\panel -> panel { draft = panel.draft { windowEnd = raw }, validationError = Nothing }))
+    modify_ (_view <<< _viewEditPanel %~ map (updateEditPanelWindowEnd raw))
   ViewEditCategoryChanged raw ->
-    modify_ (_view <<< _viewEditPanel %~ map (\panel -> panel { draft = panel.draft { category = raw }, validationError = Nothing }))
+    modify_ (_view <<< _viewEditPanel %~ map (updateEditPanelCategory raw))
   ViewEditStatusChanged raw ->
-    modify_ (_view <<< _viewEditPanel %~ map (\panel -> panel { draft = panel.draft { status = parseStatus raw }, validationError = Nothing }))
+    modify_ (_view <<< _viewEditPanel %~ map (updateEditPanelStatus (parseStatus raw)))
   ViewEditDurationChanged raw ->
-    modify_ (_view <<< _viewEditPanel %~ map (\panel -> panel { draft = panel.draft { actualDurationMinutes = raw }, validationError = Nothing }))
+    modify_ (_view <<< _viewEditPanel %~ map (updateEditPanelDuration raw))
+  ViewEditDeparturePlaceChanged raw ->
+    modify_ (_view <<< _viewEditPanel %~ map (updateEditPanelDeparturePlace raw))
+  ViewEditArrivalPlaceChanged raw ->
+    modify_ (_view <<< _viewEditPanel %~ map (updateEditPanelArrivalPlace raw))
   ViewEditSave -> do
     st <- get
     case st ^. (_view <<< _viewEditPanel) of
@@ -2001,12 +2206,19 @@ handleViewAction = case _ of
           Left err ->
             modify_ (_view <<< _viewEditPanel .~ Just (panel { validationError = Just (editErrorMessage err) }))
           Right updatedItem -> do
-            resp <- updateItem panel.draft.itemId updatedItem
-            if statusOk resp then modify_ (_syncUpdateErrorState .~ Nothing)
-            else modify_ (_syncUpdateErrorState .~ Just (updateErrorMessage (unwrap resp.status)))
-            refreshItems
-            modify_
-              ((_view <<< _viewEditPanel .~ Nothing) <<< (_view <<< _viewActiveModal .~ Nothing))
+            let itemId = editDraftItemId panel.draft
+            resp <- updateItem itemId updatedItem
+            if statusOk resp then do
+              modify_ (_syncUpdateErrorState .~ Nothing)
+              refreshItems
+              modify_
+                ((_view <<< _viewEditPanel .~ Nothing) <<< (_view <<< _viewActiveModal .~ Nothing))
+            else
+              case panel.draft of
+                EditTripDraft _ ->
+                  modify_ (_view <<< _viewEditPanel .~ Just (panel { validationError = Just (tripWriteErrorMessage resp) }))
+                EditTaskDraft _ ->
+                  modify_ (_syncUpdateErrorState .~ Just (updateErrorMessage (unwrap resp.status)))
   ViewEditCancel ->
     modify_ ((_view <<< _viewEditPanel .~ Nothing) <<< (_view <<< _viewActiveModal .~ Nothing))
   ViewSetIsMobile isMobile ->
@@ -2097,82 +2309,85 @@ renderToolsContent =
     , button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalExport)) ] [ text "Export" ]
     ]
 
-renderEditContent :: EditPanel -> H.ComponentHTML Action Slots Aff
-renderEditContent panel =
-  let
-    draft = panel.draft
-  in
-    div [ class_ "calendar-modal-stack" ]
-      [ div [ class_ "calendar-modal-field" ]
-          [ div [ class_ "calendar-notifications-label" ] [ text "Type" ]
-          , div [ class_ "badge rounded-pill text-bg-secondary" ] [ text "Tâche" ]
-          ]
-      , div [ class_ "calendar-modal-field" ]
-          [ div [ class_ "calendar-notifications-label" ] [ text "Titre" ]
-          , input
-              [ class_ "form-control calendar-input"
-              , placeholder "Titre"
-              , onValueChange (ViewAction <<< ViewEditTitleChanged)
-              , value draft.title
-              ]
-          ]
-      , div [ class_ "calendar-modal-field" ]
-          [ div [ class_ "calendar-notifications-label" ] [ text "Début" ]
-          , input
-              [ class_ "form-control calendar-input"
-              , type_ InputDatetimeLocal
-              , attr (AttrName "lang") "fr"
-              , placeholder "Début"
-              , onValueChange (ViewAction <<< ViewEditStartChanged)
-              , value draft.windowStart
-              ]
-          ]
-      , div [ class_ "calendar-modal-field" ]
-          [ div [ class_ "calendar-notifications-label" ] [ text "Fin" ]
-          , input
-              [ class_ "form-control calendar-input"
-              , type_ InputDatetimeLocal
-              , attr (AttrName "lang") "fr"
-              , placeholder "Fin"
-              , onValueChange (ViewAction <<< ViewEditEndChanged)
-              , value draft.windowEnd
-              ]
-          ]
-      , div [ class_ "calendar-modal-field" ]
-          [ div [ class_ "calendar-notifications-label" ] [ text "Catégorie" ]
-          , input
-              [ class_ "form-control calendar-input"
-              , placeholder "Catégorie"
-              , onValueChange (ViewAction <<< ViewEditCategoryChanged)
-              , value draft.category
-              ]
-          ]
-      , div [ class_ "calendar-modal-field" ]
-          [ div [ class_ "calendar-notifications-label" ] [ text "Statut" ]
-          , select
-              [ class_ "form-select calendar-input"
-              , onValueChange (ViewAction <<< ViewEditStatusChanged)
-              , value (statusValue draft.status)
-              ]
-              [ option [ value "todo" ] [ text "À faire" ]
-              , option [ value "in_progress" ] [ text "En cours" ]
-              , option [ value "done" ] [ text "Terminé" ]
-              , option [ value "canceled" ] [ text "Annulé" ]
-              ]
-          ]
-      , div [ class_ "calendar-modal-field" ]
-          [ div [ class_ "calendar-notifications-label" ] [ text "Durée réelle (minutes)" ]
-          , input
-              [ class_ "form-control calendar-input"
-              , type_ InputNumber
-              , placeholder "Ex: 30"
-              , onValueChange (ViewAction <<< ViewEditDurationChanged)
-              , value draft.actualDurationMinutes
-              ]
-          ]
-      , renderRecurrenceSlot RecurrenceEdit draft.recurrence EditRecurrenceCmd
-      , maybe (text "") (\msg -> div [ class_ "calendar-error" ] [ text msg ]) panel.validationError
+renderEditContent :: EditPanel -> TripPlacesState -> H.ComponentHTML Action Slots Aff
+renderEditContent panel tripPlaces =
+  case panel.draft of
+    EditTaskDraft draft ->
+      div [ class_ "calendar-modal-stack" ]
+        [ staticTypeBadge "Tâche"
+        , editTextField "Titre" ViewEditTitleChanged draft.title
+        , editDateTimeField "Début" ViewEditStartChanged draft.windowStart
+        , editDateTimeField "Fin" ViewEditEndChanged draft.windowEnd
+        , editTextField "Catégorie" ViewEditCategoryChanged draft.category
+        , div [ class_ "calendar-modal-field" ]
+            [ div [ class_ "calendar-notifications-label" ] [ text "Statut" ]
+            , select
+                [ class_ "form-select calendar-input"
+                , onValueChange (ViewAction <<< ViewEditStatusChanged)
+                , value (statusValue draft.status)
+                ]
+                [ option [ value "todo" ] [ text "À faire" ]
+                , option [ value "in_progress" ] [ text "En cours" ]
+                , option [ value "done" ] [ text "Terminé" ]
+                , option [ value "canceled" ] [ text "Annulé" ]
+                ]
+            ]
+        , div [ class_ "calendar-modal-field" ]
+            [ div [ class_ "calendar-notifications-label" ] [ text "Durée réelle (minutes)" ]
+            , input
+                [ class_ "form-control calendar-input"
+                , type_ InputNumber
+                , placeholder "Ex: 30"
+                , onValueChange (ViewAction <<< ViewEditDurationChanged)
+                , value draft.actualDurationMinutes
+                ]
+            ]
+        , renderRecurrenceSlot RecurrenceEdit draft.recurrence EditRecurrenceCmd
+        , renderEditError panel.validationError
+        ]
+    EditTripDraft draft ->
+      div [ class_ "calendar-modal-stack" ]
+        [ staticTypeBadge "Trajet"
+        , renderTripPlacesEditField "Départ" ViewEditDeparturePlaceChanged draft.departurePlaceId tripPlaces
+        , renderTripPlacesEditField "Arrivée" ViewEditArrivalPlaceChanged draft.arrivalPlaceId tripPlaces
+        , editDateTimeField "Départ" ViewEditStartChanged draft.windowStart
+        , editDateTimeField "Arrivée" ViewEditEndChanged draft.windowEnd
+        , renderTripPlacesFeedback tripPlaces
+        , renderEditError panel.validationError
+        ]
+  where
+  staticTypeBadge label =
+    div [ class_ "calendar-modal-field" ]
+      [ div [ class_ "calendar-notifications-label" ] [ text "Type" ]
+      , div [ class_ "badge rounded-pill text-bg-secondary" ] [ text label ]
       ]
+
+  editTextField label onChange currentValue =
+    div [ class_ "calendar-modal-field" ]
+      [ div [ class_ "calendar-notifications-label" ] [ text label ]
+      , input
+          [ class_ "form-control calendar-input"
+          , placeholder label
+          , onValueChange (ViewAction <<< onChange)
+          , value currentValue
+          ]
+      ]
+
+  editDateTimeField label onChange currentValue =
+    div [ class_ "calendar-modal-field" ]
+      [ div [ class_ "calendar-notifications-label" ] [ text label ]
+      , input
+          [ class_ "form-control calendar-input"
+          , type_ InputDatetimeLocal
+          , attr (AttrName "lang") "fr"
+          , placeholder label
+          , onValueChange (ViewAction <<< onChange)
+          , value currentValue
+          ]
+      ]
+
+  renderEditError =
+    maybe (text "") (\msg -> div [ class_ "calendar-error" ] [ text msg ])
 
 statusValue :: ItemStatus -> String
 statusValue status =
@@ -2196,6 +2411,7 @@ editErrorMessage err =
     EditValidation validation -> validationErrorMessage validation
     EditRecurrence msg -> msg
     EditDuration msg -> msg
+    EditTripValidation validation -> tripValidationErrorMessage validation
     EditUnsupported -> "Impossible de modifier cet item."
 
 validationErrorMessage :: ValidationError -> String
@@ -2294,7 +2510,7 @@ dragCalendarHandlers
            Action
        )
 dragCalendarHandlers true _ = []
-dragCalendarHandlers false item | calendarItemSupportsEdit item =
+dragCalendarHandlers false item | calendarItemSupportsDragEdit item =
   case item of
     ServerCalendarItem { id } ->
       [ draggable true
@@ -2318,7 +2534,7 @@ touchCalendarHandlers
            Action
        )
 touchCalendarHandlers false _ = []
-touchCalendarHandlers true item | calendarItemSupportsEdit item =
+touchCalendarHandlers true item | calendarItemSupportsDragEdit item =
   case item of
     ServerCalendarItem { id } ->
       [ onTouchStart (\ev -> DragAction { log: "TouchStart@calendar-card", dragAction: TouchDragStart id ev })
@@ -2518,7 +2734,7 @@ updateItemWindowById targetId newStart newEnd items =
 -- END src/Calendar/Drag.purs
 
 -- BEGIN src/Calendar/Edit.purs
-type EditDraft =
+type TaskEditDraft =
   { itemId :: String
   , itemType :: ItemType
   , title :: String
@@ -2530,10 +2746,29 @@ type EditDraft =
   , recurrence :: RecurrenceDraft
   }
 
+type TripEditDraft =
+  { itemId :: String
+  , departurePlaceId :: String
+  , arrivalPlaceId :: String
+  , windowStart :: String
+  , windowEnd :: String
+  }
+
+data EditDraft
+  = EditTaskDraft TaskEditDraft
+  | EditTripDraft TripEditDraft
+
+derive instance editDraftEq :: Eq EditDraft
+derive instance editDraftGeneric :: Generic EditDraft _
+
+instance editDraftShow :: Show EditDraft where
+  show = genericShow
+
 data EditError
   = EditValidation ValidationError
   | EditRecurrence String
   | EditDuration String
+  | EditTripValidation TripValidationError
   | EditUnsupported
 
 derive instance editErrorEq :: Eq EditError
@@ -2546,74 +2781,124 @@ buildEditDraft item =
   case item of
     ServerCalendarItem { id, content: TaskCalendarItemContent content } ->
       Just
-        { itemId: id
-        , itemType: content.itemType
-        , title: content.title
-        , windowStart: formatDateTimeLocal content.windowStart
-        , windowEnd: formatDateTimeLocal content.windowEnd
-        , category: case content.category of
-            Nothing -> ""
-            Just value -> value
-        , status: content.status
-        , actualDurationMinutes: case content.actualDurationMinutes of
-            Nothing -> ""
-            Just minutes -> show minutes
-        , recurrence: draftFromRecurrence content.recurrenceRule (map DateTime.formatLocalDate content.recurrenceExceptionDates)
-        }
+        ( EditTaskDraft
+            { itemId: id
+            , itemType: content.itemType
+            , title: content.title
+            , windowStart: formatDateTimeLocal content.windowStart
+            , windowEnd: formatDateTimeLocal content.windowEnd
+            , category: case content.category of
+                Nothing -> ""
+                Just value -> value
+            , status: content.status
+            , actualDurationMinutes: case content.actualDurationMinutes of
+                Nothing -> ""
+                Just minutes -> show minutes
+            , recurrence: draftFromRecurrence content.recurrenceRule (map DateTime.formatLocalDate content.recurrenceExceptionDates)
+            }
+        )
+    ServerCalendarItem { id, content: TripCalendarItemContent content } ->
+      Just
+        ( EditTripDraft
+            { itemId: id
+            , departurePlaceId: content.departurePlaceId
+            , arrivalPlaceId: content.arrivalPlaceId
+            , windowStart: formatDateTimeLocal content.windowStart
+            , windowEnd: formatDateTimeLocal content.windowEnd
+            }
+        )
     _ -> Nothing
 
 applyEditDraft :: EditDraft -> CalendarItem -> Either EditError CalendarItem
-applyEditDraft draft item = do
-  let
-    taskDraft :: TaskDraft
-    taskDraft =
-      { itemType: draft.itemType
-      , title: draft.title
-      , windowStart: draft.windowStart
-      , windowEnd: draft.windowEnd
-      , category: draft.category
-      , status: draft.status
-      , actualDurationMinutes: draft.actualDurationMinutes
-      , recurrence: draft.recurrence
-      }
-  case validateTask taskDraft of
-    Left err -> Left (EditValidation err)
-    Right _ -> do
-      recurrence <- case draftToRecurrence draft.recurrence of
-        Left err -> Left (EditRecurrence err)
-        Right ok -> Right ok
-      actualDuration <- parseDuration draft.actualDurationMinutes
-      windowStart <- maybe (Left (EditValidation WindowStartInvalid)) Right (parseDateTimeLocal draft.windowStart)
-      windowEnd <- maybe (Left (EditValidation WindowEndInvalid)) Right (parseDateTimeLocal draft.windowEnd)
-      case item of
-        ServerCalendarItem payload@{ content: TaskCalendarItemContent content } ->
-          Right
-            ( ServerCalendarItem
-                payload
-                  { content =
-                      TaskCalendarItemContent
-                        ( content
-                            { title = draft.title
-                            , windowStart = windowStart
-                            , windowEnd = windowEnd
-                            , category = toOptionalString draft.category
-                            , status = draft.status
-                            , actualDurationMinutes = actualDuration
-                            , recurrenceRule = recurrence.rule
-                            , recurrenceExceptionDates = parseExceptionDatesOrEmpty recurrence.exceptions
-                            }
-                        )
-                  }
-            )
-        _ -> Left EditUnsupported
+applyEditDraft draft item =
+  case draft of
+    EditTaskDraft taskDraft ->
+      let
+        normalizedTaskDraft :: TaskDraft
+        normalizedTaskDraft =
+          { itemType: taskDraft.itemType
+          , title: taskDraft.title
+          , windowStart: taskDraft.windowStart
+          , windowEnd: taskDraft.windowEnd
+          , category: taskDraft.category
+          , status: taskDraft.status
+          , actualDurationMinutes: taskDraft.actualDurationMinutes
+          , recurrence: taskDraft.recurrence
+          }
+      in
+        case validateTask normalizedTaskDraft of
+          Left err -> Left (EditValidation err)
+          Right _ -> do
+            recurrence <- case draftToRecurrence taskDraft.recurrence of
+              Left err -> Left (EditRecurrence err)
+              Right ok -> Right ok
+            actualDuration <- parseTaskDuration taskDraft.actualDurationMinutes
+            windowStart <- maybe (Left (EditValidation WindowStartInvalid)) Right (parseDateTimeLocal taskDraft.windowStart)
+            windowEnd <- maybe (Left (EditValidation WindowEndInvalid)) Right (parseDateTimeLocal taskDraft.windowEnd)
+            case item of
+              ServerCalendarItem payload@{ content: TaskCalendarItemContent content } ->
+                Right
+                  ( ServerCalendarItem
+                      payload
+                        { content =
+                            TaskCalendarItemContent
+                              ( content
+                                  { title = taskDraft.title
+                                  , windowStart = windowStart
+                                  , windowEnd = windowEnd
+                                  , category = toOptionalString taskDraft.category
+                                  , status = taskDraft.status
+                                  , actualDurationMinutes = actualDuration
+                                  , recurrenceRule = recurrence.rule
+                                  , recurrenceExceptionDates = parseExceptionDatesOrEmpty recurrence.exceptions
+                                  }
+                              )
+                        }
+                  )
+              _ -> Left EditUnsupported
+    EditTripDraft tripDraft ->
+      case
+        validateTrip
+          { departurePlaceId: tripDraft.departurePlaceId
+          , arrivalPlaceId: tripDraft.arrivalPlaceId
+          , windowStart: tripDraft.windowStart
+          , windowEnd: tripDraft.windowEnd
+          }
+        of
+        Left err -> Left (EditTripValidation err)
+        Right _ -> do
+          windowStart <- maybe (Left (EditTripValidation TripWindowStartInvalid)) Right (parseDateTimeLocal tripDraft.windowStart)
+          windowEnd <- maybe (Left (EditTripValidation TripWindowEndInvalid)) Right (parseDateTimeLocal tripDraft.windowEnd)
+          case item of
+            ServerCalendarItem payload@{ content: TripCalendarItemContent content } ->
+              Right
+                ( ServerCalendarItem
+                    payload
+                      { content =
+                          TripCalendarItemContent
+                            ( content
+                                { departurePlaceId = tripDraft.departurePlaceId
+                                , arrivalPlaceId = tripDraft.arrivalPlaceId
+                                , windowStart = windowStart
+                                , windowEnd = windowEnd
+                                }
+                            )
+                      }
+                )
+            _ -> Left EditUnsupported
   where
-  parseDuration raw =
+  parseTaskDuration raw =
     if StringCommon.trim raw == "" then
       Right Nothing
     else
       case parsePositiveInt raw of
         Just minutes -> Right (Just minutes)
         Nothing -> Left (EditDuration "Durée réelle invalide.")
+
+editDraftItemId :: EditDraft -> String
+editDraftItemId = case _ of
+  EditTaskDraft draft -> draft.itemId
+  EditTripDraft draft -> draft.itemId
 
 -- END src/Calendar/Edit.purs
 
@@ -2692,6 +2977,27 @@ toOptionalString raw =
   in
     if trimmed == "" then Nothing else Just trimmed
 
+createItemModeValue :: CreateItemMode -> String
+createItemModeValue = case _ of
+  CreateTask -> "task"
+  CreateTrip -> "trip"
+
+parseCreateItemMode :: String -> CreateItemMode
+parseCreateItemMode raw =
+  case raw of
+    "trip" -> CreateTrip
+    _ -> CreateTask
+
+mapCreateDraftWindowStart :: String -> CreateDraft -> CreateDraft
+mapCreateDraftWindowStart raw = case _ of
+  CreateTaskDraft draft -> CreateTaskDraft (draft { windowStart = raw })
+  CreateTripDraft draft -> CreateTripDraft (draft { windowStart = raw })
+
+mapCreateDraftWindowEnd :: String -> CreateDraft -> CreateDraft
+mapCreateDraftWindowEnd raw = case _ of
+  CreateTaskDraft draft -> CreateTaskDraft (draft { windowEnd = raw })
+  CreateTripDraft draft -> CreateTripDraft (draft { windowEnd = raw })
+
 validateTask :: TaskDraft -> Either ValidationError TaskDraft
 validateTask draft =
   case unit of
@@ -2701,6 +3007,221 @@ validateTask draft =
     _ | draft.windowEnd <= draft.windowStart -> Left WindowOrderInvalid
     _ | maybe true (_ <= 5) (durationMinutesBetweenRaw draft.windowStart draft.windowEnd) -> Left WindowTooShort
     _ -> Right draft
+
+validateTrip :: TripDraft -> Either TripValidationError TripDraft
+validateTrip draft =
+  case unit of
+    _ | StringCommon.trim draft.departurePlaceId == "" -> Left TripDeparturePlaceMissing
+    _ | StringCommon.trim draft.arrivalPlaceId == "" -> Left TripArrivalPlaceMissing
+    _ | draft.departurePlaceId == draft.arrivalPlaceId -> Left TripPlacesMustDiffer
+    _ | not (isDateTimeLocal draft.windowStart) -> Left TripWindowStartInvalid
+    _ | not (isDateTimeLocal draft.windowEnd) -> Left TripWindowEndInvalid
+    _ | draft.windowEnd <= draft.windowStart -> Left TripWindowOrderInvalid
+    _ -> Right draft
+
+tripValidationErrorMessage :: TripValidationError -> String
+tripValidationErrorMessage err =
+  case err of
+    TripDeparturePlaceMissing -> "Le lieu de départ est obligatoire."
+    TripArrivalPlaceMissing -> "Le lieu d'arrivée est obligatoire."
+    TripWindowStartInvalid -> "La date de départ est invalide."
+    TripWindowEndInvalid -> "La date d'arrivée est invalide."
+    TripWindowOrderInvalid -> "L'arrivée doit être après le départ."
+    TripPlacesMustDiffer -> "Le lieu de départ et d'arrivée doivent être différents."
+
+decodeTripPlacesResponse :: Response Json -> Either FatalError (Array String)
+decodeTripPlacesResponse response = do
+  tripPlaces <- lmap toFatalError (decodeJson response.body :: Either JsonDecodeError (Array TripPlace))
+  pure $ map (\(TripPlace place) -> place.name) tripPlaces
+
+responseMessage :: Response Json -> Maybe String
+responseMessage response =
+  case decodeJson response.body :: Either JsonDecodeError { message :: String } of
+    Right payload -> Just payload.message
+    Left _ -> Nothing
+
+tripWriteErrorMessage :: Response Json -> String
+tripWriteErrorMessage response =
+  case responseMessage response of
+    Just "departurePlaceId must reference an existing trip place" -> "Le lieu de départ est invalide."
+    Just "arrivalPlaceId must reference an existing trip place" -> "Le lieu d'arrivée est invalide."
+    Just "departurePlaceId and arrivalPlaceId must be different" -> "Le lieu de départ et d'arrivée doivent être différents."
+    Just "windowEnd must be strictly after windowStart" -> "L'arrivée doit être après le départ."
+    Just "trip time window overlaps another trip" -> "Ce trajet chevauche un autre trajet."
+    _ -> "Echec de sauvegarde du trajet (HTTP " <> show (unwrap response.status) <> ")."
+
+createErrorMessage :: Int -> String
+createErrorMessage status =
+  "Echec de creation de l'item (HTTP " <> show status <> ")."
+
+tripPlacesOptions :: TripPlacesState -> Array String
+tripPlacesOptions = case _ of
+  TripPlacesLoaded places -> places
+  _ -> []
+
+tripPlacesReady :: TripPlacesState -> Boolean
+tripPlacesReady = case _ of
+  TripPlacesLoaded _ -> true
+  _ -> false
+
+renderTripPlacesFeedback :: forall w action. TripPlacesState -> HTML w action
+renderTripPlacesFeedback tripPlaces =
+  case tripPlaces of
+    TripPlacesLoading ->
+      div [ class_ "calendar-notifications-label" ] [ text "Chargement des lieux de trajet..." ]
+    TripPlacesLoaded _ ->
+      text ""
+    TripPlacesError message ->
+      div [ class_ "calendar-error" ] [ text message ]
+
+renderTripPlacesField
+  :: String
+  -> (String -> CreateFormAction)
+  -> String
+  -> TripPlacesState
+  -> H.ComponentHTML Action Slots Aff
+renderTripPlacesField label onChange currentValue tripPlaces =
+  let
+    emptyLabel = case label of
+      "Départ" -> "Choisir le départ"
+      _ -> "Choisir l'arrivée"
+  in
+    div [ class_ "calendar-modal-field" ]
+      [ div [ class_ "calendar-notifications-label" ] [ text label ]
+      , select
+          [ class_ "form-select calendar-input"
+          , onValueChange (CreateFormAction <<< onChange)
+          , value currentValue
+          , disabled (not (tripPlacesReady tripPlaces))
+          ]
+          ( [ option [ value "" ] [ text emptyLabel ] ]
+              <> map (\place -> option [ value place ] [ text place ]) (tripPlacesOptions tripPlaces)
+          )
+      ]
+
+renderTripPlacesEditField
+  :: String
+  -> (String -> ViewAction)
+  -> String
+  -> TripPlacesState
+  -> H.ComponentHTML Action Slots Aff
+renderTripPlacesEditField label onChange currentValue tripPlaces =
+  let
+    emptyLabel = case label of
+      "Départ" -> "Choisir le départ"
+      _ -> "Choisir l'arrivée"
+  in
+    div [ class_ "calendar-modal-field" ]
+      [ div [ class_ "calendar-notifications-label" ] [ text label ]
+      , select
+          [ class_ "form-select calendar-input"
+          , onValueChange (ViewAction <<< onChange)
+          , value currentValue
+          , disabled (not (tripPlacesReady tripPlaces))
+          ]
+          ( [ option [ value "" ] [ text emptyLabel ] ]
+              <> map (\place -> option [ value place ] [ text place ]) (tripPlacesOptions tripPlaces)
+          )
+      ]
+
+isCreateSubmitDisabled :: CreateDraft -> TripPlacesState -> Boolean
+isCreateSubmitDisabled draft tripPlaces =
+  case draft of
+    CreateTaskDraft _ -> false
+    CreateTripDraft tripDraft ->
+      not (tripPlacesReady tripPlaces) || case validateTrip tripDraft of
+        Left _ -> true
+        Right _ -> false
+
+isEditSubmitDisabled :: EditPanel -> TripPlacesState -> Boolean
+isEditSubmitDisabled panel tripPlaces =
+  case panel.draft of
+    EditTaskDraft _ -> false
+    EditTripDraft draft ->
+      not (tripPlacesReady tripPlaces)
+        ||
+          case
+            validateTrip
+              { departurePlaceId: draft.departurePlaceId
+              , arrivalPlaceId: draft.arrivalPlaceId
+              , windowStart: draft.windowStart
+              , windowEnd: draft.windowEnd
+              }
+            of
+            Left _ -> true
+            Right _ -> false
+
+updateEditPanelRecurrence :: RecurrenceDraft -> EditPanel -> EditPanel
+updateEditPanelRecurrence recurrence panel =
+  case panel.draft of
+    EditTaskDraft draft ->
+      panel { draft = EditTaskDraft (draft { recurrence = recurrence }), validationError = Nothing }
+    EditTripDraft _ ->
+      panel
+
+updateEditPanelTitle :: String -> EditPanel -> EditPanel
+updateEditPanelTitle raw panel =
+  case panel.draft of
+    EditTaskDraft draft ->
+      panel { draft = EditTaskDraft (draft { title = raw }), validationError = Nothing }
+    EditTripDraft _ ->
+      panel
+
+updateEditPanelWindowStart :: String -> EditPanel -> EditPanel
+updateEditPanelWindowStart raw panel =
+  case panel.draft of
+    EditTaskDraft draft ->
+      panel { draft = EditTaskDraft (draft { windowStart = raw }), validationError = Nothing }
+    EditTripDraft draft ->
+      panel { draft = EditTripDraft (draft { windowStart = raw }), validationError = Nothing }
+
+updateEditPanelWindowEnd :: String -> EditPanel -> EditPanel
+updateEditPanelWindowEnd raw panel =
+  case panel.draft of
+    EditTaskDraft draft ->
+      panel { draft = EditTaskDraft (draft { windowEnd = raw }), validationError = Nothing }
+    EditTripDraft draft ->
+      panel { draft = EditTripDraft (draft { windowEnd = raw }), validationError = Nothing }
+
+updateEditPanelCategory :: String -> EditPanel -> EditPanel
+updateEditPanelCategory raw panel =
+  case panel.draft of
+    EditTaskDraft draft ->
+      panel { draft = EditTaskDraft (draft { category = raw }), validationError = Nothing }
+    EditTripDraft _ ->
+      panel
+
+updateEditPanelStatus :: ItemStatus -> EditPanel -> EditPanel
+updateEditPanelStatus status panel =
+  case panel.draft of
+    EditTaskDraft draft ->
+      panel { draft = EditTaskDraft (draft { status = status }), validationError = Nothing }
+    EditTripDraft _ ->
+      panel
+
+updateEditPanelDuration :: String -> EditPanel -> EditPanel
+updateEditPanelDuration raw panel =
+  case panel.draft of
+    EditTaskDraft draft ->
+      panel { draft = EditTaskDraft (draft { actualDurationMinutes = raw }), validationError = Nothing }
+    EditTripDraft _ ->
+      panel
+
+updateEditPanelDeparturePlace :: String -> EditPanel -> EditPanel
+updateEditPanelDeparturePlace raw panel =
+  case panel.draft of
+    EditTripDraft draft ->
+      panel { draft = EditTripDraft (draft { departurePlaceId = raw }), validationError = Nothing }
+    EditTaskDraft _ ->
+      panel
+
+updateEditPanelArrivalPlace :: String -> EditPanel -> EditPanel
+updateEditPanelArrivalPlace raw panel =
+  case panel.draft of
+    EditTripDraft draft ->
+      panel { draft = EditTripDraft (draft { arrivalPlaceId = raw }), validationError = Nothing }
+    EditTaskDraft _ ->
+      panel
 
 decodeTaskItemType :: String -> Either JsonDecodeError ItemType
 decodeTaskItemType raw =
@@ -2782,6 +3303,11 @@ calendarItemTimelineCardClass item =
 
 calendarItemSupportsEdit :: CalendarItem -> Boolean
 calendarItemSupportsEdit = case _ of
+  ServerCalendarItem _ -> true
+  _ -> false
+
+calendarItemSupportsDragEdit :: CalendarItem -> Boolean
+calendarItemSupportsDragEdit = case _ of
   ServerCalendarItem { content: TaskCalendarItemContent _ } -> true
   _ -> false
 
@@ -2906,6 +3432,13 @@ type TripCalendarItemFields =
   , arrivalPlaceId :: String
   }
 
+type TripDraft =
+  { departurePlaceId :: String
+  , arrivalPlaceId :: String
+  , windowStart :: String
+  , windowEnd :: String
+  }
+
 data CalendarItemContent
   = TaskCalendarItemContent TaskCalendarItemFields
   | TripCalendarItemContent TripCalendarItemFields
@@ -2935,6 +3468,27 @@ type TaskDraft =
   , recurrence :: RecurrenceDraft
   }
 
+data CreateDraft
+  = CreateTaskDraft TaskDraft
+  | CreateTripDraft TripDraft
+
+derive instance createDraftEq :: Eq CreateDraft
+derive instance createDraftGeneric :: Generic CreateDraft _
+
+instance showCreateDraft :: Show CreateDraft where
+  show = genericShow
+
+data TripPlacesState
+  = TripPlacesLoading
+  | TripPlacesLoaded (Array String)
+  | TripPlacesError String
+
+derive instance tripPlacesStateEq :: Eq TripPlacesState
+derive instance tripPlacesStateGeneric :: Generic TripPlacesState _
+
+instance showTripPlacesState :: Show TripPlacesState where
+  show = genericShow
+
 data ValidationError
   = TitleEmpty
   | WindowStartInvalid
@@ -2945,6 +3499,20 @@ data ValidationError
 derive instance validationErrorGeneric :: Generic ValidationError _
 derive instance validationErrorEq :: Eq ValidationError
 instance validationErrorShow :: Show ValidationError where
+  show = genericShow
+
+data TripValidationError
+  = TripDeparturePlaceMissing
+  | TripArrivalPlaceMissing
+  | TripWindowStartInvalid
+  | TripWindowEndInvalid
+  | TripWindowOrderInvalid
+  | TripPlacesMustDiffer
+
+derive instance tripValidationErrorGeneric :: Generic TripValidationError _
+derive instance tripValidationErrorEq :: Eq TripValidationError
+
+instance tripValidationErrorShow :: Show TripValidationError where
   show = genericShow
 
 data SortMode

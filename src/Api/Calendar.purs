@@ -3,10 +3,12 @@ module Api.Calendar
   , updateMethod
   , updatePath
   , getItemsResponse
+  , getTripPlacesResponse
   , createItemResponse
   , updateItemResponse
   , validateItemResponse
   , ValidateItemPayload(..)
+  , TripPlace(..)
   ) where
 
 import Prelude
@@ -16,6 +18,7 @@ import Affjax.Web (get) as Affjax
 import Affjax.Web (post)
 import Api.Common (JsonResponse, jsonBody)
 import Data.Argonaut.Core (jsonEmptyObject)
+import Data.Argonaut.Decode (class DecodeJson, decodeJson, (.:))
 import Data.Argonaut.Encode (class EncodeJson, (:=), (~>))
 import Effect.Aff (Aff)
 
@@ -32,6 +35,9 @@ instance methodShow :: Show Method where
 listPath :: String
 listPath = "/api/v1/calendar-items"
 
+tripPlacesPath :: String
+tripPlacesPath = "/api/v1/trip-places"
+
 createPath :: String
 createPath = "/api/v1/calendar-items"
 
@@ -46,6 +52,9 @@ validatePath itemId = "/api/v1/calendar-items/" <> itemId <> "/validate"
 
 getItemsResponse :: Aff JsonResponse
 getItemsResponse = Affjax.get json listPath
+
+getTripPlacesResponse :: Aff JsonResponse
+getTripPlacesResponse = Affjax.get json tripPlacesPath
 
 createItemResponse :: forall payload. EncodeJson payload => payload -> Aff JsonResponse
 createItemResponse item = post json createPath (jsonBody item)
@@ -63,6 +72,15 @@ validateItemResponse itemId payload =
 newtype ValidateItemPayload = ValidateItemPayload
   { duree_reelle_minutes :: Int }
 
+newtype TripPlace = TripPlace
+  { name :: String }
+
 instance encodeValidateItemPayload :: EncodeJson ValidateItemPayload where
   encodeJson (ValidateItemPayload payload) =
     "duree_reelle_minutes" := payload.duree_reelle_minutes ~> jsonEmptyObject
+
+instance decodeTripPlace :: DecodeJson TripPlace where
+  decodeJson json = do
+    obj <- decodeJson json
+    name <- obj .: "name"
+    pure (TripPlace { name })
