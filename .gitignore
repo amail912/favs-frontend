@@ -12,3 +12,4 @@ static/index.js
 *.swp
 /test-results/
 /dev/
+.codex
