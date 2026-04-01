@@ -1,5 +1,9 @@
 const { test, expect } = require("../fixtures/authenticated");
+const { ensureUser } = require("../support/auth-session");
 const { calendarTab, appTitle } = require("../support/ui");
+
+const API_BASE = process.env.E2E_API_URL || "http://localhost:1234/api";
+const E2E_PASSWORD = process.env.E2E_PASSWORD || "StrongPass123!";
 
 function toLocalDatetimeInput(date) {
   const pad = value => `${value}`.padStart(2, "0");
@@ -178,6 +182,54 @@ test("calendar integration: create task in day view", async ({ authenticatedPage
 
   await expect(row).toBeVisible();
   await appTitle(page).click();
+});
+
+test("calendar share panel: add and remove a shared user", async ({ authenticatedPage: page }, testInfo) => {
+  const sharedUsername = `e2e_shared_${testInfo.workerIndex}_${Date.now()}`;
+
+  await ensureUser({ apiBase: API_BASE, username: sharedUsername, password: E2E_PASSWORD });
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+
+  const sharePanel = page.locator(".calendar-share-panel");
+  await expect(sharePanel).toBeVisible();
+
+  await sharePanel.getByPlaceholder("Nom d'utilisateur").fill(sharedUsername);
+
+  const addResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/trip-sharing/shares") &&
+      response.request().method() === "POST"
+  );
+  const addListResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/trip-sharing/shares") &&
+      response.request().method() === "GET"
+  );
+
+  await sharePanel.getByRole("button", { name: "Ajouter" }).click();
+  expect((await addResponsePromise).ok()).toBeTruthy();
+  expect((await addListResponsePromise).ok()).toBeTruthy();
+
+  const shareRow = sharePanel.locator(".calendar-share-panel__item", { hasText: sharedUsername }).first();
+  await expect(shareRow).toBeVisible();
+
+  const deleteResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes(`/api/v1/trip-sharing/shares/${sharedUsername}`) &&
+      response.request().method() === "DELETE"
+  );
+  const deleteListResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/trip-sharing/shares") &&
+      response.request().method() === "GET"
+  );
+
+  await shareRow.getByRole("button", { name: "Retirer" }).click();
+  expect((await deleteResponsePromise).ok()).toBeTruthy();
+  expect((await deleteListResponsePromise).ok()).toBeTruthy();
+  await expect(shareRow).toHaveCount(0);
 });
 
 test("calendar integration: create item on a later day", async ({ authenticatedPage: page }) => {
@@ -956,6 +1008,7 @@ test("calendar mobile actions: secondary actions stay reachable across views", a
   await expect(actionsButton).toBeVisible();
 
   await actionsButton.click();
+  await expect(page.getByRole("button", { name: "Partage trajets" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Import CSV" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Import ICS" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Export" })).toBeVisible();

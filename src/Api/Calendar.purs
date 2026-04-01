@@ -4,19 +4,22 @@ module Api.Calendar
   , updatePath
   , getItemsResponse
   , getTripPlacesResponse
+  , getSharedUsersResponse
+  , addSharedUserResponse
+  , deleteSharedUserResponse
   , createItemResponse
   , updateItemResponse
   , validateItemResponse
   , ValidateItemPayload(..)
   , TripPlace(..)
+  , TripSharingUser(..)
   ) where
 
 import Prelude
 
-import Affjax.ResponseFormat (json)
-import Affjax.Web (get) as Affjax
-import Affjax.Web (post)
-import Api.Common (JsonResponse, jsonBody)
+import Affjax.ResponseFormat (json, string)
+import Affjax.Web as Affjax
+import Api.Common (JsonResponse, TextResponse, jsonBody)
 import Data.Argonaut.Core (jsonEmptyObject)
 import Data.Argonaut.Decode (class DecodeJson, decodeJson, (.:))
 import Data.Argonaut.Encode (class EncodeJson, (:=), (~>))
@@ -38,6 +41,12 @@ listPath = "/api/v1/calendar-items"
 tripPlacesPath :: String
 tripPlacesPath = "/api/v1/trip-places"
 
+shareUsersPath :: String
+shareUsersPath = "/api/v1/trip-sharing/shares"
+
+shareUserDeletePath :: String -> String
+shareUserDeletePath username = shareUsersPath <> "/" <> username
+
 createPath :: String
 createPath = "/api/v1/calendar-items"
 
@@ -56,17 +65,26 @@ getItemsResponse = Affjax.get json listPath
 getTripPlacesResponse :: Aff JsonResponse
 getTripPlacesResponse = Affjax.get json tripPlacesPath
 
+getSharedUsersResponse :: Aff JsonResponse
+getSharedUsersResponse = Affjax.get json shareUsersPath
+
+addSharedUserResponse :: TripSharingUser -> Aff TextResponse
+addSharedUserResponse user = Affjax.post string shareUsersPath (jsonBody user)
+
+deleteSharedUserResponse :: String -> Aff TextResponse
+deleteSharedUserResponse username = Affjax.delete string (shareUserDeletePath username)
+
 createItemResponse :: forall payload. EncodeJson payload => payload -> Aff JsonResponse
-createItemResponse item = post json createPath (jsonBody item)
+createItemResponse item = Affjax.post json createPath (jsonBody item)
 
 updateItemResponse :: forall payload. EncodeJson payload => String -> payload -> Aff JsonResponse
 updateItemResponse itemId item =
-  post json (updatePath itemId)
+  Affjax.post json (updatePath itemId)
     (jsonBody item)
 
 validateItemResponse :: String -> ValidateItemPayload -> Aff JsonResponse
 validateItemResponse itemId payload =
-  post json (validatePath itemId)
+  Affjax.post json (validatePath itemId)
     (jsonBody payload)
 
 newtype ValidateItemPayload = ValidateItemPayload
@@ -74,6 +92,9 @@ newtype ValidateItemPayload = ValidateItemPayload
 
 newtype TripPlace = TripPlace
   { name :: String }
+
+newtype TripSharingUser = TripSharingUser
+  { username :: String }
 
 instance encodeValidateItemPayload :: EncodeJson ValidateItemPayload where
   encodeJson (ValidateItemPayload payload) =
@@ -84,3 +105,13 @@ instance decodeTripPlace :: DecodeJson TripPlace where
     obj <- decodeJson json
     name <- obj .: "name"
     pure (TripPlace { name })
+
+instance decodeTripSharingUser :: DecodeJson TripSharingUser where
+  decodeJson json = do
+    obj <- decodeJson json
+    username <- obj .: "username"
+    pure (TripSharingUser { username })
+
+instance encodeTripSharingUser :: EncodeJson TripSharingUser where
+  encodeJson (TripSharingUser payload) =
+    "username" := payload.username ~> jsonEmptyObject

@@ -1,5 +1,6 @@
 module Api.Common
   ( JsonResponse
+  , TextResponse
   , jsonBody
   , jsonBodyFromJson
   ) where
@@ -14,6 +15,8 @@ import Data.Either (Either)
 import Data.Maybe (Maybe(..))
 
 type JsonResponse = Either Error (Response Json)
+
+type TextResponse = Either Error (Response String)
 
 jsonBody :: forall a. EncodeJson a => a -> Maybe RequestBody
 jsonBody = Just <<< Json <<< encodeJson

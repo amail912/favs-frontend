@@ -31,7 +31,10 @@ module Pages.Calendar
   , validateTask
   , validateTrip
   , decodeTripPlacesResponse
+  , decodeSharedUsersResponse
   , tripWriteErrorMessage
+  , validateShareUsername
+  , shareWriteErrorMessage
   , calendarItemPrimaryText
   , calendarItemSecondaryText
   , calendarItemCardClass
@@ -48,7 +51,7 @@ module Pages.Calendar
 
 import Prelude hiding (div)
 import Affjax.Web (Response)
-import Api.Calendar (TripPlace(..), createItemResponse, getItemsResponse, getTripPlacesResponse, updateItemResponse)
+import Api.Calendar (TripPlace(..), TripSharingUser(..), addSharedUserResponse, createItemResponse, deleteSharedUserResponse, getItemsResponse, getSharedUsersResponse, getTripPlacesResponse, updateItemResponse)
 import Calendar.Recurrence (RecurrenceDraft, RecurrenceRule, defaultRecurrenceDraft, draftFromRecurrence, draftToRecurrence)
 import Calendar.Recurrence as Recurrence
 import Calendar.ExImport.Export as Export
@@ -59,6 +62,7 @@ import Control.Monad.Trans.Class (lift)
 import Data.Argonaut.Core (Json, jsonEmptyObject)
 import Data.Argonaut.Decode (class DecodeJson, decodeJson, (.:), (.:?))
 import Data.Argonaut.Decode.Error (JsonDecodeError(..))
+import Data.Argonaut.Parser (jsonParser)
 import Data.Array (any, filter, find, findIndex, foldl, length, mapMaybe, mapWithIndex, null, sortBy, uncons, updateAt)
 import Data.Bifunctor (lmap)
 import Data.Either (Either(..), either)
@@ -156,6 +160,7 @@ data Action
   = Init
   | CreateFormAction CreateFormAction
   | DragAction DragAction
+  | ShareAction ShareAction
   | ViewAction ViewAction
   | SyncDraftTitleKeyDown String
   | SyncSubmitTask
@@ -217,8 +222,17 @@ class ToAction a where
 instance toActionCreateFormAction :: ToAction CreateFormAction where
   toAction = CreateFormAction
 
+instance toActionShareAction :: ToAction ShareAction where
+  toAction = ShareAction
+
 instance toActionViewAction :: ToAction ViewAction where
   toAction = ViewAction
+
+data ShareAction
+  = ShareUsernameChanged String
+  | ShareSubmitRequested
+  | ShareDeleteRequested String
+  | ShareReloadRequested
 
 renderAgendaView
   :: forall w
@@ -375,6 +389,9 @@ _calendarLastCreateMode = _calendar <<< _lastCreateMode
 _calendarTripPlaces :: Lens' State TripPlacesState
 _calendarTripPlaces = _calendar <<< _tripPlaces
 
+_calendarShareList :: Lens' State ShareListState
+_calendarShareList = _calendar <<< _shareList
+
 _syncUpdateErrorState :: Lens' State (Maybe String)
 _syncUpdateErrorState = _sync <<< _syncUpdateError
 
@@ -387,6 +404,8 @@ handleAction action = handleError $
     Init -> initAction
     CreateFormAction formAction ->
       lift (applyCreateFormAction formAction)
+    ShareAction shareAction ->
+      lift (handleShareAction shareAction)
     SyncDraftTitleKeyDown key ->
       when (key == "Enter") submitTask
     SyncSubmitTask ->
@@ -676,6 +695,7 @@ initAction = do
   subscribeToGlobalKeyDown
   subscribeToGlobalResize
   lift loadTripPlaces
+  lift loadSharedUsers
   refreshItems
   scheduleDayTimelineFocus
 
@@ -701,6 +721,147 @@ loadTripPlaces = do
             modify_ (_calendarTripPlaces .~ TripPlacesError "Impossible de charger les lieux de trajet.")
       else
         modify_ (_calendarTripPlaces .~ TripPlacesError "Impossible de charger les lieux de trajet.")
+
+loadSharedUsers :: AgendaAppM Unit
+loadSharedUsers = do
+  modify_ (_calendarShareList %~ _ { isLoading = true, loadError = Nothing })
+  result <- liftAff getSharedUsersResponse
+  case result of
+    Left _ ->
+      modify_
+        ( _calendarShareList
+            %~
+              _
+                { isLoading = false
+                , loadError = Just "Impossible de charger les partages de trajets."
+                }
+        )
+    Right response ->
+      if statusOk response then
+        case decodeSharedUsersResponse response of
+          Left _ ->
+            modify_
+              ( _calendarShareList
+                  %~
+                    _
+                      { isLoading = false
+                      , loadError = Just "Impossible de charger les partages de trajets."
+                      }
+              )
+          Right usernames ->
+            modify_
+              ( _calendarShareList
+                  %~
+                    _
+                      { usernames = usernames
+                      , hasLoaded = true
+                      , isLoading = false
+                      , loadError = Nothing
+                      }
+              )
+      else
+        modify_
+          ( _calendarShareList
+              %~
+                _
+                  { isLoading = false
+                  , loadError = Just "Impossible de charger les partages de trajets."
+                  }
+          )
+
+handleShareAction :: ShareAction -> AgendaAppM Unit
+handleShareAction = case _ of
+  ShareUsernameChanged raw ->
+    modify_
+      ( _calendarShareList
+          %~
+            _
+              { usernameDraft = raw
+              , submitError = Nothing
+              }
+      )
+  ShareReloadRequested ->
+    loadSharedUsers
+  ShareSubmitRequested -> do
+    st <- get
+    let shareList = st ^. _calendarShareList
+    case validateShareUsername shareList.usernameDraft of
+      Left err ->
+        modify_ (_calendarShareList %~ _ { submitError = Just err })
+      Right username -> do
+        modify_
+          ( _calendarShareList
+              %~
+                _
+                  { isAdding = true
+                  , submitError = Nothing
+                  }
+          )
+        result <- liftAff $ addSharedUserResponse (TripSharingUser { username })
+        case result of
+          Left _ ->
+            modify_ (_calendarShareList %~ _ { isAdding = false, submitError = Just genericShareWriteErrorMessage })
+          Right response ->
+            if statusOk response then do
+              modify_
+                ( _calendarShareList
+                    %~
+                      _
+                        { isAdding = false
+                        , usernameDraft = ""
+                        , submitError = Nothing
+                        }
+                )
+              loadSharedUsers
+            else
+              modify_
+                ( _calendarShareList
+                    %~
+                      _
+                        { isAdding = false
+                        , submitError = Just (shareWriteErrorMessage response)
+                        }
+                )
+  ShareDeleteRequested username -> do
+    modify_
+      ( _calendarShareList
+          %~
+            \shareList -> shareList
+              { deletingUsernames = markUsernameDeleting username shareList.deletingUsernames
+              , submitError = Nothing
+              }
+      )
+    result <- liftAff $ deleteSharedUserResponse username
+    case result of
+      Left _ ->
+        modify_
+          ( _calendarShareList
+              %~
+                \shareList -> shareList
+                  { deletingUsernames = unmarkUsernameDeleting username shareList.deletingUsernames
+                  , submitError = Just genericShareWriteErrorMessage
+                  }
+          )
+      Right response ->
+        if statusOk response then do
+          modify_
+            ( _calendarShareList
+                %~
+                  \shareList -> shareList
+                    { deletingUsernames = unmarkUsernameDeleting username shareList.deletingUsernames
+                    , submitError = Nothing
+                    }
+            )
+          loadSharedUsers
+        else
+          modify_
+            ( _calendarShareList
+                %~
+                  \shareList -> shareList
+                    { deletingUsernames = unmarkUsernameDeleting username shareList.deletingUsernames
+                    , submitError = Just genericShareWriteErrorMessage
+                    }
+            )
 
 scheduleDayTimelineFocus :: ErrorAgendaAppM Unit
 scheduleDayTimelineFocus = do
@@ -841,7 +1002,7 @@ subscribeToGlobalResize = do
 render :: State -> H.ComponentHTML Action Slots Aff
 render { calendar, sync, mouseDrag, view } =
   let
-    { items } = calendar
+    { items, shareList } = calendar
     { updateError } = sync
     draggingId = mouseDrag.draggingId
     dragHoverIndex = mouseDrag.dragHoverIndex
@@ -863,7 +1024,7 @@ render { calendar, sync, mouseDrag, view } =
                     [ renderAgendaView viewMode focusDate todayDate sortedItems isMobile promotedOverlaps draggingId dragHoverIndex ]
                 ]
             , div [ class_ "calendar-side" ]
-                []
+                [ map toAction (renderShareManager shareList) ]
             ]
         ]
           <> [ renderAgendaModals agendaModalsInput ]
@@ -877,12 +1038,13 @@ type AgendaModalsInput =
   , exportItems :: Array Export.Item
   , draft :: CreateDraft
   , tripPlaces :: TripPlacesState
+  , shareList :: ShareListState
   , validationError :: Maybe String
   , editPanel :: Maybe EditPanel
   }
 
 renderAgendaModals :: AgendaModalsInput -> H.ComponentHTML Action Slots Aff
-renderAgendaModals { activeModal, overlapSheet, exportItems, draft, tripPlaces, validationError, editPanel } =
+renderAgendaModals { activeModal, overlapSheet, exportItems, draft, tripPlaces, shareList, validationError, editPanel } =
   let
     renderModal title content = Modal.renderModal title content (ViewAction ViewCloseModal) (ViewAction ViewCloseModal)
     renderExportModal items =
@@ -899,6 +1061,7 @@ renderAgendaModals { activeModal, overlapSheet, exportItems, draft, tripPlaces, 
     maybe (div [] [])
       case _ of
         ModalTools -> renderModal "Actions" [ map toAction renderToolsContent ]
+        ModalTripShares -> renderModal "Partage des trajets" [ map toAction (renderShareManager shareList) ]
         ModalCreateItem -> Modal.renderModalWithValidateState "Créer un item" [ renderCreateContent draft tripPlaces validationError ]
           (ViewAction ViewCloseCreate)
           createValidateState
@@ -931,7 +1094,7 @@ renderAgendaModals { activeModal, overlapSheet, exportItems, draft, tripPlaces, 
 buildAgendaModalsInput :: State -> AgendaModalsInput
 buildAgendaModalsInput { calendar, view } =
   let
-    { items, draft, tripPlaces, validationError } = calendar
+    { items, draft, tripPlaces, shareList, validationError } = calendar
     { activeModal, overlapSheet, editPanel } = view
   in
     { activeModal
@@ -939,6 +1102,7 @@ buildAgendaModalsInput { calendar, view } =
     , exportItems: mapMaybe toExportItem items
     , draft
     , tripPlaces
+    , shareList
     , validationError
     , editPanel
     }
@@ -1661,6 +1825,7 @@ type CalendarState =
   , validationError :: Maybe String
   , lastCreateMode :: CreateItemMode
   , tripPlaces :: TripPlacesState
+  , shareList :: ShareListState
   }
 
 calendarInitialState :: CalendarState
@@ -1670,6 +1835,19 @@ calendarInitialState =
   , validationError: Nothing
   , lastCreateMode: CreateTask
   , tripPlaces: TripPlacesLoading
+  , shareList: shareListInitialState
+  }
+
+shareListInitialState :: ShareListState
+shareListInitialState =
+  { usernames: []
+  , hasLoaded: false
+  , isLoading: true
+  , loadError: Nothing
+  , usernameDraft: ""
+  , submitError: Nothing
+  , isAdding: false
+  , deletingUsernames: []
   }
 
 emptyTaskDraft :: TaskDraft
@@ -1711,6 +1889,9 @@ _lastCreateMode = prop (Proxy :: _ "lastCreateMode")
 
 _tripPlaces :: Lens' CalendarState TripPlacesState
 _tripPlaces = prop (Proxy :: _ "tripPlaces")
+
+_shareList :: Lens' CalendarState ShareListState
+_shareList = prop (Proxy :: _ "shareList")
 
 -- END src/Calendar/Calendar/State.purs
 
@@ -1947,6 +2128,7 @@ data AgendaModal
   | ModalImportIcs
   | ModalExport
   | ModalTools
+  | ModalTripShares
   | ModalCreateItem
   | ModalEditItem
   | ModalOverlapGroup
@@ -2304,10 +2486,76 @@ renderMobileTools _ =
 renderToolsContent :: forall w. HTML w ViewAction
 renderToolsContent =
   div [ class_ "calendar-modal-stack" ]
-    [ button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalImportCsv)) ] [ text "Import CSV" ]
+    [ button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalTripShares)) ] [ text "Partage trajets" ]
+    , button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalImportCsv)) ] [ text "Import CSV" ]
     , button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalImportIcs)) ] [ text "Import ICS" ]
     , button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalExport)) ] [ text "Export" ]
     ]
+
+renderShareManager :: forall w. ShareListState -> HTML w ShareAction
+renderShareManager shareList =
+  section [ class_ "calendar-list-panel calendar-share-panel" ]
+    [ div [ class_ "calendar-share-panel__header" ]
+        [ div [ class_ "calendar-share-panel__title" ] [ text "Qui peut voir mes trajets" ]
+        , div [ class_ "calendar-share-panel__hint" ]
+            [ text "Cette liste controle uniquement qui peut voir vos trajets." ]
+        , div [ class_ "calendar-share-panel__hint text-muted" ]
+            [ text "Voir les trajets d'une autre personne se regle separement dans les abonnements." ]
+        ]
+    , div [ class_ "calendar-share-panel__form" ]
+        [ div [ class_ "calendar-share-panel__row" ]
+            [ input
+                [ class_ "form-control calendar-input"
+                , placeholder "Nom d'utilisateur"
+                , value shareList.usernameDraft
+                , onValueChange ShareUsernameChanged
+                , disabled shareList.isAdding
+                ]
+            , button
+                [ class_ "btn btn-primary"
+                , onClick (const ShareSubmitRequested)
+                , disabled (isShareSubmitDisabled shareList)
+                ]
+                [ text "Ajouter" ]
+            ]
+        , maybe (text "") (\msg -> div [ class_ "calendar-error" ] [ text msg ]) shareList.submitError
+        ]
+    , renderShareManagerBody shareList
+    ]
+
+renderShareManagerBody :: forall w. ShareListState -> HTML w ShareAction
+renderShareManagerBody shareList
+  | shareList.isLoading && not shareList.hasLoaded =
+      div [ class_ "calendar-share-panel__empty text-muted" ] [ text "Chargement des partages..." ]
+  | otherwise =
+      div [ class_ "calendar-share-panel__body" ]
+        [ maybe (text "") renderShareLoadError shareList.loadError
+        , if null shareList.usernames then
+            div [ class_ "calendar-share-panel__empty text-muted" ] [ text "Personne n'a encore acces a vos trajets." ]
+          else
+            ul [ class_ "calendar-share-panel__list" ] (map renderSharedUsername shareList.usernames)
+        ]
+      where
+      renderShareLoadError message =
+        div [ class_ "calendar-error" ]
+          [ div [] [ text message ]
+          , button
+              [ class_ "btn btn-sm btn-outline-secondary"
+              , onClick (const ShareReloadRequested)
+              ]
+              [ text "Reessayer" ]
+          ]
+
+      renderSharedUsername username =
+        li [ class_ "calendar-share-panel__item" ]
+          [ div [ class_ "calendar-share-panel__username" ] [ text username ]
+          , button
+              [ class_ "btn btn-sm btn-outline-secondary"
+              , onClick (const (ShareDeleteRequested username))
+              , disabled (isUsernameDeleting username shareList)
+              ]
+              [ text "Retirer" ]
+          ]
 
 renderEditContent :: EditPanel -> TripPlacesState -> H.ComponentHTML Action Slots Aff
 renderEditContent panel tripPlaces =
@@ -3034,11 +3282,32 @@ decodeTripPlacesResponse response = do
   tripPlaces <- lmap toFatalError (decodeJson response.body :: Either JsonDecodeError (Array TripPlace))
   pure $ map (\(TripPlace place) -> place.name) tripPlaces
 
+decodeSharedUsersResponse :: Response Json -> Either FatalError (Array String)
+decodeSharedUsersResponse response = do
+  sharedUsers <- lmap toFatalError (decodeJson response.body :: Either JsonDecodeError (Array TripSharingUser))
+  pure $ map (\(TripSharingUser user) -> user.username) sharedUsers
+
+validateShareUsername :: String -> Either String String
+validateShareUsername raw =
+  let
+    trimmed = StringCommon.trim raw
+  in
+    if trimmed == "" then Left "Le nom d'utilisateur est obligatoire." else Right trimmed
+
 responseMessage :: Response Json -> Maybe String
 responseMessage response =
   case decodeJson response.body :: Either JsonDecodeError { message :: String } of
     Right payload -> Just payload.message
     Left _ -> Nothing
+
+textResponseMessage :: Response String -> Maybe String
+textResponseMessage response =
+  case jsonParser response.body of
+    Left _ -> Nothing
+    Right json ->
+      case decodeJson json :: Either JsonDecodeError { message :: String } of
+        Right payload -> Just payload.message
+        Left _ -> Nothing
 
 tripWriteErrorMessage :: Response Json -> String
 tripWriteErrorMessage response =
@@ -3050,9 +3319,40 @@ tripWriteErrorMessage response =
     Just "trip time window overlaps another trip" -> "Ce trajet chevauche un autre trajet."
     _ -> "Echec de sauvegarde du trajet (HTTP " <> show (unwrap response.status) <> ")."
 
+shareWriteErrorMessage :: Response String -> String
+shareWriteErrorMessage response =
+  case textResponseMessage response of
+    Just "username is required" -> "Le nom d'utilisateur est obligatoire."
+    Just "username must not be the authenticated user" -> "Vous ne pouvez pas partager vos trajets avec vous-même."
+    Just "username must reference an existing user" -> "Ce nom d'utilisateur est introuvable."
+    Just "Unable to decode the body as a TripSharingUser" -> "Le format du partage est invalide."
+    _ -> "Echec de mise a jour du partage de trajets (HTTP " <> show (unwrap response.status) <> ")."
+
 createErrorMessage :: Int -> String
 createErrorMessage status =
   "Echec de creation de l'item (HTTP " <> show status <> ")."
+
+genericShareWriteErrorMessage :: String
+genericShareWriteErrorMessage = "Echec de mise a jour du partage de trajets."
+
+isShareSubmitDisabled :: ShareListState -> Boolean
+isShareSubmitDisabled shareList =
+  shareList.isAdding || shareList.isLoading ||
+    case validateShareUsername shareList.usernameDraft of
+      Left _ -> true
+      Right _ -> false
+
+isUsernameDeleting :: String -> ShareListState -> Boolean
+isUsernameDeleting username shareList =
+  any (_ == username) shareList.deletingUsernames
+
+markUsernameDeleting :: String -> Array String -> Array String
+markUsernameDeleting username usernames =
+  if any (_ == username) usernames then usernames else usernames <> [ username ]
+
+unmarkUsernameDeleting :: String -> Array String -> Array String
+unmarkUsernameDeleting username usernames =
+  filter (_ /= username) usernames
 
 tripPlacesOptions :: TripPlacesState -> Array String
 tripPlacesOptions = case _ of
@@ -3488,6 +3788,17 @@ derive instance tripPlacesStateGeneric :: Generic TripPlacesState _
 
 instance showTripPlacesState :: Show TripPlacesState where
   show = genericShow
+
+type ShareListState =
+  { usernames :: Array String
+  , hasLoaded :: Boolean
+  , isLoading :: Boolean
+  , loadError :: Maybe String
+  , usernameDraft :: String
+  , submitError :: Maybe String
+  , isAdding :: Boolean
+  , deletingUsernames :: Array String
+  }
 
 data ValidationError
   = TitleEmpty
