@@ -1,5 +1,6 @@
 module Test.Support.Builders
   ( calendarContent
+  , tripCalendarContent
   , serverCalendarItem
   , unsafeDate
   , unsafeDateTime
@@ -7,7 +8,7 @@ module Test.Support.Builders
 
 import Prelude
 
-import Pages.Calendar (CalendarItem(..), CalendarItemContent, ItemStatus(..), ItemType)
+import Pages.Calendar (CalendarItem(..), CalendarItemContent(..), ItemStatus(..), ItemType)
 import Data.Date (Date)
 import Data.DateTime (DateTime(..))
 import Data.Maybe (Maybe(..))
@@ -18,17 +19,27 @@ import Partial.Unsafe (unsafeCrashWith)
 
 calendarContent :: ItemType -> String -> String -> String -> CalendarItemContent
 calendarContent itemType title windowStart windowEnd =
-  { itemType
-  , title
-  , windowStart: unsafeDateTime windowStart
-  , windowEnd: unsafeDateTime windowEnd
-  , status: Todo
-  , sourceItemId: Nothing
-  , actualDurationMinutes: Nothing
-  , category: Nothing
-  , recurrenceRule: Nothing
-  , recurrenceExceptionDates: []
-  }
+  TaskCalendarItemContent
+    { itemType
+    , title
+    , windowStart: unsafeDateTime windowStart
+    , windowEnd: unsafeDateTime windowEnd
+    , status: Todo
+    , sourceItemId: Nothing
+    , actualDurationMinutes: Nothing
+    , category: Nothing
+    , recurrenceRule: Nothing
+    , recurrenceExceptionDates: []
+    }
+
+tripCalendarContent :: String -> String -> String -> String -> CalendarItemContent
+tripCalendarContent departurePlaceId arrivalPlaceId windowStart windowEnd =
+  TripCalendarItemContent
+    { departurePlaceId
+    , arrivalPlaceId
+    , windowStart: unsafeDateTime windowStart
+    , windowEnd: unsafeDateTime windowEnd
+    }
 
 unsafeDateTime :: String -> DateTime
 unsafeDateTime raw =

@@ -37,8 +37,10 @@ Let users share trip information in a controlled way so each person can understa
 
 ## Stories
 
+### Done
+- [002 Trip Calendar Item](done/002-trip-calendar-item.md) - Introduce trips as a dedicated calendar item variant and render a readable route on existing agenda cards.
+
 ### To Refine
-- [002 Trip Calendar Item](to-refine/002-trip-calendar-item.md) - Introduce trips as a dedicated calendar item variant and render a readable route on existing agenda cards.
 - [003 Trip Validation And Editing](to-refine/003-trip-validation-and-editing.md) - Add trip create and edit flows backed by the place catalog and the backend validation rules.
 - [004 Share Trip Users](to-refine/004-share-trip-users.md) - Let a user manage who may see their trips through the share list endpoints.
 - [005 Subscribe To Trip Users](to-refine/005-subscribe-to-trip-users.md) - Let a user manage whose trips they follow through the subscription list endpoints.

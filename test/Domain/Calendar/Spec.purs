@@ -6,6 +6,7 @@ import Calendar.ExImport.Export as Export
 import Calendar.ExImport.Import (parseCsv, parseIcs)
 import Pages.Calendar
   ( CalendarItem(..)
+  , CalendarItemContent(..)
   , TaskDraft
   , ItemStatus(..)
   , ItemType(..)
@@ -22,6 +23,11 @@ import Pages.Calendar
   , durationMinutesBetween
   , sortItems
   , validateTask
+  , calendarItemPrimaryText
+  , calendarItemSecondaryText
+  , calendarItemCardClass
+  , calendarItemTimelineCardClass
+  , calendarItemSupportsEdit
   , DayFocusTarget(..)
   , computeDayFocusTarget
   )
@@ -35,7 +41,7 @@ import Data.String.Common as StringCommon
 import Data.String.Pattern (Pattern(..))
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (fail, shouldEqual)
-import Test.Support.Builders (calendarContent, serverCalendarItem, unsafeDate, unsafeDateTime)
+import Test.Support.Builders (calendarContent, tripCalendarContent, serverCalendarItem, unsafeDate, unsafeDateTime)
 
 spec :: Spec Unit
 spec = do
@@ -62,24 +68,37 @@ spec = do
 
     it "decodes legacy scheduled-block payloads as tasks" do
       let
+        scheduledContent =
+          case calendarContent Task "Task" "2026-02-19T11:00" "2026-02-19T12:00" of
+            TaskCalendarItemContent content ->
+              TaskCalendarItemContent (content { sourceItemId = Just "source-1" })
+            TripCalendarItemContent _ ->
+              calendarContent Task "Task" "2026-02-19T11:00" "2026-02-19T12:00"
         scheduled =
-          NewCalendarItem
-            { content:
-                { itemType: Task
-                , title: "Task"
-                , windowStart: unsafeDateTime "2026-02-19T11:00"
-                , windowEnd: unsafeDateTime "2026-02-19T12:00"
-                , status: Todo
-                , sourceItemId: Just "source-1"
-                , actualDurationMinutes: Nothing
-                , category: Nothing
-                , recurrenceRule: Nothing
-                , recurrenceExceptionDates: []
-                }
-            }
+          NewCalendarItem { content: scheduledContent }
       case decodeJson (encodeJson scheduled) of
         Right decoded -> decoded `shouldEqual` scheduled
         Left err -> fail $ "Decoding encoded task failed: " <> show err
+
+    it "encodes and decodes trip payloads with trip-specific fields" do
+      let
+        trip =
+          ServerCalendarItem
+            { id: "trip-1"
+            , content: tripCalendarContent "Paris" "St Clair" "2026-02-19T13:15" "2026-02-19T15:00"
+            }
+      case decodeJson (encodeJson trip) of
+        Right decoded -> decoded `shouldEqual` trip
+        Left err -> fail $ "Decoding encoded trip failed: " <> show err
+
+    it "renders trip display helpers with route, hours, styling, and no edit support" do
+      let
+        trip = serverCalendarItem "trip-render" (tripCalendarContent "Paris" "Le Mesnil" "2026-02-19T08:30" "2026-02-19T09:45")
+      calendarItemPrimaryText trip `shouldEqual` "Paris → Le Mesnil"
+      calendarItemSecondaryText trip `shouldEqual` "Départ 08:30 · Arrivée 09:45"
+      calendarItemCardClass trip `shouldEqual` "row list-group-item entity-card calendar-card calendar-card--trip"
+      calendarItemTimelineCardClass trip `shouldEqual` "calendar-calendar-card calendar-calendar-item--trip"
+      calendarItemSupportsEdit trip `shouldEqual` false
 
   describe "Calendar validation" do
     it "fails validation when title is blank" do
@@ -146,11 +165,17 @@ spec = do
     it "applyEditDraft updates title, actualDurationMinutes, and recurrence fields" do
       let
         content =
-          (calendarContent Task "Task" "2026-02-19T09:00" "2026-02-19T10:00")
-            { actualDurationMinutes = Just 25
-            , recurrenceRule = Just Weekly
-            , recurrenceExceptionDates = [ unsafeDate "2026-02-26" ]
-            }
+          case calendarContent Task "Task" "2026-02-19T09:00" "2026-02-19T10:00" of
+            TaskCalendarItemContent taskContent ->
+              TaskCalendarItemContent
+                ( taskContent
+                    { actualDurationMinutes = Just 25
+                    , recurrenceRule = Just Weekly
+                    , recurrenceExceptionDates = [ unsafeDate "2026-02-26" ]
+                    }
+                )
+            TripCalendarItemContent _ ->
+              calendarContent Task "Task" "2026-02-19T09:00" "2026-02-19T10:00"
         item = serverCalendarItem "edit-1" content
       case buildEditDraft item of
         Nothing -> fail "Expected edit draft"
@@ -163,7 +188,7 @@ spec = do
               }
           case applyEditDraft updatedDraft item of
             Left err -> fail $ "Edit failed: " <> show err
-            Right (ServerCalendarItem { content: updated }) -> do
+            Right (ServerCalendarItem { content: TaskCalendarItemContent updated }) -> do
               updated.title `shouldEqual` "Mise a jour"
               updated.actualDurationMinutes `shouldEqual` Just 40
               updated.recurrenceRule `shouldEqual` Just Weekly
@@ -179,6 +204,11 @@ spec = do
         Just draft -> do
           let updatedDraft = draft { actualDurationMinutes = "0" }
           applyEditDraft updatedDraft item `shouldEqual` Left (EditDuration "Durée réelle invalide.")
+
+    it "buildEditDraft does not expose trip items to the task editor" do
+      let
+        trip = serverCalendarItem "trip-edit" (tripCalendarContent "Paris" "St Clair" "2026-02-19T09:00" "2026-02-19T10:30")
+      buildEditDraft trip `shouldEqual` Nothing
 
   describe "Calendar timeline layout" do
     it "clamps end time when it is before the start" do
@@ -487,13 +517,21 @@ spec = do
       let
         itemTodo = serverCalendarItem "todo" (calendarContent Task "Todo" "2026-02-19T09:00" "2026-02-19T10:00")
         itemDone =
-          ServerCalendarItem
-            { id: "done"
-            , content:
-                (calendarContent Task "Done" "2026-02-19T11:00" "2026-02-19T12:00")
-                  { status = Done }
-            }
+          case calendarContent Task "Done" "2026-02-19T11:00" "2026-02-19T12:00" of
+            TaskCalendarItemContent content ->
+              ServerCalendarItem
+                { id: "done"
+                , content: TaskCalendarItemContent (content { status = Done })
+                }
+            TripCalendarItemContent _ ->
+              serverCalendarItem "done" (calendarContent Task "Done" "2026-02-19T11:00" "2026-02-19T12:00")
       sortItems SortByStatus [ itemDone, itemTodo ] `shouldEqual` [ itemTodo, itemDone ]
+
+    it "sortItems SortByTime orders trips and tasks by windowStart" do
+      let
+        task = serverCalendarItem "task" (calendarContent Task "Task" "2026-02-19T10:00" "2026-02-19T11:00")
+        trip = serverCalendarItem "trip" (tripCalendarContent "Paris" "St Clair" "2026-02-19T08:00" "2026-02-19T09:30")
+      sortItems SortByTime [ task, trip ] `shouldEqual` [ trip, task ]
 
   describe "Calendar recurrence" do
     it "generateOccurrencesForMonth excludes exception dates" do

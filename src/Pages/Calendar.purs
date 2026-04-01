@@ -2,7 +2,9 @@ module Pages.Calendar
   ( component
   , decodeCalendarItemsResponse
   , CalendarItem(..)
-  , CalendarItemContent
+  , CalendarItemContent(..)
+  , TaskCalendarItemFields
+  , TripCalendarItemFields
   , TaskDraft
   , ItemStatus(..)
   , ItemType(..)
@@ -21,6 +23,11 @@ module Pages.Calendar
   , durationMinutesBetween
   , sortItems
   , validateTask
+  , calendarItemPrimaryText
+  , calendarItemSecondaryText
+  , calendarItemCardClass
+  , calendarItemTimelineCardClass
+  , calendarItemSupportsEdit
   , computeDropMinuteIndex
   , computeMinuteIndexFromClientY
   , resolveDroppedWindow
@@ -265,39 +272,43 @@ fromExportItemStatus = case _ of
 
 toCalendarItemContent :: Export.Item -> CalendarItemContent
 toCalendarItemContent (Export.Item item) =
-  { itemType: fromExportItemType item.itemType
-  , title: item.title
-  , windowStart: item.windowStart
-  , windowEnd: item.windowEnd
-  , status: fromExportItemStatus item.status
-  , sourceItemId: item.sourceItemId
-  , actualDurationMinutes: item.actualDurationMinutes
-  , category: item.category
-  , recurrenceRule: item.recurrenceRule
-  , recurrenceExceptionDates: item.recurrenceExceptionDates
-  }
+  TaskCalendarItemContent
+    { itemType: fromExportItemType item.itemType
+    , title: item.title
+    , windowStart: item.windowStart
+    , windowEnd: item.windowEnd
+    , status: fromExportItemStatus item.status
+    , sourceItemId: item.sourceItemId
+    , actualDurationMinutes: item.actualDurationMinutes
+    , category: item.category
+    , recurrenceRule: item.recurrenceRule
+    , recurrenceExceptionDates: item.recurrenceExceptionDates
+    }
 
 toCalendarItem :: CalendarItemContent -> CalendarItem
 toCalendarItem content =
   NewCalendarItem { content }
 
-toExportItem :: CalendarItem -> Export.Item
+toExportItem :: CalendarItem -> Maybe Export.Item
 toExportItem item =
-  let
-    content = calendarItemContent item
-  in
-    Export.Item
-      { itemType: view itemTypeIso content.itemType
-      , title: content.title
-      , windowStart: content.windowStart
-      , windowEnd: content.windowEnd
-      , status: view itemStatusIso content.status
-      , category: content.category
-      , sourceItemId: content.sourceItemId
-      , actualDurationMinutes: content.actualDurationMinutes
-      , recurrenceRule: content.recurrenceRule
-      , recurrenceExceptionDates: content.recurrenceExceptionDates
-      }
+  case calendarItemContent item of
+    TaskCalendarItemContent content ->
+      Just
+        ( Export.Item
+            { itemType: view itemTypeIso content.itemType
+            , title: content.title
+            , windowStart: content.windowStart
+            , windowEnd: content.windowEnd
+            , status: view itemStatusIso content.status
+            , category: content.category
+            , sourceItemId: content.sourceItemId
+            , actualDurationMinutes: content.actualDurationMinutes
+            , recurrenceRule: content.recurrenceRule
+            , recurrenceExceptionDates: content.recurrenceExceptionDates
+            }
+        )
+    TripCalendarItemContent _ ->
+      Nothing
 
 component :: forall q i. H.Component q i NoOutput Aff
 component =
@@ -429,7 +440,7 @@ handleDragAction { log, dragAction } = do
                 _ -> false
             )
             (st ^. _calendarItems) <#> \item ->
-            durationMinutesBetween (calendarItemContent item).windowStart (calendarItemContent item).windowEnd
+            durationMinutesBetween (calendarItemWindowStart item) (calendarItemWindowEnd item)
       offset <- liftEffect $ dragOffsetFromEvent ev duration
       modify_ (_mouseDrag %~ ((_draggingId .~ Just itemId) <<< (_dragOffsetMinutes .~ offset)))
     DragEnd ->
@@ -446,10 +457,10 @@ handleDragAction { log, dragAction } = do
             (st ^. _calendarItems)
         duration =
           draggedItem <#> \item ->
-            durationMinutesBetween (calendarItemContent item).windowStart (calendarItemContent item).windowEnd
+            durationMinutesBetween (calendarItemWindowStart item) (calendarItemWindowEnd item)
         startIndex =
           draggedItem <#> \item ->
-            Int.quot (minuteOfDay (calendarItemContent item).windowStart) 5
+            Int.quot (minuteOfDay (calendarItemWindowStart item)) 5
       case startIndex of
         Nothing ->
           modify_ (_mouseDrag %~ clearTouchPendingState)
@@ -539,7 +550,7 @@ handleDragAction { log, dragAction } = do
                       _ -> false
                   )
                   items
-              let mins = durationMinutesBetween (calendarItemContent item).windowStart (calendarItemContent item).windowEnd
+              let mins = durationMinutesBetween (calendarItemWindowStart item) (calendarItemWindowEnd item)
               case hoverIndex of
                 Just adjustedIndex ->
                   resolveDroppedWindowFromIndex
@@ -592,7 +603,7 @@ handleDragAction { log, dragAction } = do
                       _ -> false
                   )
                   items
-              let mins = durationMinutesBetween (calendarItemContent item).windowStart (calendarItemContent item).windowEnd
+              let mins = durationMinutesBetween (calendarItemWindowStart item) (calendarItemWindowEnd item)
               case st ^. (_mouseDrag <<< _dragHoverIndex) of
                 Just adjustedIndex ->
                   resolveDroppedWindowFromIndex
@@ -841,7 +852,7 @@ buildAgendaModalsInput { calendar, view } =
   in
     { activeModal
     , overlapSheet
-    , exportItems: map toExportItem items
+    , exportItems: mapMaybe toExportItem items
     , draft
     , validationError
     , editPanel
@@ -948,7 +959,7 @@ renderDayDragPreview isMobile draggingId dragHoverIndex items =
         )
         items
     let
-      duration = durationMinutesBetween (calendarItemContent item).windowStart (calendarItemContent item).windowEnd
+      duration = durationMinutesBetween (calendarItemWindowStart item) (calendarItemWindowEnd item)
       inlineStyle =
         fold
           [ " --start:"
@@ -1016,7 +1027,7 @@ renderTimelineItem isMobile draggingId focusTargetIdentity layout =
       )
       [ renderTimelineEditButton isMobile layout.item
       , div
-          ([ class_ $ "calendar-calendar-card calendar-calendar-item--task" <> draggingClass ] <> dragProps)
+          ([ class_ $ calendarItemTimelineCardClass layout.item <> draggingClass ] <> dragProps)
           [ div touchProps [ renderTimelineCardContent layout.item ] ]
       ]
 
@@ -1068,13 +1079,14 @@ renderMobileOverlapStack draggingId focusTargetIdentity stack =
       }
   in
     div
-      ([ class_ "calendar-calendar-stack"
-       , style inlineStyle
-       ] <> focusTargetProps)
+      ( [ class_ "calendar-calendar-stack"
+        , style inlineStyle
+        ] <> focusTargetProps
+      )
       ( map (renderMobileOverlapShadow stack.hiddenCount stack.startMin) stack.hiddenCards
           <>
             [ div
-                ([ class_ $ "calendar-calendar-card calendar-calendar-item--task calendar-calendar-stack-top" <> draggingClass ] <> dragProps)
+                ([ class_ $ calendarItemTimelineCardClass stack.topItem <> " calendar-calendar-stack-top" <> draggingClass ] <> dragProps)
                 [ div touchProps [ renderTimelineCardContent stack.topItem ]
                 , renderOverlapSummaryButton overlapSheet
                 ]
@@ -1108,17 +1120,14 @@ renderTimelineCardContent
    . CalendarItem
   -> HTML w Action
 renderTimelineCardContent item =
-  let
-    content = calendarItemContent item
-  in
-    div [ class_ "calendar-calendar-content" ]
-      [ div [ class_ "calendar-calendar-meta" ]
-          [ div [ class_ "calendar-calendar-item-time" ]
-              [ text $ timeLabel content.windowStart <> " → " <> timeLabel content.windowEnd ]
-          , div [ class_ "calendar-calendar-item-title" ] [ text content.title ]
-          , renderCategory content.category
-          ]
-      ]
+  div [ class_ "calendar-calendar-content" ]
+    [ div [ class_ "calendar-calendar-meta" ]
+        [ div [ class_ "calendar-calendar-item-time" ]
+            [ text $ calendarItemTimelineTimeText item ]
+        , div [ class_ "calendar-calendar-item-title" ] [ text (calendarItemPrimaryText item) ]
+        , renderCategory (calendarItemCategory item)
+        ]
+    ]
 
 renderOverlapSummaryButton :: forall w. OverlapSheet -> HTML w Action
 renderOverlapSummaryButton overlapSheet =
@@ -1144,7 +1153,6 @@ renderOverlapSheetContent overlapSheet =
 renderOverlapSheetItem :: forall w. OverlapSheet -> CalendarItem -> HTML w Action
 renderOverlapSheetItem overlapSheet item =
   let
-    content = calendarItemContent item
     isCurrentTop = calendarItemIdentity item == calendarItemIdentity overlapSheet.topItem
     itemClasses =
       "calendar-overlap-sheet__item"
@@ -1162,9 +1170,9 @@ renderOverlapSheetItem overlapSheet item =
     li []
       [ button itemProps
           [ div [ class_ "calendar-overlap-sheet__time" ]
-              [ text $ timeLabel content.windowStart <> " → " <> timeLabel content.windowEnd ]
-          , div [ class_ "calendar-overlap-sheet__title" ] [ text content.title ]
-          , renderCategory content.category
+              [ text $ calendarItemTimelineTimeText item ]
+          , div [ class_ "calendar-overlap-sheet__title" ] [ text (calendarItemPrimaryText item) ]
+          , renderCategory (calendarItemCategory item)
           , if isCurrentTop then
               div [ class_ "calendar-overlap-sheet__state" ] [ text "Visible" ]
             else
@@ -1174,18 +1182,15 @@ renderOverlapSheetItem overlapSheet item =
 
 renderTimelineEditButton :: forall w. Boolean -> CalendarItem -> HTML w Action
 renderTimelineEditButton isMobile item =
-  if isMobile then text ""
+  if isMobile || not (calendarItemSupportsEdit item) then text ""
   else
-    case item of
-      ServerCalendarItem _ ->
-        button
-          [ class_ "btn btn-sm btn-outline-secondary calendar-edit calendar-edit--timeline"
-          , attr (AttrName "aria-label") "Editer"
-          , onMouseDown (const (ViewAction (ViewOpenEdit item)))
-          , onClick (const (ViewAction (ViewOpenEdit item)))
-          ]
-          [ i [ class_ "bi bi-pencil" ] [] ]
-      _ -> text ""
+    button
+      [ class_ "btn btn-sm btn-outline-secondary calendar-edit calendar-edit--timeline"
+      , attr (AttrName "aria-label") "Editer"
+      , onMouseDown (const (ViewAction (ViewOpenEdit item)))
+      , onClick (const (ViewAction (ViewOpenEdit item)))
+      ]
+      [ i [ class_ "bi bi-pencil" ] [] ]
 
 -- END src/Calendar/Calendar/Agenda/Day.purs
 
@@ -1205,16 +1210,14 @@ renderItem
   -> HTML w Action
 renderItem isMobile _ item =
   let
-    content = calendarItemContent item
     editProps = editHandlers isMobile Nothing item
   in
-    li ([ class_ "row list-group-item entity-card calendar-card" ] <> editProps)
+    li ([ class_ (calendarItemCardClass item) ] <> editProps)
       [ div [ class_ "col entity-card-body" ]
-          [ div [ class_ "calendar-card-time" ] [ text (timeLabel content.windowStart) ]
-          , div [ class_ "calendar-card-title" ] [ text content.title ]
-          , div [ class_ "calendar-card-window" ]
-              [ text $ formatDateTimeLocal content.windowStart <> " → " <> formatDateTimeLocal content.windowEnd ]
-          , renderCategory content.category
+          [ div [ class_ "calendar-card-time" ] [ text (calendarItemListTimeText item) ]
+          , div [ class_ "calendar-card-title" ] [ text (calendarItemPrimaryText item) ]
+          , div [ class_ "calendar-card-window" ] [ text (calendarItemSecondaryText item) ]
+          , renderCategory (calendarItemCategory item)
           ]
       ]
 
@@ -1419,17 +1422,18 @@ toNewTask draft = do
     Right
       ( NewCalendarItem
           { content:
-              { itemType: draft.itemType
-              , title: draft.title
-              , windowStart
-              , windowEnd
-              , status: draft.status
-              , sourceItemId: Nothing
-              , actualDurationMinutes: actualDuration
-              , category: toOptionalString draft.category
-              , recurrenceRule: recurrence.rule
-              , recurrenceExceptionDates: parseExceptionDatesOrEmpty recurrence.exceptions
-              }
+              TaskCalendarItemContent
+                { itemType: draft.itemType
+                , title: draft.title
+                , windowStart
+                , windowEnd
+                , status: draft.status
+                , sourceItemId: Nothing
+                , actualDurationMinutes: actualDuration
+                , category: toOptionalString draft.category
+                , recurrenceRule: recurrence.rule
+                , recurrenceExceptionDates: parseExceptionDatesOrEmpty recurrence.exceptions
+                }
           }
       )
   where
@@ -1689,9 +1693,8 @@ assignColumns group =
 toTimelineBlock :: CalendarItem -> Maybe TimelineBlock
 toTimelineBlock item =
   let
-    content = calendarItemContent item
-    startMin = minuteOfDay content.windowStart
-    endMinRaw = minuteOfDay content.windowEnd
+    startMin = minuteOfDay (calendarItemWindowStart item)
+    endMinRaw = minuteOfDay (calendarItemWindowEnd item)
     startClamped = clamp 0 1439 startMin
     endAdjusted = if endMinRaw <= startMin then 1440 else endMinRaw
     endClamped = clamp (startClamped + 1) 1440 endAdjusted
@@ -1703,14 +1706,28 @@ calendarItemIdentity :: CalendarItem -> String
 calendarItemIdentity = case _ of
   ServerCalendarItem { id } -> "server:" <> id
   NewCalendarItem { content } ->
-    fold
-      [ "new:"
-      , content.title
-      , ":"
-      , show content.windowStart
-      , ":"
-      , show content.windowEnd
-      ]
+    let
+      identityLabel =
+        case content of
+          TaskCalendarItemContent taskContent -> taskContent.title
+          TripCalendarItemContent tripContent -> tripRouteLabel tripContent
+      identityStart =
+        case content of
+          TaskCalendarItemContent taskContent -> taskContent.windowStart
+          TripCalendarItemContent tripContent -> tripContent.windowStart
+      identityEnd =
+        case content of
+          TaskCalendarItemContent taskContent -> taskContent.windowEnd
+          TripCalendarItemContent tripContent -> tripContent.windowEnd
+    in
+      fold
+        [ "new:"
+        , identityLabel
+        , ":"
+        , show identityStart
+        , ":"
+        , show identityEnd
+        ]
 
 -- END src/Calendar/Calendar/Timeline.purs
 
@@ -2277,12 +2294,16 @@ dragCalendarHandlers
            Action
        )
 dragCalendarHandlers true _ = []
-dragCalendarHandlers false (ServerCalendarItem { id }) =
-  [ draggable true
-  , onDragStart (\ev -> DragAction { log: "DragStart@calendar-card", dragAction: DragStart id ev })
-  , onDragEnd (const (DragAction { log: "DragEnd@calendar-card", dragAction: DragEnd }))
-  ]
-dragCalendarHandlers false _ = []
+dragCalendarHandlers false item | calendarItemSupportsEdit item =
+  case item of
+    ServerCalendarItem { id } ->
+      [ draggable true
+      , onDragStart (\ev -> DragAction { log: "DragStart@calendar-card", dragAction: DragStart id ev })
+      , onDragEnd (const (DragAction { log: "DragEnd@calendar-card", dragAction: DragEnd }))
+      ]
+    _ -> []
+dragCalendarHandlers false _ =
+  []
 
 touchCalendarHandlers
   :: forall r
@@ -2297,10 +2318,13 @@ touchCalendarHandlers
            Action
        )
 touchCalendarHandlers false _ = []
-touchCalendarHandlers true (ServerCalendarItem { id }) =
-  [ onTouchStart (\ev -> DragAction { log: "TouchStart@calendar-card", dragAction: TouchDragStart id ev })
-  , onTouchCancel (const (DragAction { log: "TouchCancel@calendar-card", dragAction: TouchDragCancel }))
-  ]
+touchCalendarHandlers true item | calendarItemSupportsEdit item =
+  case item of
+    ServerCalendarItem { id } ->
+      [ onTouchStart (\ev -> DragAction { log: "TouchStart@calendar-card", dragAction: TouchDragStart id ev })
+      , onTouchCancel (const (DragAction { log: "TouchCancel@calendar-card", dragAction: TouchDragCancel }))
+      ]
+    _ -> []
 touchCalendarHandlers true _ = []
 
 renderDropIndicator :: forall w action. Int -> HTML w action
@@ -2466,14 +2490,26 @@ updateItemWindowById targetId newStart newEnd items =
     case item of
       ServerCalendarItem payload | payload.id == targetId ->
         let
+          nextContent =
+            case payload.content of
+              TaskCalendarItemContent content ->
+                TaskCalendarItemContent
+                  ( content
+                      { windowStart = newStart
+                      , windowEnd = newEnd
+                      }
+                  )
+              TripCalendarItemContent content ->
+                TripCalendarItemContent
+                  ( content
+                      { windowStart = newStart
+                      , windowEnd = newEnd
+                      }
+                  )
           updatedItem =
             ServerCalendarItem
               payload
-                { content = payload.content
-                    { windowStart = newStart
-                    , windowEnd = newEnd
-                    }
-                }
+                { content = nextContent }
         in
           { items: acc.items <> [ updatedItem ], updated: Just updatedItem }
       _ ->
@@ -2508,7 +2544,7 @@ instance editErrorShow :: Show EditError where
 buildEditDraft :: CalendarItem -> Maybe EditDraft
 buildEditDraft item =
   case item of
-    ServerCalendarItem { id, content } ->
+    ServerCalendarItem { id, content: TaskCalendarItemContent content } ->
       Just
         { itemId: id
         , itemType: content.itemType
@@ -2550,21 +2586,23 @@ applyEditDraft draft item = do
       windowStart <- maybe (Left (EditValidation WindowStartInvalid)) Right (parseDateTimeLocal draft.windowStart)
       windowEnd <- maybe (Left (EditValidation WindowEndInvalid)) Right (parseDateTimeLocal draft.windowEnd)
       case item of
-        ServerCalendarItem payload ->
+        ServerCalendarItem payload@{ content: TaskCalendarItemContent content } ->
           Right
             ( ServerCalendarItem
                 payload
                   { content =
-                      payload.content
-                        { title = draft.title
-                        , windowStart = windowStart
-                        , windowEnd = windowEnd
-                        , category = toOptionalString draft.category
-                        , status = draft.status
-                        , actualDurationMinutes = actualDuration
-                        , recurrenceRule = recurrence.rule
-                        , recurrenceExceptionDates = parseExceptionDatesOrEmpty recurrence.exceptions
-                        }
+                      TaskCalendarItemContent
+                        ( content
+                            { title = draft.title
+                            , windowStart = windowStart
+                            , windowEnd = windowEnd
+                            , category = toOptionalString draft.category
+                            , status = draft.status
+                            , actualDurationMinutes = actualDuration
+                            , recurrenceRule = recurrence.rule
+                            , recurrenceExceptionDates = parseExceptionDatesOrEmpty recurrence.exceptions
+                            }
+                        )
                   }
             )
         _ -> Left EditUnsupported
@@ -2643,19 +2681,6 @@ computeDayFocusTarget selectedDate now itemsForDate
   | null itemsForDate = FocusTop
   | otherwise = FocusFirstTask
 
-focusMinuteForTarget :: DateTime -> Array CalendarItem -> DayFocusTarget -> Int
-focusMinuteForTarget now itemsForDate target =
-  case target of
-    FocusCurrentTime ->
-      max 0 (minuteOfDay now - 120)
-    FocusFirstTask ->
-      case uncons (sortItems SortByTime itemsForDate) of
-        Nothing -> 0
-        Just { head } ->
-          max 0 (minuteOfDay (calendarItemContent head).windowStart - 30)
-    FocusTop ->
-      0
-
 timeLabel :: DateTime -> String
 timeLabel raw =
   DateTime.formatLocalTime (time raw)
@@ -2677,15 +2702,94 @@ validateTask draft =
     _ | maybe true (_ <= 5) (durationMinutesBetweenRaw draft.windowStart draft.windowEnd) -> Left WindowTooShort
     _ -> Right draft
 
+decodeTaskItemType :: String -> Either JsonDecodeError ItemType
+decodeTaskItemType raw =
+  case raw of
+    "INTENTION" -> Right Task
+    "BLOC_PLANIFIE" -> Right Task
+    _ -> Left $ UnexpectedValue (encodeJson raw)
+
 calendarItemContent :: CalendarItem -> CalendarItemContent
 calendarItemContent (NewCalendarItem { content }) = content
 calendarItemContent (ServerCalendarItem { content }) = content
+
+calendarItemWindowStart :: CalendarItem -> DateTime
+calendarItemWindowStart item =
+  case calendarItemContent item of
+    TaskCalendarItemContent content -> content.windowStart
+    TripCalendarItemContent content -> content.windowStart
+
+calendarItemWindowEnd :: CalendarItem -> DateTime
+calendarItemWindowEnd item =
+  case calendarItemContent item of
+    TaskCalendarItemContent content -> content.windowEnd
+    TripCalendarItemContent content -> content.windowEnd
+
+calendarItemCategory :: CalendarItem -> Maybe String
+calendarItemCategory item =
+  case calendarItemContent item of
+    TaskCalendarItemContent content -> content.category
+    TripCalendarItemContent _ -> Nothing
+
+tripRouteLabel :: TripCalendarItemFields -> String
+tripRouteLabel { departurePlaceId, arrivalPlaceId } =
+  departurePlaceId <> " → " <> arrivalPlaceId
+
+calendarItemPrimaryText :: CalendarItem -> String
+calendarItemPrimaryText item =
+  case calendarItemContent item of
+    TaskCalendarItemContent content -> content.title
+    TripCalendarItemContent content -> tripRouteLabel content
+
+calendarItemSecondaryText :: CalendarItem -> String
+calendarItemSecondaryText item =
+  case calendarItemContent item of
+    TaskCalendarItemContent content ->
+      formatDateTimeLocal content.windowStart <> " → " <> formatDateTimeLocal content.windowEnd
+    TripCalendarItemContent content ->
+      "Départ " <> timeLabel content.windowStart <> " · Arrivée " <> timeLabel content.windowEnd
+
+calendarItemTimelineTimeText :: CalendarItem -> String
+calendarItemTimelineTimeText item =
+  case calendarItemContent item of
+    TaskCalendarItemContent content ->
+      timeLabel content.windowStart <> " → " <> timeLabel content.windowEnd
+    TripCalendarItemContent content ->
+      "Départ " <> timeLabel content.windowStart <> " · Arrivée " <> timeLabel content.windowEnd
+
+calendarItemListTimeText :: CalendarItem -> String
+calendarItemListTimeText item =
+  case calendarItemContent item of
+    TaskCalendarItemContent content -> timeLabel content.windowStart
+    TripCalendarItemContent _ -> "Trajet"
+
+isTripCalendarItem :: CalendarItem -> Boolean
+isTripCalendarItem item =
+  case calendarItemContent item of
+    TripCalendarItemContent _ -> true
+    TaskCalendarItemContent _ -> false
+
+calendarItemCardClass :: CalendarItem -> String
+calendarItemCardClass item =
+  "row list-group-item entity-card calendar-card"
+    <> guard (isTripCalendarItem item) " calendar-card--trip"
+
+calendarItemTimelineCardClass :: CalendarItem -> String
+calendarItemTimelineCardClass item =
+  "calendar-calendar-card"
+    <> guard (not (isTripCalendarItem item)) " calendar-calendar-item--task"
+    <> guard (isTripCalendarItem item) " calendar-calendar-item--trip"
+
+calendarItemSupportsEdit :: CalendarItem -> Boolean
+calendarItemSupportsEdit = case _ of
+  ServerCalendarItem { content: TaskCalendarItemContent _ } -> true
+  _ -> false
 
 isItemOnDate :: String -> CalendarItem -> Boolean
 isItemOnDate dateStr item =
   case parseDateLocal dateStr of
     Nothing -> false
-    Just dateValue -> date (calendarItemContent item).windowStart == dateValue
+    Just dateValue -> date (calendarItemWindowStart item) == dateValue
 
 generateDateRange :: String -> Int -> Array String
 generateDateRange start count =
@@ -2741,16 +2845,22 @@ sortItems mode items =
     SortByCategory -> sortBy compareCategory items
     SortByTime -> sortBy compareTime items
   where
-  compareTime a b = compare (calendarItemContent a).windowStart (calendarItemContent b).windowStart
+  compareTime a b = compare (calendarItemWindowStart a) (calendarItemWindowStart b)
 
-  compareStatus a b = compare (statusRank (calendarItemContent a).status) (statusRank (calendarItemContent b).status)
+  compareStatus a b = compare (statusRank (calendarItemStatus a)) (statusRank (calendarItemStatus b))
 
-  compareCategory a b = compare (categoryKey (calendarItemContent a).category) (categoryKey (calendarItemContent b).category)
+  compareCategory a b = compare (categoryKey (calendarItemCategory a)) (categoryKey (calendarItemCategory b))
 
-  statusRank Todo = 0
-  statusRank InProgress = 1
-  statusRank Done = 2
-  statusRank Canceled = 3
+  calendarItemStatus item =
+    case calendarItemContent item of
+      TaskCalendarItemContent content -> Just content.status
+      TripCalendarItemContent _ -> Nothing
+
+  statusRank (Just Todo) = 0
+  statusRank (Just InProgress) = 1
+  statusRank (Just Done) = 2
+  statusRank (Just Canceled) = 3
+  statusRank Nothing = 4
 
   categoryKey Nothing = "~~~"
   categoryKey (Just value) = value
@@ -2776,7 +2886,7 @@ derive instance itemStatusEq :: Eq ItemStatus
 instance itemStatusShow :: Show ItemStatus where
   show = genericShow
 
-type CalendarItemContent =
+type TaskCalendarItemFields =
   { itemType :: ItemType
   , title :: String
   , windowStart :: DateTime
@@ -2788,6 +2898,22 @@ type CalendarItemContent =
   , recurrenceRule :: Maybe RecurrenceRule
   , recurrenceExceptionDates :: Array Date
   }
+
+type TripCalendarItemFields =
+  { windowStart :: DateTime
+  , windowEnd :: DateTime
+  , departurePlaceId :: String
+  , arrivalPlaceId :: String
+  }
+
+data CalendarItemContent
+  = TaskCalendarItemContent TaskCalendarItemFields
+  | TripCalendarItemContent TripCalendarItemFields
+
+derive instance calendarItemContentGeneric :: Generic CalendarItemContent _
+derive instance calendarItemContentEq :: Eq CalendarItemContent
+instance calendarItemContentShow :: Show CalendarItemContent where
+  show = genericShow
 
 data CalendarItem
   = NewCalendarItem { content :: CalendarItemContent }
@@ -2871,31 +2997,51 @@ instance itemStatusDecodeJson :: DecodeJson ItemStatus where
 instance calendarItemDecodeJson :: DecodeJson CalendarItem where
   decodeJson json = do
     obj <- decodeJson json
-    itemType <- obj .: "type"
-    title <- obj .: "titre"
-    windowStartRaw <- obj .: "fenetre_debut"
-    windowEndRaw <- obj .: "fenetre_fin"
-    windowStart <- maybe (Left $ UnexpectedValue (encodeJson windowStartRaw)) Right (DateTime.parseLocalDateTime windowStartRaw)
-    windowEnd <- maybe (Left $ UnexpectedValue (encodeJson windowEndRaw)) Right (DateTime.parseLocalDateTime windowEndRaw)
-    status <- obj .: "statut"
-    sourceItemId <- obj .:? "source_item_id"
-    actualDurationMinutes <- obj .:? "duree_reelle_minutes"
-    category <- obj .:? "categorie"
-    recurrenceRule <- obj .:? "recurrence_rule"
-    recurrenceExceptionDatesRaw <- obj .:? "recurrence_exception_dates"
-    let
-      content =
-        { itemType
-        , title
-        , windowStart
-        , windowEnd
-        , status
-        , sourceItemId
-        , actualDurationMinutes
-        , category
-        , recurrenceRule
-        , recurrenceExceptionDates: parseExceptionDatesOrEmpty (fromMaybe [] recurrenceExceptionDatesRaw)
-        }
+    rawType <- obj .: "type"
+    content <-
+      case rawType of
+        "trip" -> do
+          windowStartRaw <- obj .: "windowStart"
+          windowEndRaw <- obj .: "windowEnd"
+          windowStart <- maybe (Left $ UnexpectedValue (encodeJson windowStartRaw)) Right (DateTime.parseLocalDateTime windowStartRaw)
+          windowEnd <- maybe (Left $ UnexpectedValue (encodeJson windowEndRaw)) Right (DateTime.parseLocalDateTime windowEndRaw)
+          departurePlaceId <- obj .: "departurePlaceId"
+          arrivalPlaceId <- obj .: "arrivalPlaceId"
+          pure
+            ( TripCalendarItemContent
+                { windowStart
+                , windowEnd
+                , departurePlaceId
+                , arrivalPlaceId
+                }
+            )
+        _ -> do
+          itemType <- decodeTaskItemType rawType
+          title <- obj .: "titre"
+          windowStartRaw <- obj .: "fenetre_debut"
+          windowEndRaw <- obj .: "fenetre_fin"
+          windowStart <- maybe (Left $ UnexpectedValue (encodeJson windowStartRaw)) Right (DateTime.parseLocalDateTime windowStartRaw)
+          windowEnd <- maybe (Left $ UnexpectedValue (encodeJson windowEndRaw)) Right (DateTime.parseLocalDateTime windowEndRaw)
+          status <- obj .: "statut"
+          sourceItemId <- obj .:? "source_item_id"
+          actualDurationMinutes <- obj .:? "duree_reelle_minutes"
+          category <- obj .:? "categorie"
+          recurrenceRule <- obj .:? "recurrence_rule"
+          recurrenceExceptionDatesRaw <- obj .:? "recurrence_exception_dates"
+          pure
+            ( TaskCalendarItemContent
+                { itemType
+                , title
+                , windowStart
+                , windowEnd
+                , status
+                , sourceItemId
+                , actualDurationMinutes
+                , category
+                , recurrenceRule
+                , recurrenceExceptionDates: parseExceptionDatesOrEmpty (fromMaybe [] recurrenceExceptionDatesRaw)
+                }
+            )
     either (const $ pure $ NewCalendarItem { content })
       (\id -> pure $ ServerCalendarItem { content, id })
       (obj .: "id")
@@ -2908,34 +3054,42 @@ instance calendarItemEncodeJson :: EncodeJson CalendarItem where
       ~> encodeCalendarContent content
 
 encodeCalendarContent :: CalendarItemContent -> Json
-encodeCalendarContent { itemType, title, windowStart, windowEnd, status, sourceItemId, actualDurationMinutes, category, recurrenceRule, recurrenceExceptionDates } =
-  withRecurrence $ withCategory $ withDuration $ withSourceItem $
-    "type" := itemType
-      ~> "titre" := title
-      ~> "fenetre_debut" := formatDateTimeLocal windowStart
-      ~> "fenetre_fin" := formatDateTimeLocal windowEnd
-      ~> "statut" := status
+encodeCalendarContent = case _ of
+  TaskCalendarItemContent { itemType, title, windowStart, windowEnd, status, sourceItemId, actualDurationMinutes, category, recurrenceRule, recurrenceExceptionDates } ->
+    withRecurrence $ withCategory $ withDuration $ withSourceItem $
+      "type" := itemType
+        ~> "titre" := title
+        ~> "fenetre_debut" := formatDateTimeLocal windowStart
+        ~> "fenetre_fin" := formatDateTimeLocal windowEnd
+        ~> "statut" := status
+        ~> jsonEmptyObject
+    where
+    withSourceItem base =
+      case sourceItemId of
+        Just sourceId -> "source_item_id" := sourceId ~> base
+        Nothing -> base
+    withDuration base =
+      case actualDurationMinutes of
+        Just minutes -> "duree_reelle_minutes" := minutes ~> base
+        Nothing -> base
+    withCategory base =
+      case category of
+        Just value -> "categorie" := value ~> base
+        Nothing -> base
+    withRecurrence base =
+      case recurrenceRule of
+        Just rule ->
+          "recurrence_rule" := encodeJson rule
+            ~> "recurrence_exception_dates" := map DateTime.formatLocalDate recurrenceExceptionDates
+            ~> base
+        Nothing -> base
+  TripCalendarItemContent { windowStart, windowEnd, departurePlaceId, arrivalPlaceId } ->
+    "type" := "trip"
+      ~> "windowStart" := formatDateTimeLocal windowStart
+      ~> "windowEnd" := formatDateTimeLocal windowEnd
+      ~> "departurePlaceId" := departurePlaceId
+      ~> "arrivalPlaceId" := arrivalPlaceId
       ~> jsonEmptyObject
-  where
-  withSourceItem base =
-    case sourceItemId of
-      Just sourceId -> "source_item_id" := sourceId ~> base
-      Nothing -> base
-  withDuration base =
-    case actualDurationMinutes of
-      Just minutes -> "duree_reelle_minutes" := minutes ~> base
-      Nothing -> base
-  withCategory base =
-    case category of
-      Just value -> "categorie" := value ~> base
-      Nothing -> base
-  withRecurrence base =
-    case recurrenceRule of
-      Just rule ->
-        "recurrence_rule" := encodeJson rule
-          ~> "recurrence_exception_dates" := map DateTime.formatLocalDate recurrenceExceptionDates
-          ~> base
-      Nothing -> base
 
 -- BEGIN src/Calendar/purs
 type SyncState =

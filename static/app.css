@@ -654,6 +654,16 @@ a.nav-link:hover {
   border-color: rgba(45, 108, 223, 0.3);
 }
 
+.calendar-calendar-item--trip {
+  background: rgba(240, 251, 246, 0.96);
+  border-color: rgba(30, 133, 100, 0.28);
+  border-left-color: #1e8564;
+}
+
+.calendar-calendar-item--trip .calendar-calendar-item-time {
+  color: #16654d;
+}
+
 .calendar-calendar-item--dragging {
   box-shadow:
     0 0 0 3px rgba(47, 111, 228, 0.28),
@@ -961,6 +971,12 @@ a.nav-link:hover {
   border-left: 0;
 }
 
+.calendar-card--trip {
+  cursor: default;
+  background: rgba(240, 251, 246, 0.82);
+  border-color: rgba(30, 133, 100, 0.18);
+}
+
 .calendar-card::before {
   content: "";
   position: absolute;
@@ -972,10 +988,20 @@ a.nav-link:hover {
   background: #2d6cdf;
   box-shadow: 0 0 0 4px rgba(45, 108, 223, 0.15);
 }
+
+.calendar-card--trip::before {
+  background: #1e8564;
+  box-shadow: 0 0 0 4px rgba(30, 133, 100, 0.16);
+}
+
 .calendar-card-time {
   font-weight: 700;
   color: #1d52b3;
   margin-bottom: 0.2rem;
+}
+
+.calendar-card--trip .calendar-card-time {
+  color: #16654d;
 }
 
 .calendar-card-category {
