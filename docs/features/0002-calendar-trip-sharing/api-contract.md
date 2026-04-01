@@ -19,8 +19,14 @@ Define the backend contract needed to support trip sharing and frontend-derived 
 Returns the fixed list of places available for trips.
 
 Response fields per place:
-- `id`
 - `name`
+
+The place name is the identifier for this iteration.
+
+Initial place list currently implemented by the backend:
+- `Paris`
+- `Le Mesnil`
+- `St Clair`
 
 No short label is returned by the backend.
 
@@ -37,20 +43,23 @@ Trips reuse the existing calendar item endpoints.
 - `POST /api/v1/calendar-items`
 
 Relevant fields for trip items:
-- common calendar item fields reused by trips:
-  - `windowStart`
-  - `windowEnd`
-- trip-specific fields:
-  - `type = "trip"`
-  - `departurePlaceId`
-  - `arrivalPlaceId`
+- `type = "trip"`
+- `windowStart`
+- `windowEnd`
+- `departurePlaceId`
+- `arrivalPlaceId`
 
 Validation rules:
 - `departurePlaceId` must exist in `trip-places`
 - `arrivalPlaceId` must exist in `trip-places`
 - `departurePlaceId != arrivalPlaceId`
 - `windowEnd` must be strictly after `windowStart`
+- trip windows for the same owner must not overlap
 - only the owner can create, update, or delete their trip items
+
+Notes:
+- The backend currently accepts ISO local date-time strings for trip windows.
+- Trip fields use `windowStart` and `windowEnd`, not the legacy `fenetre_debut` and `fenetre_fin` names used by non-trip calendar items.
 
 ## Sharing Lists
 The backend should expose two independent user lists for the authenticated user.
@@ -90,6 +99,11 @@ Recommended response shape:
   - `username`
   - ordered `trips`
 
+Result-shape notes from the current backend:
+- users with no visible trip before the period and no trip inside the period are omitted
+- trips inside each user group are ordered by parsed `windowStart`
+- the seed trip, when present, is the latest trip whose `windowStart` is strictly before `start`
+
 This endpoint should be specialized for shared-trip consultation instead of overloading the generic calendar items response.
 
 ## Why The Period Trips Contract Works
@@ -107,7 +121,7 @@ This contract becomes insufficient if later rules allow:
 - ambiguous ordering rules between trips
 
 The backend contract should therefore explicitly guarantee:
-- no overlapping trips for a given user, or a deterministic equivalent rule
+- no overlapping trips for a given user
 - location changes only through trips
 - ordering by `windowStart`
 
@@ -123,6 +137,7 @@ The frontend should derive presence over the requested period as follows:
 - Contract tests for `GET /api/v1/trip-places`
 - Contract tests for trip create and update through `calendar-items`
 - Validation tests for invalid places, identical departure and arrival, and invalid time windows
+- Validation tests for overlapping trips owned by the same user
 - Authorization tests for trip ownership
 - Contract tests for share and subscription list management
 - Period-trips tests covering:
