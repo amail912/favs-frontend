@@ -32,6 +32,10 @@ module Pages.Calendar
   , validateTrip
   , decodeTripPlacesResponse
   , decodeSharedUsersResponse
+  , decodePeriodTripsResponse
+  , normalizePeriodTripGroups
+  , SharedPeriodTrip
+  , SharedPeriodTripGroup
   , tripWriteErrorMessage
   , validateShareUsername
   , shareWriteErrorMessage
@@ -52,7 +56,7 @@ module Pages.Calendar
 
 import Prelude hiding (div)
 import Affjax.Web (Response)
-import Api.Calendar (TripPlace(..), TripSharingUser(..), addSharedUserResponse, addSubscribedUserResponse, createItemResponse, deleteSharedUserResponse, deleteSubscribedUserResponse, getItemsResponse, getSharedUsersResponse, getSubscribedUsersResponse, getTripPlacesResponse, updateItemResponse)
+import Api.Calendar (PeriodTrip(..), PeriodTripGroup(..), TripPlace(..), TripSharingUser(..), addSharedUserResponse, addSubscribedUserResponse, createItemResponse, deleteSharedUserResponse, deleteSubscribedUserResponse, getItemsResponse, getPeriodTripsResponse, getSharedUsersResponse, getSubscribedUsersResponse, getTripPlacesResponse, updateItemResponse)
 import Calendar.Recurrence (RecurrenceDraft, RecurrenceRule, defaultRecurrenceDraft, draftFromRecurrence, draftToRecurrence)
 import Calendar.Recurrence as Recurrence
 import Calendar.ExImport.Export as Export
@@ -119,6 +123,7 @@ import Data.Time (Time, hour, minute)
 import Data.String.Common as StringCommon
 import Data.Argonaut.Encode (class EncodeJson, encodeJson, (:=), (~>))
 import Data.Int as Int
+import Data.Traversable (traverse)
 
 -- foldl comes from Data.Array in this module
 
@@ -406,6 +411,9 @@ _calendarShareList = _calendar <<< _shareList
 _calendarSubscriptionList :: Lens' State ShareListState
 _calendarSubscriptionList = _calendar <<< _subscriptionList
 
+_calendarSharedTrips :: Lens' State SharedTripsState
+_calendarSharedTrips = _calendar <<< _sharedTrips
+
 _syncUpdateErrorState :: Lens' State (Maybe String)
 _syncUpdateErrorState = _sync <<< _syncUpdateError
 
@@ -444,8 +452,16 @@ handleAction action = handleError $
           modify_ ((_calendarDraft .~ nextDraft) <<< (_calendarValidationError .~ Nothing))
         ViewOpenEdit _ -> focusModal
         ViewOpenEditFromDoubleClick _ -> focusModal
-        ViewChangedAction _ -> scheduleDayTimelineFocus
-        ViewFocusDateChanged _ -> scheduleDayTimelineFocus
+        ViewChangedAction _ -> do
+          scheduleDayTimelineFocus
+          st' <- get
+          when (st' ^. (_view <<< _viewMode) == ViewDay) $
+            lift loadSharedTripsForFocusDate
+        ViewFocusDateChanged _ -> do
+          scheduleDayTimelineFocus
+          st' <- get
+          when (st' ^. (_view <<< _viewMode) == ViewDay) $
+            lift loadSharedTripsForFocusDate
         ViewCloseCreate -> do
           st <- get
           let
@@ -713,6 +729,7 @@ initAction = do
   lift loadTripPlaces
   lift loadSharedUsers
   lift loadSubscribedUsers
+  lift loadSharedTripsForFocusDate
   refreshItems
   scheduleDayTimelineFocus
 
@@ -832,6 +849,29 @@ loadSubscribedUsers = do
                   , loadError = Just "Impossible de charger les abonnements de trajets."
                   }
           )
+
+loadSharedTripsForFocusDate :: AgendaAppM Unit
+loadSharedTripsForFocusDate = do
+  st <- get
+  let focusDate = st ^. _viewFocusDatePage
+  case buildDayPeriodRange focusDate of
+    Nothing ->
+      modify_ (_calendarSharedTrips .~ SharedTripsError "Impossible de charger les trajets partagés pour cette date.")
+    Just { start, end } -> do
+      modify_ (_calendarSharedTrips .~ SharedTripsLoading)
+      result <- liftAff $ getPeriodTripsResponse start end
+      case result of
+        Left _ ->
+          modify_ (_calendarSharedTrips .~ SharedTripsError "Impossible de charger les trajets partagés pour cette date.")
+        Right response ->
+          if statusOk response then
+            case decodePeriodTripsResponse response of
+              Left _ ->
+                modify_ (_calendarSharedTrips .~ SharedTripsError "Impossible de charger les trajets partagés pour cette date.")
+              Right groups ->
+                modify_ (_calendarSharedTrips .~ SharedTripsLoaded (normalizePeriodTripGroups groups))
+          else
+            modify_ (_calendarSharedTrips .~ SharedTripsError "Impossible de charger les trajets partagés pour cette date.")
 
 handleShareAction :: ShareAction -> AgendaAppM Unit
 handleShareAction = case _ of
@@ -1990,6 +2030,7 @@ type CalendarState =
   , tripPlaces :: TripPlacesState
   , shareList :: ShareListState
   , subscriptionList :: ShareListState
+  , sharedTrips :: SharedTripsState
   }
 
 calendarInitialState :: CalendarState
@@ -2001,6 +2042,7 @@ calendarInitialState =
   , tripPlaces: TripPlacesLoading
   , shareList: shareListInitialState
   , subscriptionList: shareListInitialState
+  , sharedTrips: SharedTripsLoading
   }
 
 shareListInitialState :: ShareListState
@@ -2060,6 +2102,9 @@ _shareList = prop (Proxy :: _ "shareList")
 
 _subscriptionList :: Lens' CalendarState ShareListState
 _subscriptionList = prop (Proxy :: _ "subscriptionList")
+
+_sharedTrips :: Lens' CalendarState SharedTripsState
+_sharedTrips = prop (Proxy :: _ "sharedTrips")
 
 -- END src/Calendar/Calendar/State.purs
 
@@ -3376,6 +3421,16 @@ parseDateTimeLocal = DateTime.parseLocalDateTime
 parseDateLocal :: String -> Maybe Date
 parseDateLocal = DateTime.parseLocalDate
 
+buildDayPeriodRange :: String -> Maybe { start :: String, end :: String }
+buildDayPeriodRange selectedDate = do
+  startDate <- parseDateLocal selectedDate
+  startTime <- parseTimeLocal "00:00"
+  endDate <- addDaysToDate 1 startDate
+  pure
+    { start: formatDateTimeLocal (DateTime startDate startTime)
+    , end: formatDateTimeLocal (DateTime endDate startTime)
+    }
+
 parseExceptionDatesOrEmpty :: Array String -> Array Date
 parseExceptionDatesOrEmpty exceptions =
   let
@@ -3502,6 +3557,27 @@ decodeSharedUsersResponse :: Response Json -> Either FatalError (Array String)
 decodeSharedUsersResponse response = do
   sharedUsers <- lmap toFatalError (decodeJson response.body :: Either JsonDecodeError (Array TripSharingUser))
   pure $ map (\(TripSharingUser user) -> user.username) sharedUsers
+
+decodePeriodTripsResponse :: Response Json -> Either FatalError (Array PeriodTripGroup)
+decodePeriodTripsResponse response =
+  lmap toFatalError (decodeJson response.body :: Either JsonDecodeError (Array PeriodTripGroup))
+
+normalizePeriodTripGroups :: Array PeriodTripGroup -> Array SharedPeriodTripGroup
+normalizePeriodTripGroups groups =
+  mapMaybe normalizeGroup groups
+  where
+  normalizeGroup (PeriodTripGroup group) =
+    { username: group.username, trips: _ } <$> traverse normalizeTrip group.trips
+
+  normalizeTrip (PeriodTrip trip) = do
+    windowStart <- parseDateTimeLocal trip.windowStart
+    windowEnd <- parseDateTimeLocal trip.windowEnd
+    pure
+      { windowStart
+      , windowEnd
+      , departurePlaceId: trip.departurePlaceId
+      , arrivalPlaceId: trip.arrivalPlaceId
+      }
 
 validateShareUsername :: String -> Either String String
 validateShareUsername raw =
@@ -4027,6 +4103,29 @@ type ShareListState =
   , isAdding :: Boolean
   , deletingUsernames :: Array String
   }
+
+type SharedPeriodTrip =
+  { windowStart :: DateTime
+  , windowEnd :: DateTime
+  , departurePlaceId :: String
+  , arrivalPlaceId :: String
+  }
+
+type SharedPeriodTripGroup =
+  { username :: String
+  , trips :: Array SharedPeriodTrip
+  }
+
+data SharedTripsState
+  = SharedTripsLoading
+  | SharedTripsLoaded (Array SharedPeriodTripGroup)
+  | SharedTripsError String
+
+derive instance sharedTripsStateEq :: Eq SharedTripsState
+derive instance sharedTripsStateGeneric :: Generic SharedTripsState _
+
+instance showSharedTripsState :: Show SharedTripsState where
+  show = genericShow
 
 data ValidationError
   = TitleEmpty

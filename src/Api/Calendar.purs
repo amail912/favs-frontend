@@ -6,6 +6,7 @@ module Api.Calendar
   , getTripPlacesResponse
   , getSharedUsersResponse
   , getSubscribedUsersResponse
+  , getPeriodTripsResponse
   , addSharedUserResponse
   , addSubscribedUserResponse
   , deleteSharedUserResponse
@@ -16,6 +17,8 @@ module Api.Calendar
   , ValidateItemPayload(..)
   , TripPlace(..)
   , TripSharingUser(..)
+  , PeriodTrip(..)
+  , PeriodTripGroup(..)
   ) where
 
 import Prelude
@@ -50,6 +53,9 @@ shareUsersPath = "/api/v1/trip-sharing/shares"
 subscribedUsersPath :: String
 subscribedUsersPath = "/api/v1/trip-sharing/subscriptions"
 
+periodTripsPath :: String
+periodTripsPath = "/api/v1/trip-sharing/period-trips"
+
 shareUserDeletePath :: String -> String
 shareUserDeletePath username = shareUsersPath <> "/" <> username
 
@@ -79,6 +85,10 @@ getSharedUsersResponse = Affjax.get json shareUsersPath
 
 getSubscribedUsersResponse :: Aff JsonResponse
 getSubscribedUsersResponse = Affjax.get json subscribedUsersPath
+
+getPeriodTripsResponse :: String -> String -> Aff JsonResponse
+getPeriodTripsResponse start end =
+  Affjax.get json (periodTripsPath <> "?start=" <> start <> "&end=" <> end)
 
 addSharedUserResponse :: TripSharingUser -> Aff TextResponse
 addSharedUserResponse user = Affjax.post string shareUsersPath (jsonBody user)
@@ -114,6 +124,18 @@ newtype TripPlace = TripPlace
 newtype TripSharingUser = TripSharingUser
   { username :: String }
 
+newtype PeriodTrip = PeriodTrip
+  { windowStart :: String
+  , windowEnd :: String
+  , departurePlaceId :: String
+  , arrivalPlaceId :: String
+  }
+
+newtype PeriodTripGroup = PeriodTripGroup
+  { username :: String
+  , trips :: Array PeriodTrip
+  }
+
 instance encodeValidateItemPayload :: EncodeJson ValidateItemPayload where
   encodeJson (ValidateItemPayload payload) =
     "duree_reelle_minutes" := payload.duree_reelle_minutes ~> jsonEmptyObject
@@ -129,6 +151,29 @@ instance decodeTripSharingUser :: DecodeJson TripSharingUser where
     obj <- decodeJson json
     username <- obj .: "username"
     pure (TripSharingUser { username })
+
+instance decodePeriodTrip :: DecodeJson PeriodTrip where
+  decodeJson json = do
+    obj <- decodeJson json
+    windowStart <- obj .: "windowStart"
+    windowEnd <- obj .: "windowEnd"
+    departurePlaceId <- obj .: "departurePlaceId"
+    arrivalPlaceId <- obj .: "arrivalPlaceId"
+    pure
+      ( PeriodTrip
+          { windowStart
+          , windowEnd
+          , departurePlaceId
+          , arrivalPlaceId
+          }
+      )
+
+instance decodePeriodTripGroup :: DecodeJson PeriodTripGroup where
+  decodeJson json = do
+    obj <- decodeJson json
+    username <- obj .: "username"
+    trips <- obj .: "trips"
+    pure (PeriodTripGroup { username, trips })
 
 instance encodeTripSharingUser :: EncodeJson TripSharingUser where
   encodeJson (TripSharingUser payload) =

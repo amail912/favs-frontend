@@ -42,9 +42,9 @@ Let users share trip information in a controlled way so each person can understa
 - [003 Trip Validation And Editing](done/003-trip-validation-and-editing.md) - Add trip create and edit flows backed by the place catalog and the backend validation rules.
 - [004 Share Trip Users](done/004-share-trip-users.md) - Let a user manage who may see their trips through the share list endpoints.
 - [005 Subscribe To Trip Users](done/005-subscribe-to-trip-users.md) - Let a user manage whose trips they follow through the subscription list endpoints.
+- [006 Period Trips Query](done/006-period-trips-query.md) - Consume the dedicated grouped shared-trips query needed for presence derivation.
 
 ### To Refine
-- [006 Period Trips Query](to-refine/006-period-trips-query.md) - Consume the dedicated grouped shared-trips query needed for presence derivation.
 - [007 Presence Derivation](to-refine/007-presence-derivation.md) - Derive deterministic location state from grouped ordered trips.
 - [008 Day View Side Rail](to-refine/008-day-view-side-rail.md) - Render derived presence in Day view without competing with the owner agenda.
 - [009 Day View Location Inspection](to-refine/009-day-view-location-inspection.md) - Reveal the exact derived location or in-transit state on interaction.
