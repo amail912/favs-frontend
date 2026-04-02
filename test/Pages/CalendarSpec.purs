@@ -13,7 +13,7 @@ import Data.DateTime (DateTime)
 import Data.Either (Either(..))
 import Helpers.DateTime as DateTime
 import Helpers.DateTime (formatCalendarDayDateLabelWithReference)
-import Pages.Calendar (SharedPresenceLoadState(..), SharedPresenceState(..), buildSharedPresenceSegmentLayouts, decodeCalendarItemsResponse, decodePeriodTripsResponse, decodeSharedUsersResponse, decodeTripPlacesResponse, deriveSharedPresence, normalizePeriodTripGroups, shareWriteErrorMessage, sharedPresenceLaneToneClass, sharedPresenceSegmentRailClass, shouldRenderDayCalendarShell, shouldRenderSharedPresenceRail, subscriptionWriteErrorMessage, tripWriteErrorMessage, validateShareUsername)
+import Pages.Calendar (SharedPresenceLoadState(..), SharedPresenceState(..), buildSharedPresenceSegmentLayouts, decodeCalendarItemsResponse, decodePeriodTripsResponse, decodeSharedUsersResponse, decodeTripPlacesResponse, deriveSharedPresence, normalizePeriodTripGroups, presenceInspectionAriaLabel, presenceInspectionStateText, presenceInspectionTimeText, shareWriteErrorMessage, sharedPresenceLaneToneClass, sharedPresenceSegmentRailClass, shouldRenderDayCalendarShell, shouldRenderSharedPresenceRail, subscriptionWriteErrorMessage, tripWriteErrorMessage, validateShareUsername)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (fail, shouldEqual)
 import Test.Support.Builders (unsafeDateTime)
@@ -167,14 +167,45 @@ spec =
         layouts = buildSharedPresenceSegmentLayouts (deriveSharedPresence (unsafeDateTime "2026-04-02T00:00") (unsafeDateTime "2026-04-03T00:00") (normalizePeriodTripGroups decodedPeriodTrips))
       summarizePresenceRailLayouts layouts
         `shouldEqual`
-          [ { username: "alice", laneIndex: 0, laneCount: 2, startMin: 0, duration: 480, railClass: "calendar-presence-rail__segment--unknown", toneClass: "calendar-presence-rail__segment--tone-0" }
-          , { username: "alice", laneIndex: 0, laneCount: 2, startMin: 480, duration: 60, railClass: "calendar-presence-rail__segment--transit", toneClass: "calendar-presence-rail__segment--tone-0" }
-          , { username: "alice", laneIndex: 0, laneCount: 2, startMin: 540, duration: 180, railClass: "calendar-presence-rail__segment--place", toneClass: "calendar-presence-rail__segment--tone-0" }
-          , { username: "alice", laneIndex: 0, laneCount: 2, startMin: 720, duration: 60, railClass: "calendar-presence-rail__segment--transit", toneClass: "calendar-presence-rail__segment--tone-0" }
-          , { username: "alice", laneIndex: 0, laneCount: 2, startMin: 780, duration: 660, railClass: "calendar-presence-rail__segment--place", toneClass: "calendar-presence-rail__segment--tone-0" }
-          , { username: "bob", laneIndex: 1, laneCount: 2, startMin: 0, duration: 60, railClass: "calendar-presence-rail__segment--transit", toneClass: "calendar-presence-rail__segment--tone-1" }
-          , { username: "bob", laneIndex: 1, laneCount: 2, startMin: 60, duration: 1380, railClass: "calendar-presence-rail__segment--place", toneClass: "calendar-presence-rail__segment--tone-1" }
+          [ { username: "alice", segmentIndex: 0, laneIndex: 0, laneCount: 2, startMin: 0, duration: 480, railClass: "calendar-presence-rail__segment--unknown", toneClass: "calendar-presence-rail__segment--tone-0" }
+          , { username: "alice", segmentIndex: 1, laneIndex: 0, laneCount: 2, startMin: 480, duration: 60, railClass: "calendar-presence-rail__segment--transit", toneClass: "calendar-presence-rail__segment--tone-0" }
+          , { username: "alice", segmentIndex: 2, laneIndex: 0, laneCount: 2, startMin: 540, duration: 180, railClass: "calendar-presence-rail__segment--place", toneClass: "calendar-presence-rail__segment--tone-0" }
+          , { username: "alice", segmentIndex: 3, laneIndex: 0, laneCount: 2, startMin: 720, duration: 60, railClass: "calendar-presence-rail__segment--transit", toneClass: "calendar-presence-rail__segment--tone-0" }
+          , { username: "alice", segmentIndex: 4, laneIndex: 0, laneCount: 2, startMin: 780, duration: 660, railClass: "calendar-presence-rail__segment--place", toneClass: "calendar-presence-rail__segment--tone-0" }
+          , { username: "bob", segmentIndex: 0, laneIndex: 1, laneCount: 2, startMin: 0, duration: 60, railClass: "calendar-presence-rail__segment--transit", toneClass: "calendar-presence-rail__segment--tone-1" }
+          , { username: "bob", segmentIndex: 1, laneIndex: 1, laneCount: 2, startMin: 60, duration: 1380, railClass: "calendar-presence-rail__segment--place", toneClass: "calendar-presence-rail__segment--tone-1" }
           ]
+
+    it "formats presence inspection text for unknown, place and transit states" do
+      presenceInspectionStateText PresenceUnknown `shouldEqual` "Lieu inconnu"
+      presenceInspectionStateText (PresenceAtPlace "Paris") `shouldEqual` "Lieu: Paris"
+      presenceInspectionStateText (PresenceInTransit { departurePlaceId: "Paris", arrivalPlaceId: "St Clair" }) `shouldEqual` "Trajet: Paris → St Clair"
+
+    it "formats presence inspection time text from layout geometry" do
+      presenceInspectionTimeText
+        { username: "alice"
+        , segmentIndex: 1
+        , laneIndex: 0
+        , laneCount: 2
+        , startMin: 480
+        , duration: 60
+        , state: PresenceInTransit { departurePlaceId: "Paris", arrivalPlaceId: "St Clair" }
+        }
+        `shouldEqual` "De 08:00 à 09:00"
+
+    it "builds an aria label for an inspected presence segment" do
+      let
+        layout =
+          { username: "alice"
+          , segmentIndex: 1
+          , laneIndex: 0
+          , laneCount: 2
+          , startMin: 480
+          , duration: 60
+          , state: PresenceInTransit { departurePlaceId: "Paris", arrivalPlaceId: "St Clair" }
+          }
+      presenceInspectionAriaLabel "alice" layout
+        `shouldEqual` "alice · Trajet: Paris → St Clair · De 08:00 à 09:00"
 
     it "encodes share add payloads" do
       decodeJson (encodeJson (TripSharingUser { username: "alice" }))
@@ -415,10 +446,11 @@ summarizePresenceState = case _ of
   PresenceAtPlace placeId -> "at-place:" <> placeId
   PresenceInTransit { departurePlaceId, arrivalPlaceId } -> "in-transit:" <> departurePlaceId <> "->" <> arrivalPlaceId
 
-summarizePresenceRailLayouts :: Array { username :: String, laneIndex :: Int, laneCount :: Int, startMin :: Int, duration :: Int, state :: SharedPresenceState } -> Array { username :: String, laneIndex :: Int, laneCount :: Int, startMin :: Int, duration :: Int, railClass :: String, toneClass :: String }
+summarizePresenceRailLayouts :: Array { username :: String, segmentIndex :: Int, laneIndex :: Int, laneCount :: Int, startMin :: Int, duration :: Int, state :: SharedPresenceState } -> Array { username :: String, segmentIndex :: Int, laneIndex :: Int, laneCount :: Int, startMin :: Int, duration :: Int, railClass :: String, toneClass :: String }
 summarizePresenceRailLayouts =
   map \layout ->
     { username: layout.username
+    , segmentIndex: layout.segmentIndex
     , laneIndex: layout.laneIndex
     , laneCount: layout.laneCount
     , startMin: layout.startMin

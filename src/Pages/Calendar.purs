@@ -48,6 +48,9 @@ module Pages.Calendar
   , buildSharedPresenceSegmentLayouts
   , sharedPresenceSegmentRailClass
   , sharedPresenceLaneToneClass
+  , presenceInspectionStateText
+  , presenceInspectionTimeText
+  , presenceInspectionAriaLabel
   , tripWriteErrorMessage
   , validateShareUsername
   , shareWriteErrorMessage
@@ -98,7 +101,7 @@ import Halogen (Component, ComponentHTML, HalogenM, Slot, defaultEval, getRef, m
 import Halogen (subscribe)
 import Halogen.HTML (HTML, button, div, h2, i, input, li, option, section, select, slot, span, text, ul)
 import Halogen.HTML.Core (AttrName(..))
-import Halogen.HTML.Events (onClick, onDragEnter, onDragOver, onDrop, onMouseDown, onValueChange, onKeyDown, onDragEnd, onDragStart, onScroll, onTouchStart, onTouchMove, onTouchEnd, onTouchCancel)
+import Halogen.HTML.Events (handler', onClick, onDragEnter, onDragOver, onDrop, onMouseDown, onValueChange, onKeyDown, onDragEnd, onDragStart, onScroll, onTouchStart, onTouchMove, onTouchEnd, onTouchCancel)
 import Halogen.HTML.Properties (attr, style, IProp, value, placeholder, type_, draggable, ref, disabled)
 import Halogen.Query.Event as HQE
 import Type.Proxy (Proxy(..))
@@ -112,6 +115,7 @@ import Web.HTML.Window as Window
 import Web.UIEvent.KeyboardEvent as KE
 import Web.UIEvent.KeyboardEvent.EventTypes as KeyboardEventTypes
 import Web.UIEvent.MouseEvent as MouseEvent
+import Web.UIEvent.FocusEvent as FocusEvent
 import Data.Enum (enumFromTo, fromEnum, toEnum)
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Data.Generic.Rep (class Generic)
@@ -269,15 +273,16 @@ renderAgendaView
   -> String
   -> Array CalendarItem
   -> SharedPresenceLoadState
+  -> Maybe SharedPresenceInspection
   -> Boolean
   -> Array MobileOverlapPromotion
   -> Maybe String
   -> Maybe Int
   -> HTML w Action
-renderAgendaView viewMode focusDate todayDate items sharedPresence isMobile promotedOverlaps draggingId dragHoverIndex =
+renderAgendaView viewMode focusDate todayDate items sharedPresence presenceInspection isMobile promotedOverlaps draggingId dragHoverIndex =
   case viewMode of
     ViewDay ->
-      renderDayCalendar focusDate todayDate items sharedPresence isMobile promotedOverlaps draggingId dragHoverIndex
+      renderDayCalendar focusDate todayDate items sharedPresence presenceInspection isMobile promotedOverlaps draggingId dragHoverIndex
     ViewWeek ->
       renderRangeView "Semaine" (generateDateRange focusDate 7) items isMobile
     ViewMonth ->
@@ -867,6 +872,8 @@ loadSharedPresenceForFocusDate :: AgendaAppM Unit
 loadSharedPresenceForFocusDate = do
   st <- get
   let focusDate = st ^. _viewFocusDatePage
+  modify_ (_view <<< _viewPresenceInspection .~ Nothing)
+  modify_ (_view <<< _viewActiveModal %~ clearPresenceInspectionModal)
   case buildDayPeriodRange focusDate of
     Nothing ->
       modify_ (_calendarSharedPresence .~ SharedPresenceError "Impossible de charger les trajets partagés pour cette date.")
@@ -889,6 +896,10 @@ loadSharedPresenceForFocusDate = do
                     modify_ (_calendarSharedPresence .~ SharedPresenceLoaded (deriveSharedPresence period.start period.end (normalizePeriodTripGroups groups)))
           else
             modify_ (_calendarSharedPresence .~ SharedPresenceError "Impossible de charger les trajets partagés pour cette date.")
+  where
+  clearPresenceInspectionModal = case _ of
+    Just ModalPresenceInspection -> Nothing
+    value -> value
 
 handleShareAction :: ShareAction -> AgendaAppM Unit
 handleShareAction = case _ of
@@ -1221,7 +1232,7 @@ render { calendar, sync, mouseDrag, view } =
     { updateError } = sync
     draggingId = mouseDrag.draggingId
     dragHoverIndex = mouseDrag.dragHoverIndex
-    { viewMode, focusDate, todayDate, isMobile, promotedOverlaps } = view
+    { viewMode, focusDate, todayDate, isMobile, promotedOverlaps, presenceInspection } = view
     agendaModalsInput = buildAgendaModalsInput { calendar, sync, mouseDrag, view }
     sortedItems = sortItems SortByTime items
   in
@@ -1236,7 +1247,7 @@ render { calendar, sync, mouseDrag, view } =
             [ div [ class_ "calendar-main" ]
                 [ maybe (text "") renderUpdateError updateError
                 , section [ class_ $ "calendar-list-panel" <> guard (viewMode == ViewDay) " calendar-list-panel--calendar" ]
-                    [ renderAgendaView viewMode focusDate todayDate sortedItems sharedPresence isMobile promotedOverlaps draggingId dragHoverIndex ]
+                    [ renderAgendaView viewMode focusDate todayDate sortedItems sharedPresence presenceInspection isMobile promotedOverlaps draggingId dragHoverIndex ]
                 ]
             , div [ class_ "calendar-side" ]
                 [ map toAction (renderShareManager sharePanelConfig shareList)
@@ -1259,10 +1270,11 @@ type AgendaModalsInput =
   , subscriptionList :: ShareListState
   , validationError :: Maybe String
   , editPanel :: Maybe EditPanel
+  , presenceInspection :: Maybe SharedPresenceInspection
   }
 
 renderAgendaModals :: AgendaModalsInput -> H.ComponentHTML Action Slots Aff
-renderAgendaModals { activeModal, overlapSheet, exportItems, draft, tripPlaces, shareList, subscriptionList, validationError, editPanel } =
+renderAgendaModals { activeModal, overlapSheet, exportItems, draft, tripPlaces, shareList, subscriptionList, validationError, editPanel, presenceInspection } =
   let
     renderModal title content = Modal.renderModal title content (ViewAction ViewCloseModal) (ViewAction ViewCloseModal)
     renderExportModal items =
@@ -1301,6 +1313,12 @@ renderAgendaModals { activeModal, overlapSheet, exportItems, draft, tripPlaces, 
             Modal.renderBottomSheet "Elements superposes"
               [ renderOverlapSheetContent overlap ]
               (ViewAction ViewCloseModal)
+        ModalPresenceInspection -> case presenceInspection of
+          Nothing -> text ""
+          Just inspection ->
+            Modal.renderBottomSheet inspection.username
+              [ renderPresenceInspectionContent inspection ]
+              (ViewAction ViewCloseModal)
         ModalEditItem -> case editPanel of
           Nothing -> text ""
           Just panel ->
@@ -1314,7 +1332,7 @@ buildAgendaModalsInput :: State -> AgendaModalsInput
 buildAgendaModalsInput { calendar, view } =
   let
     { items, draft, tripPlaces, shareList, subscriptionList, validationError } = calendar
-    { activeModal, overlapSheet, editPanel } = view
+    { activeModal, overlapSheet, editPanel, presenceInspection } = view
   in
     { activeModal
     , overlapSheet
@@ -1325,6 +1343,7 @@ buildAgendaModalsInput { calendar, view } =
     , subscriptionList
     , validationError
     , editPanel
+    , presenceInspection
     }
 
 -- END src/Pages/Calendar.purs
@@ -1340,12 +1359,13 @@ renderDayCalendar
   -> String
   -> Array CalendarItem
   -> SharedPresenceLoadState
+  -> Maybe SharedPresenceInspection
   -> Boolean
   -> Array MobileOverlapPromotion
   -> Maybe String
   -> Maybe Int
   -> HTML w Action
-renderDayCalendar focusDate todayDate items sharedPresence isMobile promotedOverlaps draggingId dragHoverIndex =
+renderDayCalendar focusDate todayDate items sharedPresence presenceInspection isMobile promotedOverlaps draggingId dragHoverIndex =
   let
     itemsForDate = filter (isItemOnDate focusDate) items
     sorted = sortItems SortByTime itemsForDate
@@ -1355,6 +1375,11 @@ renderDayCalendar focusDate todayDate items sharedPresence isMobile promotedOver
     railLayouts = case sharedPresence of
       SharedPresenceLoaded groups -> buildSharedPresenceSegmentLayouts groups
       _ -> []
+    desktopInspection =
+      if isMobile then
+        Nothing
+      else
+        presenceInspection >>= resolvePresenceInspection railLayouts
     timelineItems =
       if isMobile then
         map (renderMobileOverlapStack draggingId focusTargetIdentity) (applyMobileOverlapPromotions promotedOverlaps (buildMobileOverlapStacks sorted))
@@ -1386,7 +1411,8 @@ renderDayCalendar focusDate todayDate items sharedPresence isMobile promotedOver
                     (map renderHourLine (enumFromTo 0 23))
                 , maybe (text "") renderDropIndicator dragHoverIndex
                 , maybe (text "") identity dragPreview
-                , if showPresenceRail then renderSharedPresenceRail isMobile railLayouts else text ""
+                , if showPresenceRail then renderSharedPresenceRail isMobile presenceInspection railLayouts else text ""
+                , maybe (text "") renderPresenceInspectionCard desktopInspection
                 , div
                     [ class_ $
                         "calendar-calendar-items"
@@ -1414,39 +1440,102 @@ renderHourLine :: forall w action. Int -> HTML w action
 renderHourLine _ =
   div [ class_ "calendar-calendar-line" ] []
 
-renderSharedPresenceRail :: forall w. Boolean -> Array SharedPresenceSegmentLayout -> HTML w Action
-renderSharedPresenceRail isMobile layouts =
+onMouseEnterAction
+  :: forall r i
+   . i
+  -> IProp (onMouseEnter :: MouseEvent.MouseEvent | r) i
+onMouseEnterAction action =
+  handler' (EventType "mouseenter") (const (Just action))
+
+onMouseLeaveAction
+  :: forall r i
+   . i
+  -> IProp (onMouseLeave :: MouseEvent.MouseEvent | r) i
+onMouseLeaveAction action =
+  handler' (EventType "mouseleave") (const (Just action))
+
+onFocusAction
+  :: forall r i
+   . i
+  -> IProp (onFocus :: FocusEvent.FocusEvent | r) i
+onFocusAction action =
+  handler' (EventType "focus") (const (Just action))
+
+onBlurAction
+  :: forall r i
+   . i
+  -> IProp (onBlur :: FocusEvent.FocusEvent | r) i
+onBlurAction action =
+  handler' (EventType "blur") (const (Just action))
+
+renderSharedPresenceRail :: forall w. Boolean -> Maybe SharedPresenceInspection -> Array SharedPresenceSegmentLayout -> HTML w Action
+renderSharedPresenceRail isMobile presenceInspection layouts =
   let
     railClass =
       "calendar-presence-rail" <>
         guard isMobile " calendar-presence-rail--mobile"
   in
-    div [ class_ railClass, attr (AttrName "aria-hidden") "true" ]
-      (map renderSharedPresenceSegment layouts)
+    div [ class_ railClass ]
+      (map (renderSharedPresenceSegment isMobile presenceInspection) layouts)
 
-renderSharedPresenceSegment :: forall w. SharedPresenceSegmentLayout -> HTML w Action
-renderSharedPresenceSegment layout =
+renderSharedPresenceSegment :: forall w. Boolean -> Maybe SharedPresenceInspection -> SharedPresenceSegmentLayout -> HTML w Action
+renderSharedPresenceSegment _ presenceInspection layout =
+  let
+    isActive = maybe false (\activeInspection -> isSamePresenceInspection activeInspection layout) presenceInspection
+    inspection = toPresenceInspection layout
+  in
+    button
+      [ class_ $
+          "calendar-presence-rail__segment"
+            <> " "
+            <> sharedPresenceSegmentRailClass layout.state
+            <> " "
+            <> sharedPresenceLaneToneClass layout.laneIndex
+            <> guard isActive " calendar-presence-rail__segment--active"
+      , style $
+          " --start:" <> show layout.startMin <> ";"
+            <> " --duration:"
+            <> show layout.duration
+            <> ";"
+            <> " --lane:"
+            <> show layout.laneIndex
+            <> ";"
+            <> " --lanes:"
+            <> show layout.laneCount
+            <> ";"
+      , attr (AttrName "type") "button"
+      , attr (AttrName "aria-label") (presenceInspectionAriaLabel layout.username layout)
+      , attr (AttrName "data-username") layout.username
+      , attr (AttrName "data-segment-index") (show layout.segmentIndex)
+      , onClick (const (ViewAction (ViewInspectPresence PresenceInspectTap inspection)))
+      , onMouseEnterAction (ViewAction (ViewInspectPresence PresenceInspectHover inspection))
+      , onMouseLeaveAction (ViewAction ViewClearPresenceInspection)
+      , onFocusAction (ViewAction (ViewInspectPresence PresenceInspectFocus inspection))
+      , onBlurAction (ViewAction ViewClearPresenceInspection)
+      ]
+      []
+
+renderPresenceInspectionCard :: forall w. SharedPresenceInspection -> HTML w Action
+renderPresenceInspectionCard inspection =
   div
-    [ class_ $
-        "calendar-presence-rail__segment"
-          <> " "
-          <> sharedPresenceSegmentRailClass layout.state
-          <> " "
-          <> sharedPresenceLaneToneClass layout.laneIndex
+    [ class_ "calendar-presence-inspection"
     , style $
-        " --start:" <> show layout.startMin <> ";"
+        " --start:"
+          <> show inspection.startMin
+          <> ";"
           <> " --duration:"
-          <> show layout.duration
+          <> show inspection.duration
           <> ";"
-          <> " --lane:"
-          <> show layout.laneIndex
-          <> ";"
-          <> " --lanes:"
-          <> show layout.laneCount
-          <> ";"
-    , attr (AttrName "data-username") layout.username
     ]
-    []
+    [ renderPresenceInspectionContent inspection ]
+
+renderPresenceInspectionContent :: forall w. SharedPresenceInspection -> HTML w Action
+renderPresenceInspectionContent inspection =
+  div [ class_ "calendar-presence-inspection__content" ]
+    [ div [ class_ "calendar-presence-inspection__title" ] [ text inspection.username ]
+    , div [ class_ "calendar-presence-inspection__state" ] [ text (presenceInspectionStateText inspection.state) ]
+    , div [ class_ "calendar-presence-inspection__time" ] [ text (presenceInspectionTimeText inspection) ]
+    ]
 
 renderDayDragPreview
   :: forall w
@@ -2404,6 +2493,7 @@ data AgendaModal
   | ModalCreateItem
   | ModalEditItem
   | ModalOverlapGroup
+  | ModalPresenceInspection
 
 derive instance eqAgendaModal :: Eq AgendaModal
 
@@ -2414,12 +2504,23 @@ type OverlapSheet =
   , hiddenCount :: Int
   }
 
+type SharedPresenceInspection =
+  { username :: String
+  , segmentIndex :: Int
+  , laneIndex :: Int
+  , laneCount :: Int
+  , startMin :: Int
+  , duration :: Int
+  , state :: SharedPresenceState
+  }
+
 type ViewState =
   { viewMode :: CalendarView
   , focusDate :: String
   , todayDate :: String
   , activeModal :: Maybe AgendaModal
   , overlapSheet :: Maybe OverlapSheet
+  , presenceInspection :: Maybe SharedPresenceInspection
   , promotedOverlaps :: Array MobileOverlapPromotion
   , editPanel :: Maybe EditPanel
   , isMobile :: Boolean
@@ -2436,6 +2537,7 @@ viewInitialState =
   , todayDate: ""
   , activeModal: Nothing
   , overlapSheet: Nothing
+  , presenceInspection: Nothing
   , promotedOverlaps: []
   , editPanel: Nothing
   , isMobile: false
@@ -2473,6 +2575,12 @@ _viewOverlapSheet =
   lens
     _.overlapSheet
     (_ { overlapSheet = _ })
+
+_viewPresenceInspection :: Lens' ViewState (Maybe SharedPresenceInspection)
+_viewPresenceInspection =
+  lens
+    _.presenceInspection
+    (_ { presenceInspection = _ })
 
 _viewPromotedOverlaps :: Lens' ViewState (Array MobileOverlapPromotion)
 _viewPromotedOverlaps =
@@ -2530,6 +2638,8 @@ data ViewAction
   | ViewOpenModal AgendaModal
   | ViewOpenOverlapSheet OverlapSheet
   | ViewPromoteOverlapItem OverlapSheet CalendarItem
+  | ViewInspectPresence SharedPresenceInspectionTrigger SharedPresenceInspection
+  | ViewClearPresenceInspection
   | ViewCloseModal
   | ViewOpenCreate
   | ViewCloseCreate
@@ -2546,6 +2656,11 @@ data ViewAction
   | ViewEditSave
   | ViewEditCancel
   | ViewSetIsMobile Boolean
+
+data SharedPresenceInspectionTrigger
+  = PresenceInspectHover
+  | PresenceInspectFocus
+  | PresenceInspectTap
 
 handleViewAction :: ViewAction -> ErrorAgendaAppM Unit
 handleViewAction = case _ of
@@ -2568,6 +2683,7 @@ handleViewAction = case _ of
             %~
               ( (_viewMode .~ nextView)
                   <<< resetPromotions
+                  <<< (_viewPresenceInspection .~ Nothing)
                   <<< (_viewDayFocusContext .~ Nothing)
                   <<< (_viewDayFocusApplied .~ false)
                   <<< (_viewDayFocusUserScrolled .~ false)
@@ -2579,6 +2695,7 @@ handleViewAction = case _ of
       ( _view
           %~
             ( (_viewFocusDateState .~ raw)
+                <<< (_viewPresenceInspection .~ Nothing)
                 <<< (_viewDayFocusContext .~ Nothing)
                 <<< (_viewDayFocusApplied .~ false)
                 <<< (_viewDayFocusUserScrolled .~ false)
@@ -2598,6 +2715,7 @@ handleViewAction = case _ of
       ( _view
           %~
             ( (_viewOverlapSheet .~ Just overlapSheet)
+                <<< (_viewPresenceInspection .~ Nothing)
                 <<< (_viewActiveModal .~ Just ModalOverlapGroup)
             )
       )
@@ -2610,8 +2728,46 @@ handleViewAction = case _ of
                 <<< (_viewOverlapSheet .~ Nothing)
             )
       )
+  ViewInspectPresence trigger inspection -> do
+    st <- get
+    let isMobileNow = st ^. (_view <<< _viewIsMobile)
+    modify_
+      ( _view %~
+          case trigger, isMobileNow of
+            PresenceInspectTap, true ->
+              (_viewPresenceInspection .~ Just inspection)
+                <<< (_viewActiveModal .~ Just ModalPresenceInspection)
+                <<< (_viewOverlapSheet .~ Nothing)
+            PresenceInspectTap, false ->
+              (_viewPresenceInspection .~ Just inspection)
+            PresenceInspectHover, false ->
+              (_viewPresenceInspection .~ Just inspection)
+            PresenceInspectFocus, false ->
+              (_viewPresenceInspection .~ Just inspection)
+            _, _ ->
+              identity
+      )
+  ViewClearPresenceInspection -> do
+    st <- get
+    let isMobileNow = st ^. (_view <<< _viewIsMobile)
+    let activeModal = st ^. (_view <<< _viewActiveModal)
+    if isMobileNow && activeModal == Just ModalPresenceInspection then
+      pure unit
+    else
+      modify_
+        ( _view %~
+            ( (_viewPresenceInspection .~ Nothing)
+                <<< (_viewActiveModal %~ closePresenceModal)
+            )
+        )
   ViewCloseModal ->
-    modify_ ((_view <<< _viewActiveModal .~ Nothing) <<< (_view <<< _viewOverlapSheet .~ Nothing))
+    modify_
+      ( _view %~
+          ( (_viewActiveModal .~ Nothing)
+              <<< (_viewOverlapSheet .~ Nothing)
+              <<< (_viewPresenceInspection .~ Nothing)
+          )
+      )
   ViewOpenCreate ->
     modify_ (_view <<< _viewActiveModal .~ Just ModalCreateItem)
   ViewCloseCreate ->
@@ -2677,6 +2833,10 @@ handleViewAction = case _ of
     modify_ ((_view <<< _viewEditPanel .~ Nothing) <<< (_view <<< _viewActiveModal .~ Nothing))
   ViewSetIsMobile isMobile ->
     modify_ (_view <<< _viewIsMobile .~ isMobile)
+  where
+  closePresenceModal = case _ of
+    Just ModalPresenceInspection -> Nothing
+    value -> value
 
 viewTitle :: CalendarView -> String
 viewTitle viewMode =
@@ -3786,6 +3946,7 @@ shouldRenderDayCalendarShell items sharedPresence =
 
 type SharedPresenceSegmentLayout =
   { username :: String
+  , segmentIndex :: Int
   , laneIndex :: Int
   , laneCount :: Int
   , startMin :: Int
@@ -3801,9 +3962,10 @@ buildSharedPresenceSegmentLayouts groups =
     foldl (<>) []
       ( mapWithIndex
           ( \laneIndex group ->
-              map
-                ( \segment ->
+              mapWithIndex
+                ( \segmentIndex segment ->
                     { username: group.username
+                    , segmentIndex
                     , laneIndex
                     , laneCount
                     , startMin: minuteOfDay segment.start
@@ -3815,6 +3977,46 @@ buildSharedPresenceSegmentLayouts groups =
           )
           groups
       )
+
+toPresenceInspection :: SharedPresenceSegmentLayout -> SharedPresenceInspection
+toPresenceInspection layout =
+  { username: layout.username
+  , segmentIndex: layout.segmentIndex
+  , laneIndex: layout.laneIndex
+  , laneCount: layout.laneCount
+  , startMin: layout.startMin
+  , duration: layout.duration
+  , state: layout.state
+  }
+
+isSamePresenceInspection :: SharedPresenceInspection -> SharedPresenceSegmentLayout -> Boolean
+isSamePresenceInspection inspection layout =
+  inspection.username == layout.username && inspection.segmentIndex == layout.segmentIndex
+
+resolvePresenceInspection :: Array SharedPresenceSegmentLayout -> SharedPresenceInspection -> Maybe SharedPresenceInspection
+resolvePresenceInspection layouts inspection =
+  toPresenceInspection <$> find (isSamePresenceInspection inspection) layouts
+
+presenceInspectionStateText :: SharedPresenceState -> String
+presenceInspectionStateText = case _ of
+  PresenceUnknown -> "Lieu inconnu"
+  PresenceAtPlace placeId -> "Lieu: " <> placeId
+  PresenceInTransit { departurePlaceId, arrivalPlaceId } -> "Trajet: " <> departurePlaceId <> " → " <> arrivalPlaceId
+
+minuteToTimeLabel :: Int -> String
+minuteToTimeLabel totalMinutes =
+  if totalMinutes >= 1440 then
+    "24:00"
+  else
+    DateTime.formatLocalTimeParts (Int.quot totalMinutes 60) (Int.rem totalMinutes 60)
+
+presenceInspectionTimeText :: SharedPresenceInspection -> String
+presenceInspectionTimeText inspection =
+  "De " <> minuteToTimeLabel inspection.startMin <> " à " <> minuteToTimeLabel (inspection.startMin + inspection.duration)
+
+presenceInspectionAriaLabel :: String -> SharedPresenceSegmentLayout -> String
+presenceInspectionAriaLabel username layout =
+  username <> " · " <> presenceInspectionStateText layout.state <> " · " <> presenceInspectionTimeText (toPresenceInspection layout)
 
 sharedPresenceSegmentRailClass :: SharedPresenceState -> String
 sharedPresenceSegmentRailClass = case _ of

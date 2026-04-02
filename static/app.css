@@ -590,6 +590,24 @@ a.nav-link:hover {
   min-height: 8px;
   border-radius: 999px;
   opacity: 0.95;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  pointer-events: auto;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.calendar-presence-rail__segment:focus-visible {
+  outline: 2px solid rgba(19, 54, 118, 0.82);
+  outline-offset: 2px;
+}
+
+.calendar-presence-rail__segment--active {
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.92),
+    0 0 0 4px rgba(19, 54, 118, 0.24);
+  opacity: 1;
 }
 
 .calendar-presence-rail__segment--place {
@@ -628,6 +646,54 @@ a.nav-link:hover {
 
 .calendar-presence-rail__segment--tone-3 {
   background-color: rgba(198, 86, 113, 0.7);
+}
+
+.calendar-presence-inspection {
+  position: absolute;
+  top: calc((var(--start) + (var(--duration) / 2)) * var(--calendar-minute-height));
+  left: calc(var(--calendar-presence-width) + 16px);
+  z-index: 3;
+  width: min(240px, calc(100% - var(--calendar-presence-width) - 24px));
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.calendar-presence-inspection::before {
+  content: "";
+  position: absolute;
+  left: -7px;
+  top: calc(50% - 7px);
+  width: 14px;
+  height: 14px;
+  background: #ffffff;
+  border-left: 1px solid rgba(28, 46, 81, 0.12);
+  border-bottom: 1px solid rgba(28, 46, 81, 0.12);
+  transform: rotate(45deg);
+}
+
+.calendar-presence-inspection__content {
+  position: relative;
+  padding: 0.65rem 0.8rem;
+  border-radius: 14px;
+  border: 1px solid rgba(28, 46, 81, 0.12);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 12px 32px rgba(20, 31, 52, 0.16);
+}
+
+.calendar-presence-inspection__title {
+  font-weight: 700;
+  color: #17315e;
+}
+
+.calendar-presence-inspection__state {
+  margin-top: 0.25rem;
+  color: #23344f;
+}
+
+.calendar-presence-inspection__time {
+  margin-top: 0.2rem;
+  font-size: 0.88rem;
+  color: #617089;
 }
 
 .calendar-calendar-stack {

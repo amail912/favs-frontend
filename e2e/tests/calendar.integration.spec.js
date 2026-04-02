@@ -61,6 +61,38 @@ async function setTextInputValue(locator, value) {
   }, value);
 }
 
+async function mockSharedPresenceRoute(page, focusDate, sharedUsername) {
+  await page.route("**/api/v1/trip-sharing/period-trips**", async route => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("start") === `${focusDate}T00:00`) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json; charset=utf-8",
+        body: JSON.stringify([
+          {
+            username: sharedUsername,
+            trips: [
+              {
+                windowStart: `${focusDate}T08:00`,
+                windowEnd: `${focusDate}T09:00`,
+                departurePlaceId: "Paris",
+                arrivalPlaceId: "St Clair"
+              }
+            ]
+          }
+        ])
+      });
+      return;
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json; charset=utf-8",
+      body: "[]"
+    });
+  });
+}
+
 async function dragCalendarItemToMinute(page, title, targetMinuteOfDay) {
   const source = page.locator(".calendar-calendar-card", {
     has: page.locator(".calendar-calendar-item-title", { hasText: title })
@@ -287,35 +319,7 @@ test("calendar day rail: shows shared presence without owner items", async ({ au
   const focusDate = toLocalDateInput(isolatedFutureDate(2330));
   const sharedUsername = "shared-rail-user";
 
-  await page.route("**/api/v1/trip-sharing/period-trips**", async route => {
-    const url = new URL(route.request().url());
-    if (url.searchParams.get("start") === `${focusDate}T00:00`) {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json; charset=utf-8",
-        body: JSON.stringify([
-          {
-            username: sharedUsername,
-            trips: [
-              {
-                windowStart: `${focusDate}T08:00`,
-                windowEnd: `${focusDate}T09:00`,
-                departurePlaceId: "Paris",
-                arrivalPlaceId: "St Clair"
-              }
-            ]
-          }
-        ])
-      });
-      return;
-    }
-
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json; charset=utf-8",
-      body: "[]"
-    });
-  });
+  await mockSharedPresenceRoute(page, focusDate, sharedUsername);
 
   await calendarTab(page).click();
   await expect(page).toHaveURL(/\/calendar$/);
@@ -338,6 +342,57 @@ test("calendar day rail: shows shared presence without owner items", async ({ au
   await expect(page.locator(`.calendar-presence-rail__segment--unknown[data-username="${sharedUsername}"]`)).toHaveCount(1);
   await expect(page.locator(`.calendar-presence-rail__segment--transit[data-username="${sharedUsername}"]`)).toHaveCount(1);
   await expect(page.locator(`.calendar-presence-rail__segment--place[data-username="${sharedUsername}"]`)).toHaveCount(1);
+});
+
+test("calendar day rail: hover and focus reveal presence inspection on desktop", async ({ authenticatedPage: page }) => {
+  const focusDate = toLocalDateInput(isolatedFutureDate(2340));
+  const sharedUsername = "shared-inspection-user";
+
+  await mockSharedPresenceRoute(page, focusDate, sharedUsername);
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const unknownSegment = page.locator(`.calendar-presence-rail__segment--unknown[data-username="${sharedUsername}"]`).first();
+  const transitSegment = page.locator(`.calendar-presence-rail__segment--transit[data-username="${sharedUsername}"]`).first();
+  const placeSegment = page.locator(`.calendar-presence-rail__segment--place[data-username="${sharedUsername}"]`).first();
+  const inspection = page.locator(".calendar-presence-inspection");
+
+  await unknownSegment.hover();
+  await expect(inspection).toBeVisible();
+  await expect(inspection).toContainText(sharedUsername);
+  await expect(inspection).toContainText("Lieu inconnu");
+  await expect(inspection).toContainText("De 00:00 à 08:00");
+
+  await transitSegment.focus();
+  await expect(inspection).toContainText("Trajet: Paris → St Clair");
+  await expect(inspection).toContainText("De 08:00 à 09:00");
+
+  await placeSegment.hover();
+  await expect(inspection).toContainText("Lieu: St Clair");
+  await expect(inspection).toContainText("De 09:00 à 24:00");
+});
+
+test("calendar day rail: tap reveals presence inspection on mobile", async ({ authenticatedPage: page }) => {
+  const focusDate = toLocalDateInput(isolatedFutureDate(2350));
+  const sharedUsername = "shared-mobile-user";
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockSharedPresenceRoute(page, focusDate, sharedUsername);
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const transitSegment = page.locator(`.calendar-presence-rail__segment--transit[data-username="${sharedUsername}"]`).first();
+  await transitSegment.click();
+
+  const sheet = page.locator(".app-bottom-sheet__dialog");
+  await expect(sheet).toBeVisible();
+  await expect(sheet).toContainText(sharedUsername);
+  await expect(sheet).toContainText("Trajet: Paris → St Clair");
+  await expect(sheet).toContainText("De 08:00 à 09:00");
 });
 
 test("calendar integration: create item on a later day", async ({ authenticatedPage: page }) => {
