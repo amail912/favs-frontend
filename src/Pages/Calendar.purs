@@ -34,8 +34,13 @@ module Pages.Calendar
   , decodeSharedUsersResponse
   , decodePeriodTripsResponse
   , normalizePeriodTripGroups
+  , deriveSharedPresence
   , SharedPeriodTrip
   , SharedPeriodTripGroup
+  , SharedPresence
+  , SharedPresenceGroup
+  , SharedPresenceSegment
+  , SharedPresenceState(..)
   , tripWriteErrorMessage
   , validateShareUsername
   , shareWriteErrorMessage
@@ -411,8 +416,8 @@ _calendarShareList = _calendar <<< _shareList
 _calendarSubscriptionList :: Lens' State ShareListState
 _calendarSubscriptionList = _calendar <<< _subscriptionList
 
-_calendarSharedTrips :: Lens' State SharedTripsState
-_calendarSharedTrips = _calendar <<< _sharedTrips
+_calendarSharedPresence :: Lens' State SharedPresenceLoadState
+_calendarSharedPresence = _calendar <<< _sharedPresence
 
 _syncUpdateErrorState :: Lens' State (Maybe String)
 _syncUpdateErrorState = _sync <<< _syncUpdateError
@@ -456,12 +461,12 @@ handleAction action = handleError $
           scheduleDayTimelineFocus
           st' <- get
           when (st' ^. (_view <<< _viewMode) == ViewDay) $
-            lift loadSharedTripsForFocusDate
+            lift loadSharedPresenceForFocusDate
         ViewFocusDateChanged _ -> do
           scheduleDayTimelineFocus
           st' <- get
           when (st' ^. (_view <<< _viewMode) == ViewDay) $
-            lift loadSharedTripsForFocusDate
+            lift loadSharedPresenceForFocusDate
         ViewCloseCreate -> do
           st <- get
           let
@@ -729,7 +734,7 @@ initAction = do
   lift loadTripPlaces
   lift loadSharedUsers
   lift loadSubscribedUsers
-  lift loadSharedTripsForFocusDate
+  lift loadSharedPresenceForFocusDate
   refreshItems
   scheduleDayTimelineFocus
 
@@ -850,28 +855,32 @@ loadSubscribedUsers = do
                   }
           )
 
-loadSharedTripsForFocusDate :: AgendaAppM Unit
-loadSharedTripsForFocusDate = do
+loadSharedPresenceForFocusDate :: AgendaAppM Unit
+loadSharedPresenceForFocusDate = do
   st <- get
   let focusDate = st ^. _viewFocusDatePage
   case buildDayPeriodRange focusDate of
     Nothing ->
-      modify_ (_calendarSharedTrips .~ SharedTripsError "Impossible de charger les trajets partagés pour cette date.")
+      modify_ (_calendarSharedPresence .~ SharedPresenceError "Impossible de charger les trajets partagés pour cette date.")
     Just { start, end } -> do
-      modify_ (_calendarSharedTrips .~ SharedTripsLoading)
+      modify_ (_calendarSharedPresence .~ SharedPresenceLoading)
       result <- liftAff $ getPeriodTripsResponse start end
       case result of
         Left _ ->
-          modify_ (_calendarSharedTrips .~ SharedTripsError "Impossible de charger les trajets partagés pour cette date.")
+          modify_ (_calendarSharedPresence .~ SharedPresenceError "Impossible de charger les trajets partagés pour cette date.")
         Right response ->
           if statusOk response then
             case decodePeriodTripsResponse response of
               Left _ ->
-                modify_ (_calendarSharedTrips .~ SharedTripsError "Impossible de charger les trajets partagés pour cette date.")
+                modify_ (_calendarSharedPresence .~ SharedPresenceError "Impossible de charger les trajets partagés pour cette date.")
               Right groups ->
-                modify_ (_calendarSharedTrips .~ SharedTripsLoaded (normalizePeriodTripGroups groups))
+                case buildDayPeriodDateTimeRange focusDate of
+                  Nothing ->
+                    modify_ (_calendarSharedPresence .~ SharedPresenceError "Impossible de charger les trajets partagés pour cette date.")
+                  Just period ->
+                    modify_ (_calendarSharedPresence .~ SharedPresenceLoaded (deriveSharedPresence period.start period.end (normalizePeriodTripGroups groups)))
           else
-            modify_ (_calendarSharedTrips .~ SharedTripsError "Impossible de charger les trajets partagés pour cette date.")
+            modify_ (_calendarSharedPresence .~ SharedPresenceError "Impossible de charger les trajets partagés pour cette date.")
 
 handleShareAction :: ShareAction -> AgendaAppM Unit
 handleShareAction = case _ of
@@ -2030,7 +2039,7 @@ type CalendarState =
   , tripPlaces :: TripPlacesState
   , shareList :: ShareListState
   , subscriptionList :: ShareListState
-  , sharedTrips :: SharedTripsState
+  , sharedPresence :: SharedPresenceLoadState
   }
 
 calendarInitialState :: CalendarState
@@ -2042,7 +2051,7 @@ calendarInitialState =
   , tripPlaces: TripPlacesLoading
   , shareList: shareListInitialState
   , subscriptionList: shareListInitialState
-  , sharedTrips: SharedTripsLoading
+  , sharedPresence: SharedPresenceLoading
   }
 
 shareListInitialState :: ShareListState
@@ -2103,8 +2112,8 @@ _shareList = prop (Proxy :: _ "shareList")
 _subscriptionList :: Lens' CalendarState ShareListState
 _subscriptionList = prop (Proxy :: _ "subscriptionList")
 
-_sharedTrips :: Lens' CalendarState SharedTripsState
-_sharedTrips = prop (Proxy :: _ "sharedTrips")
+_sharedPresence :: Lens' CalendarState SharedPresenceLoadState
+_sharedPresence = prop (Proxy :: _ "sharedPresence")
 
 -- END src/Calendar/Calendar/State.purs
 
@@ -3431,6 +3440,16 @@ buildDayPeriodRange selectedDate = do
     , end: formatDateTimeLocal (DateTime endDate startTime)
     }
 
+buildDayPeriodDateTimeRange :: String -> Maybe { start :: DateTime, end :: DateTime }
+buildDayPeriodDateTimeRange selectedDate = do
+  startDate <- parseDateLocal selectedDate
+  startTime <- parseTimeLocal "00:00"
+  endDate <- addDaysToDate 1 startDate
+  pure
+    { start: DateTime startDate startTime
+    , end: DateTime endDate startTime
+    }
+
 parseExceptionDatesOrEmpty :: Array String -> Array Date
 parseExceptionDatesOrEmpty exceptions =
   let
@@ -3578,6 +3597,134 @@ normalizePeriodTripGroups groups =
       , departurePlaceId: trip.departurePlaceId
       , arrivalPlaceId: trip.arrivalPlaceId
       }
+
+deriveSharedPresence :: DateTime -> DateTime -> Array SharedPeriodTripGroup -> Array SharedPresenceGroup
+deriveSharedPresence periodStart periodEnd =
+  mapMaybe (deriveSharedPresenceGroup periodStart periodEnd)
+
+deriveSharedPresenceGroup :: DateTime -> DateTime -> SharedPeriodTripGroup -> Maybe SharedPresenceGroup
+deriveSharedPresenceGroup periodStart periodEnd { username, trips } =
+  if periodStart >= periodEnd then Nothing
+  else Just
+    { username
+    , segments: coalescePresenceSegments (derivePresenceSegments periodStart periodEnd trips)
+    }
+
+derivePresenceSegments :: DateTime -> DateTime -> Array SharedPeriodTrip -> Array SharedPresenceSegment
+derivePresenceSegments periodStart periodEnd trips =
+  go periodStart initialPresenceState trips []
+  where
+  initialPresenceState =
+    case uncons trips of
+      Just { head: trip }
+        | trip.windowStart < periodStart && trip.windowEnd <= periodStart ->
+            PresenceAtPlace trip.arrivalPlaceId
+        | trip.windowStart < periodStart && trip.windowEnd > periodStart ->
+            PresenceInTransit
+              { departurePlaceId: trip.departurePlaceId
+              , arrivalPlaceId: trip.arrivalPlaceId
+              }
+      _ ->
+        PresenceUnknown
+
+  go cursor currentState remaining acc =
+    case uncons remaining of
+      Nothing ->
+        appendPresenceSegment acc
+          { start: cursor
+          , end: periodEnd
+          , state: currentState
+          }
+      Just { head: trip, tail: rest }
+        | trip.windowEnd <= periodStart ->
+            go cursor (PresenceAtPlace trip.arrivalPlaceId) rest acc
+        | trip.windowStart < periodStart && trip.windowEnd > periodStart ->
+            let
+              transitState =
+                PresenceInTransit
+                  { departurePlaceId: trip.departurePlaceId
+                  , arrivalPlaceId: trip.arrivalPlaceId
+                  }
+              transitEnd = min trip.windowEnd periodEnd
+              nextAcc =
+                appendPresenceSegment acc
+                  { start: cursor
+                  , end: transitEnd
+                  , state: transitState
+                  }
+            in
+              go transitEnd (PresenceAtPlace trip.arrivalPlaceId) rest nextAcc
+        | trip.windowStart >= periodEnd ->
+            appendPresenceSegment acc
+              { start: cursor
+              , end: periodEnd
+              , state: currentState
+              }
+        | otherwise ->
+            let
+              nextAcc =
+                appendPresenceSegment acc
+                  { start: cursor
+                  , end: min trip.windowStart periodEnd
+                  , state: currentState
+                  }
+              transitState =
+                PresenceInTransit
+                  { departurePlaceId: trip.departurePlaceId
+                  , arrivalPlaceId: trip.arrivalPlaceId
+                  }
+              transitStart = max trip.windowStart periodStart
+              transitEnd = min trip.windowEnd periodEnd
+              afterTransit =
+                appendPresenceSegment nextAcc
+                  { start: transitStart
+                  , end: transitEnd
+                  , state: transitState
+                  }
+            in
+              go transitEnd (PresenceAtPlace trip.arrivalPlaceId) rest afterTransit
+
+appendPresenceSegment :: Array SharedPresenceSegment -> SharedPresenceSegment -> Array SharedPresenceSegment
+appendPresenceSegment acc segment =
+  if segment.start >= segment.end then acc else acc <> [ segment ]
+
+coalescePresenceSegments :: Array SharedPresenceSegment -> Array SharedPresenceSegment
+coalescePresenceSegments =
+  foldl coalesce []
+  where
+  coalesce acc next =
+    case unsnocSegments acc of
+      Just { init: rest, last: previous }
+        | previous.end == next.start && previous.state == next.state ->
+            rest <>
+              [ { start: previous.start
+                , end: next.end
+                , state: previous.state
+                }
+              ]
+      _ ->
+        acc <> [ next ]
+
+unsnocSegments :: Array SharedPresenceSegment -> Maybe { init :: Array SharedPresenceSegment, last :: SharedPresenceSegment }
+unsnocSegments items =
+  case length items of
+    0 -> Nothing
+    count ->
+      case { init: takeSegments (count - 1) items, last: dropSegments (count - 1) items } of
+        { last: [ last ] } -> Just { init: takeSegments (count - 1) items, last }
+        _ -> Nothing
+
+takeSegments :: Int -> Array SharedPresenceSegment -> Array SharedPresenceSegment
+takeSegments count =
+  mapMaybeWithIndex (\index item -> if index < count then Just item else Nothing)
+
+dropSegments :: Int -> Array SharedPresenceSegment -> Array SharedPresenceSegment
+dropSegments count =
+  mapMaybeWithIndex (\index item -> if index >= count then Just item else Nothing)
+
+mapMaybeWithIndex :: forall a b. (Int -> a -> Maybe b) -> Array a -> Array b
+mapMaybeWithIndex fn items =
+  mapMaybe identity (mapWithIndex fn items)
 
 validateShareUsername :: String -> Either String String
 validateShareUsername raw =
@@ -4116,16 +4263,40 @@ type SharedPeriodTripGroup =
   , trips :: Array SharedPeriodTrip
   }
 
-data SharedTripsState
-  = SharedTripsLoading
-  | SharedTripsLoaded (Array SharedPeriodTripGroup)
-  | SharedTripsError String
+data SharedPresenceLoadState
+  = SharedPresenceLoading
+  | SharedPresenceLoaded (Array SharedPresenceGroup)
+  | SharedPresenceError String
 
-derive instance sharedTripsStateEq :: Eq SharedTripsState
-derive instance sharedTripsStateGeneric :: Generic SharedTripsState _
+derive instance sharedPresenceLoadStateEq :: Eq SharedPresenceLoadState
+derive instance sharedPresenceLoadStateGeneric :: Generic SharedPresenceLoadState _
 
-instance showSharedTripsState :: Show SharedTripsState where
+instance showSharedPresenceLoadState :: Show SharedPresenceLoadState where
   show = genericShow
+
+data SharedPresenceState
+  = PresenceUnknown
+  | PresenceAtPlace String
+  | PresenceInTransit { departurePlaceId :: String, arrivalPlaceId :: String }
+
+derive instance sharedPresenceStateEq :: Eq SharedPresenceState
+derive instance sharedPresenceStateGeneric :: Generic SharedPresenceState _
+
+instance showSharedPresenceState :: Show SharedPresenceState where
+  show = genericShow
+
+type SharedPresenceSegment =
+  { start :: DateTime
+  , end :: DateTime
+  , state :: SharedPresenceState
+  }
+
+type SharedPresenceGroup =
+  { username :: String
+  , segments :: Array SharedPresenceSegment
+  }
+
+type SharedPresence = Array SharedPresenceGroup
 
 data ValidationError
   = TitleEmpty

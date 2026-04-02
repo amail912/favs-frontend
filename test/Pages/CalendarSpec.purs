@@ -13,9 +13,10 @@ import Data.DateTime (DateTime)
 import Data.Either (Either(..))
 import Helpers.DateTime as DateTime
 import Helpers.DateTime (formatCalendarDayDateLabelWithReference)
-import Pages.Calendar (decodeCalendarItemsResponse, decodePeriodTripsResponse, decodeSharedUsersResponse, decodeTripPlacesResponse, normalizePeriodTripGroups, shareWriteErrorMessage, subscriptionWriteErrorMessage, tripWriteErrorMessage, validateShareUsername)
+import Pages.Calendar (SharedPresenceState(..), decodeCalendarItemsResponse, decodePeriodTripsResponse, decodeSharedUsersResponse, decodeTripPlacesResponse, deriveSharedPresence, normalizePeriodTripGroups, shareWriteErrorMessage, subscriptionWriteErrorMessage, tripWriteErrorMessage, validateShareUsername)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (fail, shouldEqual)
+import Test.Support.Builders (unsafeDateTime)
 
 spec :: Spec Unit
 spec =
@@ -82,6 +83,70 @@ spec =
       let
         normalized = normalizePeriodTripGroups malformedPeriodTrips
       normalized `shouldEqual` []
+
+    it "derives unknown until the first trip when there is no seed trip" do
+      let
+        derived = deriveSharedPresence (unsafeDateTime "2026-04-02T00:00") (unsafeDateTime "2026-04-03T00:00") (normalizePeriodTripGroups noSeedPeriodTrips)
+      summarizePresenceGroups derived
+        `shouldEqual`
+          [ { username: "alice"
+            , segments:
+                [ { start: "2026-04-02T00:00", end: "2026-04-02T08:00", state: "unknown" }
+                , { start: "2026-04-02T08:00", end: "2026-04-02T09:00", state: "in-transit:Paris->Lyon" }
+                , { start: "2026-04-02T09:00", end: "2026-04-03T00:00", state: "at-place:Lyon" }
+                ]
+            }
+          ]
+
+    it "derives initial place from a completed seed trip before the period" do
+      let
+        derived = deriveSharedPresence (unsafeDateTime "2026-04-02T00:00") (unsafeDateTime "2026-04-03T00:00") (normalizePeriodTripGroups completedSeedPeriodTrips)
+      summarizePresenceGroups derived
+        `shouldEqual`
+          [ { username: "bob"
+            , segments:
+                [ { start: "2026-04-02T00:00", end: "2026-04-02T12:00", state: "at-place:Paris" }
+                , { start: "2026-04-02T12:00", end: "2026-04-02T13:00", state: "in-transit:Paris->Lyon" }
+                , { start: "2026-04-02T13:00", end: "2026-04-03T00:00", state: "at-place:Lyon" }
+                ]
+            }
+          ]
+
+    it "derives in transit from a seed trip active at the period start" do
+      let
+        derived = deriveSharedPresence (unsafeDateTime "2026-04-02T00:00") (unsafeDateTime "2026-04-03T00:00") (normalizePeriodTripGroups decodedPeriodTrips)
+      summarizePresenceGroups derived
+        `shouldEqual`
+          [ { username: "alice"
+            , segments:
+                [ { start: "2026-04-02T00:00", end: "2026-04-02T08:00", state: "unknown" }
+                , { start: "2026-04-02T08:00", end: "2026-04-02T09:00", state: "in-transit:Paris->Lyon" }
+                , { start: "2026-04-02T09:00", end: "2026-04-02T12:00", state: "at-place:Lyon" }
+                , { start: "2026-04-02T12:00", end: "2026-04-02T13:00", state: "in-transit:Lyon->Paris" }
+                , { start: "2026-04-02T13:00", end: "2026-04-03T00:00", state: "at-place:Paris" }
+                ]
+            }
+          , { username: "bob"
+            , segments:
+                [ { start: "2026-04-02T00:00", end: "2026-04-02T01:00", state: "in-transit:Le Mesnil->Paris" }
+                , { start: "2026-04-02T01:00", end: "2026-04-03T00:00", state: "at-place:Paris" }
+                ]
+            }
+          ]
+
+    it "coalesces adjacent stable states and drops zero-length segments" do
+      let
+        derived = deriveSharedPresence (unsafeDateTime "2026-04-02T00:00") (unsafeDateTime "2026-04-03T00:00") (normalizePeriodTripGroups adjacentPresenceTrips)
+      summarizePresenceGroups derived
+        `shouldEqual`
+          [ { username: "carol"
+            , segments:
+                [ { start: "2026-04-02T00:00", end: "2026-04-02T10:00", state: "at-place:Paris" }
+                , { start: "2026-04-02T10:00", end: "2026-04-02T11:00", state: "in-transit:Paris->Lyon" }
+                , { start: "2026-04-02T11:00", end: "2026-04-03T00:00", state: "at-place:Lyon" }
+                ]
+            }
+          ]
 
     it "encodes share add payloads" do
       decodeJson (encodeJson (TripSharingUser { username: "alice" }))
@@ -204,6 +269,63 @@ malformedPeriodTrips =
       }
   ]
 
+noSeedPeriodTrips :: Array PeriodTripGroup
+noSeedPeriodTrips =
+  [ PeriodTripGroup
+      { username: "alice"
+      , trips:
+          [ PeriodTrip
+              { windowStart: "2026-04-02T08:00"
+              , windowEnd: "2026-04-02T09:00"
+              , departurePlaceId: "Paris"
+              , arrivalPlaceId: "Lyon"
+              }
+          ]
+      }
+  ]
+
+completedSeedPeriodTrips :: Array PeriodTripGroup
+completedSeedPeriodTrips =
+  [ PeriodTripGroup
+      { username: "bob"
+      , trips:
+          [ PeriodTrip
+              { windowStart: "2026-04-01T22:00"
+              , windowEnd: "2026-04-01T23:00"
+              , departurePlaceId: "Le Mesnil"
+              , arrivalPlaceId: "Paris"
+              }
+          , PeriodTrip
+              { windowStart: "2026-04-02T12:00"
+              , windowEnd: "2026-04-02T13:00"
+              , departurePlaceId: "Paris"
+              , arrivalPlaceId: "Lyon"
+              }
+          ]
+      }
+  ]
+
+adjacentPresenceTrips :: Array PeriodTripGroup
+adjacentPresenceTrips =
+  [ PeriodTripGroup
+      { username: "carol"
+      , trips:
+          [ PeriodTrip
+              { windowStart: "2026-04-01T22:00"
+              , windowEnd: "2026-04-01T23:00"
+              , departurePlaceId: "Le Mesnil"
+              , arrivalPlaceId: "Paris"
+              }
+          , PeriodTrip
+              { windowStart: "2026-04-02T10:00"
+              , windowEnd: "2026-04-02T11:00"
+              , departurePlaceId: "Paris"
+              , arrivalPlaceId: "Lyon"
+              }
+          ]
+      }
+  ]
+
 mkTextResponse :: Int -> String -> Response String
 mkTextResponse code body =
   { status: StatusCode code
@@ -243,3 +365,24 @@ summarizeNormalizedGroups =
           )
           group.trips
     }
+
+summarizePresenceGroups :: Array { username :: String, segments :: Array { start :: DateTime, end :: DateTime, state :: SharedPresenceState } } -> Array { username :: String, segments :: Array { start :: String, end :: String, state :: String } }
+summarizePresenceGroups =
+  map \group ->
+    { username: group.username
+    , segments:
+        map
+          ( \segment ->
+              { start: DateTime.formatLocalDateTime segment.start
+              , end: DateTime.formatLocalDateTime segment.end
+              , state: summarizePresenceState segment.state
+              }
+          )
+          group.segments
+    }
+
+summarizePresenceState :: SharedPresenceState -> String
+summarizePresenceState = case _ of
+  PresenceUnknown -> "unknown"
+  PresenceAtPlace placeId -> "at-place:" <> placeId
+  PresenceInTransit { departurePlaceId, arrivalPlaceId } -> "in-transit:" <> departurePlaceId <> "->" <> arrivalPlaceId
