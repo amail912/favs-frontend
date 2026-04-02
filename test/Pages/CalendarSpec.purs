@@ -11,7 +11,7 @@ import Data.Argonaut.Decode.Error (JsonDecodeError)
 import Data.Argonaut.Encode (encodeJson, (:=), (~>))
 import Data.Either (Either(..))
 import Helpers.DateTime (formatCalendarDayDateLabelWithReference)
-import Pages.Calendar (decodeCalendarItemsResponse, decodeSharedUsersResponse, decodeTripPlacesResponse, shareWriteErrorMessage, tripWriteErrorMessage, validateShareUsername)
+import Pages.Calendar (decodeCalendarItemsResponse, decodeSharedUsersResponse, decodeTripPlacesResponse, shareWriteErrorMessage, subscriptionWriteErrorMessage, tripWriteErrorMessage, validateShareUsername)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (fail, shouldEqual)
 
@@ -62,6 +62,12 @@ spec =
         response =
           mkTextResponse 400 "{\"message\":\"username must reference an existing user\"}"
       shareWriteErrorMessage response `shouldEqual` "Ce nom d'utilisateur est introuvable."
+
+    it "maps known subscription write errors to French feedback" do
+      let
+        response =
+          mkTextResponse 400 "{\"message\":\"username must not be the authenticated user\"}"
+      subscriptionWriteErrorMessage response `shouldEqual` "Vous ne pouvez pas vous abonner à vos propres trajets."
 
     it "formats a same-year day label without the year" do
       formatCalendarDayDateLabelWithReference "2026-03-12" "2026-01-01"

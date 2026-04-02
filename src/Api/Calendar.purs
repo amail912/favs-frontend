@@ -5,8 +5,11 @@ module Api.Calendar
   , getItemsResponse
   , getTripPlacesResponse
   , getSharedUsersResponse
+  , getSubscribedUsersResponse
   , addSharedUserResponse
+  , addSubscribedUserResponse
   , deleteSharedUserResponse
+  , deleteSubscribedUserResponse
   , createItemResponse
   , updateItemResponse
   , validateItemResponse
@@ -44,8 +47,14 @@ tripPlacesPath = "/api/v1/trip-places"
 shareUsersPath :: String
 shareUsersPath = "/api/v1/trip-sharing/shares"
 
+subscribedUsersPath :: String
+subscribedUsersPath = "/api/v1/trip-sharing/subscriptions"
+
 shareUserDeletePath :: String -> String
 shareUserDeletePath username = shareUsersPath <> "/" <> username
+
+subscribedUserDeletePath :: String -> String
+subscribedUserDeletePath username = subscribedUsersPath <> "/" <> username
 
 createPath :: String
 createPath = "/api/v1/calendar-items"
@@ -68,11 +77,20 @@ getTripPlacesResponse = Affjax.get json tripPlacesPath
 getSharedUsersResponse :: Aff JsonResponse
 getSharedUsersResponse = Affjax.get json shareUsersPath
 
+getSubscribedUsersResponse :: Aff JsonResponse
+getSubscribedUsersResponse = Affjax.get json subscribedUsersPath
+
 addSharedUserResponse :: TripSharingUser -> Aff TextResponse
 addSharedUserResponse user = Affjax.post string shareUsersPath (jsonBody user)
 
+addSubscribedUserResponse :: TripSharingUser -> Aff TextResponse
+addSubscribedUserResponse user = Affjax.post string subscribedUsersPath (jsonBody user)
+
 deleteSharedUserResponse :: String -> Aff TextResponse
 deleteSharedUserResponse username = Affjax.delete string (shareUserDeletePath username)
+
+deleteSubscribedUserResponse :: String -> Aff TextResponse
+deleteSubscribedUserResponse username = Affjax.delete string (subscribedUserDeletePath username)
 
 createItemResponse :: forall payload. EncodeJson payload => payload -> Aff JsonResponse
 createItemResponse item = Affjax.post json createPath (jsonBody item)

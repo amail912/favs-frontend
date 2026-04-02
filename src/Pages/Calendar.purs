@@ -35,6 +35,7 @@ module Pages.Calendar
   , tripWriteErrorMessage
   , validateShareUsername
   , shareWriteErrorMessage
+  , subscriptionWriteErrorMessage
   , calendarItemPrimaryText
   , calendarItemSecondaryText
   , calendarItemCardClass
@@ -51,7 +52,7 @@ module Pages.Calendar
 
 import Prelude hiding (div)
 import Affjax.Web (Response)
-import Api.Calendar (TripPlace(..), TripSharingUser(..), addSharedUserResponse, createItemResponse, deleteSharedUserResponse, getItemsResponse, getSharedUsersResponse, getTripPlacesResponse, updateItemResponse)
+import Api.Calendar (TripPlace(..), TripSharingUser(..), addSharedUserResponse, addSubscribedUserResponse, createItemResponse, deleteSharedUserResponse, deleteSubscribedUserResponse, getItemsResponse, getSharedUsersResponse, getSubscribedUsersResponse, getTripPlacesResponse, updateItemResponse)
 import Calendar.Recurrence (RecurrenceDraft, RecurrenceRule, defaultRecurrenceDraft, draftFromRecurrence, draftToRecurrence)
 import Calendar.Recurrence as Recurrence
 import Calendar.ExImport.Export as Export
@@ -161,6 +162,7 @@ data Action
   | CreateFormAction CreateFormAction
   | DragAction DragAction
   | ShareAction ShareAction
+  | SubscriptionAction SubscriptionAction
   | ViewAction ViewAction
   | SyncDraftTitleKeyDown String
   | SyncSubmitTask
@@ -225,6 +227,9 @@ instance toActionCreateFormAction :: ToAction CreateFormAction where
 instance toActionShareAction :: ToAction ShareAction where
   toAction = ShareAction
 
+instance toActionSubscriptionAction :: ToAction SubscriptionAction where
+  toAction = SubscriptionAction
+
 instance toActionViewAction :: ToAction ViewAction where
   toAction = ViewAction
 
@@ -233,6 +238,12 @@ data ShareAction
   | ShareSubmitRequested
   | ShareDeleteRequested String
   | ShareReloadRequested
+
+data SubscriptionAction
+  = SubscriptionUsernameChanged String
+  | SubscriptionSubmitRequested
+  | SubscriptionDeleteRequested String
+  | SubscriptionReloadRequested
 
 renderAgendaView
   :: forall w
@@ -392,6 +403,9 @@ _calendarTripPlaces = _calendar <<< _tripPlaces
 _calendarShareList :: Lens' State ShareListState
 _calendarShareList = _calendar <<< _shareList
 
+_calendarSubscriptionList :: Lens' State ShareListState
+_calendarSubscriptionList = _calendar <<< _subscriptionList
+
 _syncUpdateErrorState :: Lens' State (Maybe String)
 _syncUpdateErrorState = _sync <<< _syncUpdateError
 
@@ -406,6 +420,8 @@ handleAction action = handleError $
       lift (applyCreateFormAction formAction)
     ShareAction shareAction ->
       lift (handleShareAction shareAction)
+    SubscriptionAction subscriptionAction ->
+      lift (handleSubscriptionAction subscriptionAction)
     SyncDraftTitleKeyDown key ->
       when (key == "Enter") submitTask
     SyncSubmitTask ->
@@ -696,6 +712,7 @@ initAction = do
   subscribeToGlobalResize
   lift loadTripPlaces
   lift loadSharedUsers
+  lift loadSubscribedUsers
   refreshItems
   scheduleDayTimelineFocus
 
@@ -766,6 +783,53 @@ loadSharedUsers = do
                 _
                   { isLoading = false
                   , loadError = Just "Impossible de charger les partages de trajets."
+                  }
+          )
+
+loadSubscribedUsers :: AgendaAppM Unit
+loadSubscribedUsers = do
+  modify_ (_calendarSubscriptionList %~ _ { isLoading = true, loadError = Nothing })
+  result <- liftAff getSubscribedUsersResponse
+  case result of
+    Left _ ->
+      modify_
+        ( _calendarSubscriptionList
+            %~
+              _
+                { isLoading = false
+                , loadError = Just "Impossible de charger les abonnements de trajets."
+                }
+        )
+    Right response ->
+      if statusOk response then
+        case decodeSharedUsersResponse response of
+          Left _ ->
+            modify_
+              ( _calendarSubscriptionList
+                  %~
+                    _
+                      { isLoading = false
+                      , loadError = Just "Impossible de charger les abonnements de trajets."
+                      }
+              )
+          Right usernames ->
+            modify_
+              ( _calendarSubscriptionList
+                  %~
+                    _
+                      { usernames = usernames
+                      , hasLoaded = true
+                      , isLoading = false
+                      , loadError = Nothing
+                      }
+              )
+      else
+        modify_
+          ( _calendarSubscriptionList
+              %~
+                _
+                  { isLoading = false
+                  , loadError = Just "Impossible de charger les abonnements de trajets."
                   }
           )
 
@@ -860,6 +924,100 @@ handleShareAction = case _ of
                   \shareList -> shareList
                     { deletingUsernames = unmarkUsernameDeleting username shareList.deletingUsernames
                     , submitError = Just genericShareWriteErrorMessage
+                    }
+            )
+
+handleSubscriptionAction :: SubscriptionAction -> AgendaAppM Unit
+handleSubscriptionAction = case _ of
+  SubscriptionUsernameChanged raw ->
+    modify_
+      ( _calendarSubscriptionList
+          %~
+            _
+              { usernameDraft = raw
+              , submitError = Nothing
+              }
+      )
+  SubscriptionReloadRequested ->
+    loadSubscribedUsers
+  SubscriptionSubmitRequested -> do
+    st <- get
+    let subscriptionList = st ^. _calendarSubscriptionList
+    case validateShareUsername subscriptionList.usernameDraft of
+      Left err ->
+        modify_ (_calendarSubscriptionList %~ _ { submitError = Just err })
+      Right username -> do
+        modify_
+          ( _calendarSubscriptionList
+              %~
+                _
+                  { isAdding = true
+                  , submitError = Nothing
+                  }
+          )
+        result <- liftAff $ addSubscribedUserResponse (TripSharingUser { username })
+        case result of
+          Left _ ->
+            modify_ (_calendarSubscriptionList %~ _ { isAdding = false, submitError = Just genericSubscriptionWriteErrorMessage })
+          Right response ->
+            if statusOk response then do
+              modify_
+                ( _calendarSubscriptionList
+                    %~
+                      _
+                        { isAdding = false
+                        , usernameDraft = ""
+                        , submitError = Nothing
+                        }
+                )
+              loadSubscribedUsers
+            else
+              modify_
+                ( _calendarSubscriptionList
+                    %~
+                      _
+                        { isAdding = false
+                        , submitError = Just (subscriptionWriteErrorMessage response)
+                        }
+                )
+  SubscriptionDeleteRequested username -> do
+    modify_
+      ( _calendarSubscriptionList
+          %~
+            \subscriptionList -> subscriptionList
+              { deletingUsernames = markUsernameDeleting username subscriptionList.deletingUsernames
+              , submitError = Nothing
+              }
+      )
+    result <- liftAff $ deleteSubscribedUserResponse username
+    case result of
+      Left _ ->
+        modify_
+          ( _calendarSubscriptionList
+              %~
+                \subscriptionList -> subscriptionList
+                  { deletingUsernames = unmarkUsernameDeleting username subscriptionList.deletingUsernames
+                  , submitError = Just genericSubscriptionWriteErrorMessage
+                  }
+          )
+      Right response ->
+        if statusOk response then do
+          modify_
+            ( _calendarSubscriptionList
+                %~
+                  \subscriptionList -> subscriptionList
+                    { deletingUsernames = unmarkUsernameDeleting username subscriptionList.deletingUsernames
+                    , submitError = Nothing
+                    }
+            )
+          loadSubscribedUsers
+        else
+          modify_
+            ( _calendarSubscriptionList
+                %~
+                  \subscriptionList -> subscriptionList
+                    { deletingUsernames = unmarkUsernameDeleting username subscriptionList.deletingUsernames
+                    , submitError = Just genericSubscriptionWriteErrorMessage
                     }
             )
 
@@ -1002,7 +1160,7 @@ subscribeToGlobalResize = do
 render :: State -> H.ComponentHTML Action Slots Aff
 render { calendar, sync, mouseDrag, view } =
   let
-    { items, shareList } = calendar
+    { items, shareList, subscriptionList } = calendar
     { updateError } = sync
     draggingId = mouseDrag.draggingId
     dragHoverIndex = mouseDrag.dragHoverIndex
@@ -1024,7 +1182,9 @@ render { calendar, sync, mouseDrag, view } =
                     [ renderAgendaView viewMode focusDate todayDate sortedItems isMobile promotedOverlaps draggingId dragHoverIndex ]
                 ]
             , div [ class_ "calendar-side" ]
-                [ map toAction (renderShareManager shareList) ]
+                [ map toAction (renderShareManager sharePanelConfig shareList)
+                , map toAction (renderSubscriptionManager subscriptionPanelConfig subscriptionList)
+                ]
             ]
         ]
           <> [ renderAgendaModals agendaModalsInput ]
@@ -1039,12 +1199,13 @@ type AgendaModalsInput =
   , draft :: CreateDraft
   , tripPlaces :: TripPlacesState
   , shareList :: ShareListState
+  , subscriptionList :: ShareListState
   , validationError :: Maybe String
   , editPanel :: Maybe EditPanel
   }
 
 renderAgendaModals :: AgendaModalsInput -> H.ComponentHTML Action Slots Aff
-renderAgendaModals { activeModal, overlapSheet, exportItems, draft, tripPlaces, shareList, validationError, editPanel } =
+renderAgendaModals { activeModal, overlapSheet, exportItems, draft, tripPlaces, shareList, subscriptionList, validationError, editPanel } =
   let
     renderModal title content = Modal.renderModal title content (ViewAction ViewCloseModal) (ViewAction ViewCloseModal)
     renderExportModal items =
@@ -1061,7 +1222,8 @@ renderAgendaModals { activeModal, overlapSheet, exportItems, draft, tripPlaces, 
     maybe (div [] [])
       case _ of
         ModalTools -> renderModal "Actions" [ map toAction renderToolsContent ]
-        ModalTripShares -> renderModal "Partage des trajets" [ map toAction (renderShareManager shareList) ]
+        ModalTripShares -> renderModal "Partage des trajets" [ map toAction (renderShareManager sharePanelConfig shareList) ]
+        ModalTripSubscriptions -> renderModal "Abonnements trajets" [ map toAction (renderSubscriptionManager subscriptionPanelConfig subscriptionList) ]
         ModalCreateItem -> Modal.renderModalWithValidateState "Créer un item" [ renderCreateContent draft tripPlaces validationError ]
           (ViewAction ViewCloseCreate)
           createValidateState
@@ -1094,7 +1256,7 @@ renderAgendaModals { activeModal, overlapSheet, exportItems, draft, tripPlaces, 
 buildAgendaModalsInput :: State -> AgendaModalsInput
 buildAgendaModalsInput { calendar, view } =
   let
-    { items, draft, tripPlaces, shareList, validationError } = calendar
+    { items, draft, tripPlaces, shareList, subscriptionList, validationError } = calendar
     { activeModal, overlapSheet, editPanel } = view
   in
     { activeModal
@@ -1103,6 +1265,7 @@ buildAgendaModalsInput { calendar, view } =
     , draft
     , tripPlaces
     , shareList
+    , subscriptionList
     , validationError
     , editPanel
     }
@@ -1826,6 +1989,7 @@ type CalendarState =
   , lastCreateMode :: CreateItemMode
   , tripPlaces :: TripPlacesState
   , shareList :: ShareListState
+  , subscriptionList :: ShareListState
   }
 
 calendarInitialState :: CalendarState
@@ -1836,6 +2000,7 @@ calendarInitialState =
   , lastCreateMode: CreateTask
   , tripPlaces: TripPlacesLoading
   , shareList: shareListInitialState
+  , subscriptionList: shareListInitialState
   }
 
 shareListInitialState :: ShareListState
@@ -1892,6 +2057,9 @@ _tripPlaces = prop (Proxy :: _ "tripPlaces")
 
 _shareList :: Lens' CalendarState ShareListState
 _shareList = prop (Proxy :: _ "shareList")
+
+_subscriptionList :: Lens' CalendarState ShareListState
+_subscriptionList = prop (Proxy :: _ "subscriptionList")
 
 -- END src/Calendar/Calendar/State.purs
 
@@ -2129,6 +2297,7 @@ data AgendaModal
   | ModalExport
   | ModalTools
   | ModalTripShares
+  | ModalTripSubscriptions
   | ModalCreateItem
   | ModalEditItem
   | ModalOverlapGroup
@@ -2487,72 +2656,119 @@ renderToolsContent :: forall w. HTML w ViewAction
 renderToolsContent =
   div [ class_ "calendar-modal-stack" ]
     [ button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalTripShares)) ] [ text "Partage trajets" ]
+    , button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalTripSubscriptions)) ] [ text "Abonnements trajets" ]
     , button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalImportCsv)) ] [ text "Import CSV" ]
     , button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalImportIcs)) ] [ text "Import ICS" ]
     , button [ class_ "btn btn-outline-secondary", onClick (const (ViewOpenModal ModalExport)) ] [ text "Export" ]
     ]
 
-renderShareManager :: forall w. ShareListState -> HTML w ShareAction
-renderShareManager shareList =
+type UserListPanelConfig action =
+  { title :: String
+  , primaryHint :: String
+  , secondaryHint :: String
+  , loadingText :: String
+  , emptyText :: String
+  , usernameChanged :: String -> action
+  , submitRequested :: action
+  , deleteRequested :: String -> action
+  , reloadRequested :: action
+  }
+
+sharePanelConfig :: UserListPanelConfig ShareAction
+sharePanelConfig =
+  { title: "Qui peut voir mes trajets"
+  , primaryHint: "Cette liste controle uniquement qui peut voir vos trajets."
+  , secondaryHint: "Voir les trajets d'une autre personne se regle separement dans les abonnements."
+  , loadingText: "Chargement des partages..."
+  , emptyText: "Personne n'a encore acces a vos trajets."
+  , usernameChanged: ShareUsernameChanged
+  , submitRequested: ShareSubmitRequested
+  , deleteRequested: ShareDeleteRequested
+  , reloadRequested: ShareReloadRequested
+  }
+
+subscriptionPanelConfig :: UserListPanelConfig SubscriptionAction
+subscriptionPanelConfig =
+  { title: "Utilisateurs suivis"
+  , primaryHint: "Cette liste controle uniquement les trajets que vous souhaitez suivre."
+  , secondaryHint: "Vous ne verrez les trajets d'une personne que si elle vous les partage aussi."
+  , loadingText: "Chargement des abonnements..."
+  , emptyText: "Vous ne suivez encore aucun utilisateur pour les trajets."
+  , usernameChanged: SubscriptionUsernameChanged
+  , submitRequested: SubscriptionSubmitRequested
+  , deleteRequested: SubscriptionDeleteRequested
+  , reloadRequested: SubscriptionReloadRequested
+  }
+
+renderShareManager :: forall w. UserListPanelConfig ShareAction -> ShareListState -> HTML w ShareAction
+renderShareManager config shareList =
+  renderUserListManager config shareList
+
+renderSubscriptionManager :: forall w. UserListPanelConfig SubscriptionAction -> ShareListState -> HTML w SubscriptionAction
+renderSubscriptionManager config subscriptionList =
+  renderUserListManager config subscriptionList
+
+renderUserListManager :: forall w action. UserListPanelConfig action -> ShareListState -> HTML w action
+renderUserListManager config userList =
   section [ class_ "calendar-list-panel calendar-share-panel" ]
     [ div [ class_ "calendar-share-panel__header" ]
-        [ div [ class_ "calendar-share-panel__title" ] [ text "Qui peut voir mes trajets" ]
+        [ div [ class_ "calendar-share-panel__title" ] [ text config.title ]
         , div [ class_ "calendar-share-panel__hint" ]
-            [ text "Cette liste controle uniquement qui peut voir vos trajets." ]
+            [ text config.primaryHint ]
         , div [ class_ "calendar-share-panel__hint text-muted" ]
-            [ text "Voir les trajets d'une autre personne se regle separement dans les abonnements." ]
+            [ text config.secondaryHint ]
         ]
     , div [ class_ "calendar-share-panel__form" ]
         [ div [ class_ "calendar-share-panel__row" ]
             [ input
                 [ class_ "form-control calendar-input"
                 , placeholder "Nom d'utilisateur"
-                , value shareList.usernameDraft
-                , onValueChange ShareUsernameChanged
-                , disabled shareList.isAdding
+                , value userList.usernameDraft
+                , onValueChange config.usernameChanged
+                , disabled userList.isAdding
                 ]
             , button
                 [ class_ "btn btn-primary"
-                , onClick (const ShareSubmitRequested)
-                , disabled (isShareSubmitDisabled shareList)
+                , onClick (const config.submitRequested)
+                , disabled (isShareSubmitDisabled userList)
                 ]
                 [ text "Ajouter" ]
             ]
-        , maybe (text "") (\msg -> div [ class_ "calendar-error" ] [ text msg ]) shareList.submitError
+        , maybe (text "") (\msg -> div [ class_ "calendar-error" ] [ text msg ]) userList.submitError
         ]
-    , renderShareManagerBody shareList
+    , renderUserListManagerBody config userList
     ]
 
-renderShareManagerBody :: forall w. ShareListState -> HTML w ShareAction
-renderShareManagerBody shareList
-  | shareList.isLoading && not shareList.hasLoaded =
-      div [ class_ "calendar-share-panel__empty text-muted" ] [ text "Chargement des partages..." ]
+renderUserListManagerBody :: forall w action. UserListPanelConfig action -> ShareListState -> HTML w action
+renderUserListManagerBody config userList
+  | userList.isLoading && not userList.hasLoaded =
+      div [ class_ "calendar-share-panel__empty text-muted" ] [ text config.loadingText ]
   | otherwise =
       div [ class_ "calendar-share-panel__body" ]
-        [ maybe (text "") renderShareLoadError shareList.loadError
-        , if null shareList.usernames then
-            div [ class_ "calendar-share-panel__empty text-muted" ] [ text "Personne n'a encore acces a vos trajets." ]
+        [ maybe (text "") renderLoadError userList.loadError
+        , if null userList.usernames then
+            div [ class_ "calendar-share-panel__empty text-muted" ] [ text config.emptyText ]
           else
-            ul [ class_ "calendar-share-panel__list" ] (map renderSharedUsername shareList.usernames)
+            ul [ class_ "calendar-share-panel__list" ] (map renderUsername userList.usernames)
         ]
       where
-      renderShareLoadError message =
+      renderLoadError message =
         div [ class_ "calendar-error" ]
           [ div [] [ text message ]
           , button
               [ class_ "btn btn-sm btn-outline-secondary"
-              , onClick (const ShareReloadRequested)
+              , onClick (const config.reloadRequested)
               ]
               [ text "Reessayer" ]
           ]
 
-      renderSharedUsername username =
+      renderUsername username =
         li [ class_ "calendar-share-panel__item" ]
           [ div [ class_ "calendar-share-panel__username" ] [ text username ]
           , button
               [ class_ "btn btn-sm btn-outline-secondary"
-              , onClick (const (ShareDeleteRequested username))
-              , disabled (isUsernameDeleting username shareList)
+              , onClick (const (config.deleteRequested username))
+              , disabled (isUsernameDeleting username userList)
               ]
               [ text "Retirer" ]
           ]
@@ -3328,12 +3544,24 @@ shareWriteErrorMessage response =
     Just "Unable to decode the body as a TripSharingUser" -> "Le format du partage est invalide."
     _ -> "Echec de mise a jour du partage de trajets (HTTP " <> show (unwrap response.status) <> ")."
 
+subscriptionWriteErrorMessage :: Response String -> String
+subscriptionWriteErrorMessage response =
+  case textResponseMessage response of
+    Just "username is required" -> "Le nom d'utilisateur est obligatoire."
+    Just "username must not be the authenticated user" -> "Vous ne pouvez pas vous abonner à vos propres trajets."
+    Just "username must reference an existing user" -> "Ce nom d'utilisateur est introuvable."
+    Just "Unable to decode the body as a TripSharingUser" -> "Le format de l'abonnement est invalide."
+    _ -> "Echec de mise a jour de l'abonnement de trajets (HTTP " <> show (unwrap response.status) <> ")."
+
 createErrorMessage :: Int -> String
 createErrorMessage status =
   "Echec de creation de l'item (HTTP " <> show status <> ")."
 
 genericShareWriteErrorMessage :: String
 genericShareWriteErrorMessage = "Echec de mise a jour du partage de trajets."
+
+genericSubscriptionWriteErrorMessage :: String
+genericSubscriptionWriteErrorMessage = "Echec de mise a jour de l'abonnement de trajets."
 
 isShareSubmitDisabled :: ShareListState -> Boolean
 isShareSubmitDisabled shareList =

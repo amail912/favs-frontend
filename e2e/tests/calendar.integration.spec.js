@@ -59,6 +59,14 @@ async function setCalendarViewDate(page, value) {
   }, value);
 }
 
+async function setTextInputValue(locator, value) {
+  await locator.evaluate((input, nextValue) => {
+    input.value = nextValue;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, value);
+}
+
 async function dragCalendarItemToMinute(page, title, targetMinuteOfDay) {
   const source = page.locator(".calendar-calendar-card", {
     has: page.locator(".calendar-calendar-item-title", { hasText: title })
@@ -192,10 +200,10 @@ test("calendar share panel: add and remove a shared user", async ({ authenticate
   await calendarTab(page).click();
   await expect(page).toHaveURL(/\/calendar$/);
 
-  const sharePanel = page.locator(".calendar-share-panel");
+  const sharePanel = page.locator(".calendar-share-panel").filter({ hasText: "Qui peut voir mes trajets" });
   await expect(sharePanel).toBeVisible();
 
-  await sharePanel.getByPlaceholder("Nom d'utilisateur").fill(sharedUsername);
+  await setTextInputValue(sharePanel.getByPlaceholder("Nom d'utilisateur"), sharedUsername);
 
   const addResponsePromise = page.waitForResponse(
     response =>
@@ -230,6 +238,55 @@ test("calendar share panel: add and remove a shared user", async ({ authenticate
   expect((await deleteResponsePromise).ok()).toBeTruthy();
   expect((await deleteListResponsePromise).ok()).toBeTruthy();
   await expect(shareRow).toHaveCount(0);
+});
+
+test("calendar subscription panel: add and remove a subscribed user", async ({ authenticatedPage: page }, testInfo) => {
+  const subscribedUsername = `e2e_subscription_${testInfo.workerIndex}_${Date.now()}`;
+
+  await ensureUser({ apiBase: API_BASE, username: subscribedUsername, password: E2E_PASSWORD });
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+
+  const subscriptionPanel = page.locator(".calendar-share-panel").filter({ hasText: "Utilisateurs suivis" });
+  await expect(subscriptionPanel).toBeVisible();
+  await expect(subscriptionPanel).toContainText("Vous ne verrez les trajets d'une personne que si elle vous les partage aussi.");
+
+  await setTextInputValue(subscriptionPanel.getByPlaceholder("Nom d'utilisateur"), subscribedUsername);
+
+  const addResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/trip-sharing/subscriptions") &&
+      response.request().method() === "POST"
+  );
+  const addListResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/trip-sharing/subscriptions") &&
+      response.request().method() === "GET"
+  );
+
+  await subscriptionPanel.getByRole("button", { name: "Ajouter" }).click();
+  expect((await addResponsePromise).ok()).toBeTruthy();
+  expect((await addListResponsePromise).ok()).toBeTruthy();
+
+  const subscriptionRow = subscriptionPanel.locator(".calendar-share-panel__item", { hasText: subscribedUsername }).first();
+  await expect(subscriptionRow).toBeVisible();
+
+  const deleteResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes(`/api/v1/trip-sharing/subscriptions/${subscribedUsername}`) &&
+      response.request().method() === "DELETE"
+  );
+  const deleteListResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/trip-sharing/subscriptions") &&
+      response.request().method() === "GET"
+  );
+
+  await subscriptionRow.getByRole("button", { name: "Retirer" }).click();
+  expect((await deleteResponsePromise).ok()).toBeTruthy();
+  expect((await deleteListResponsePromise).ok()).toBeTruthy();
+  await expect(subscriptionRow).toHaveCount(0);
 });
 
 test("calendar integration: create item on a later day", async ({ authenticatedPage: page }) => {
