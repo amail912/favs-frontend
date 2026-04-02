@@ -26,6 +26,10 @@ function createAccountButton(page) {
   return page.getByRole("button", { name: "Create account" });
 }
 
+function signInButton(page) {
+  return page.getByRole("button", { name: "Sign in" });
+}
+
 function signupUsernameInput(page) {
   return page.locator("#signup-username");
 }
@@ -36,6 +40,10 @@ function signupPasswordInput(page) {
 
 function signinUsernameInput(page) {
   return page.locator("#signin-username");
+}
+
+function signinPasswordInput(page) {
+  return page.locator("#signin-password");
 }
 
 function appTitle(page) {
@@ -49,6 +57,8 @@ module.exports = {
   createAccountButton,
   createButton,
   notesTab,
+  signInButton,
+  signinPasswordInput,
   signupMenuButton,
   signupPasswordInput,
   signupUsernameInput,

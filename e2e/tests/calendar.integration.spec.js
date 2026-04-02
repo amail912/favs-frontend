@@ -45,12 +45,6 @@ async function openCreateModal(page) {
   return modal;
 }
 
-async function dayTimelineScrollTop(page) {
-  const body = page.locator(".calendar-calendar-body");
-  await expect(body).toBeVisible();
-  return body.evaluate(element => element.scrollTop);
-}
-
 async function setCalendarViewDate(page, value) {
   await page.locator(".calendar-view-date").evaluate((input, nextValue) => {
     input.value = nextValue;
@@ -336,7 +330,9 @@ test("calendar integration: create item on a later day", async ({ authenticatedP
   await setCalendarViewDate(page, focusDate);
 
   await expect(row).toBeVisible();
-  await expect.poll(() => dayTimelineScrollTop(page)).toBeGreaterThan(0);
+  await expect(page.locator("[data-day-focus-item='true']", {
+    has: page.locator(".calendar-calendar-item-title", { hasText: title })
+  })).toBeVisible();
 });
 
 test("calendar desktop: drag and drop keeps the focused date and dropped time", async ({ authenticatedPage: page }) => {

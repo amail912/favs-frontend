@@ -1,11 +1,23 @@
 const { test, expect } = require("@playwright/test");
-const { createAccountButton, signinUsernameInput, signupPasswordInput, signupUsernameInput } = require("../support/ui");
+const {
+  createAccountButton,
+  signInButton,
+  signinPasswordInput,
+  signinUsernameInput,
+  signupPasswordInput,
+  signupUsernameInput
+} = require("../support/ui");
 
 const STRONG_PASSWORD = "StrongPass123!";
 
 async function gotoSignup(page) {
   await page.goto("/signup");
   await expect(signupUsernameInput(page)).toBeVisible();
+}
+
+async function gotoSignin(page) {
+  await page.goto("/signin");
+  await expect(signinUsernameInput(page)).toBeVisible();
 }
 
 test("signup form shows client-side validation feedback", async ({ page }) => {
@@ -60,4 +72,23 @@ test("signup form shows backend failure feedback for duplicate username", async 
   await createAccountButton(page).click();
 
   await expect(page.getByText("Unable to create user")).toBeVisible();
+});
+
+test("signin form shows backend pending approval feedback", async ({ page }) => {
+  const username = `pending_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+
+  await page.route("**/api/signin", async route => {
+    await route.fulfill({
+      status: 403,
+      contentType: "text/plain; charset=utf-8",
+      body: "Account pending approval"
+    });
+  });
+
+  await gotoSignin(page);
+  await signinUsernameInput(page).fill(username);
+  await signinPasswordInput(page).fill(STRONG_PASSWORD);
+  await signInButton(page).click();
+
+  await expect(page.getByText("Account pending approval")).toBeVisible();
 });

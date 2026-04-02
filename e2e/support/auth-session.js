@@ -1,5 +1,7 @@
 const DEFAULT_API_BASE = "http://localhost:1234/api";
 const DEFAULT_PASSWORD = "StrongPass123!";
+const DEFAULT_ADMIN_USERNAME = "admin";
+const DEFAULT_ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD || "averystrongpass";
 
 function parseSessionCookie(setCookieHeader) {
   const setCookie = setCookieHeader || "";
@@ -57,6 +59,14 @@ async function signinUser(options = {}) {
   };
 }
 
+function buildAdminCredentials(options = {}) {
+  return buildCredentials({
+    ...options,
+    username: options.adminUsername || DEFAULT_ADMIN_USERNAME,
+    password: options.adminPassword || DEFAULT_ADMIN_PASSWORD
+  });
+}
+
 async function ensureUser(options = {}) {
   const { signup, username, password } = await signupUser(options);
   if (signup.ok) {
@@ -71,8 +81,54 @@ async function ensureUser(options = {}) {
   return { username, password };
 }
 
-async function signupAndSignin(options = {}) {
+async function signinAdmin(options = {}) {
+  const { apiBase, username, password } = buildAdminCredentials(options);
+  return signinUser({ apiBase, username, password });
+}
+
+async function ensureAdminUser(options = {}) {
+  const { apiBase, username, password } = buildAdminCredentials(options);
+  await ensureUser({ apiBase, username, password });
+  return { apiBase, username, password };
+}
+
+async function approveUser(options = {}) {
+  const { apiBase, username, adminCookie } = options;
+
+  if (!username) {
+    throw new Error("approveUser requires a username");
+  }
+
+  if (!adminCookie || !adminCookie.name || !adminCookie.value) {
+    throw new Error("approveUser requires a valid adminCookie");
+  }
+
+  const approval = await fetch(`${apiBase}/v1/admin/pending-signups/approve`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      cookie: `${adminCookie.name}=${adminCookie.value}`
+    },
+    body: JSON.stringify({ username })
+  });
+
+  if (!approval.ok) {
+    const body = await approval.text();
+    throw new Error(`Approve user failed with status ${approval.status}: ${body}`);
+  }
+}
+
+async function ensureApprovedUser(options = {}) {
+  const { apiBase } = buildCredentials(options);
   const { username, password } = await ensureUser(options);
+  await ensureAdminUser(options);
+  const adminSession = await signinAdmin(options);
+  await approveUser({ apiBase, username, adminCookie: adminSession.cookie });
+  return { username, password };
+}
+
+async function signupAndSignin(options = {}) {
+  const { username, password } = await ensureApprovedUser(options);
   const signedIn = await signinUser({ ...options, username, password });
 
   return {
@@ -83,7 +139,11 @@ async function signupAndSignin(options = {}) {
 }
 
 module.exports = {
+  approveUser,
+  ensureAdminUser,
+  ensureApprovedUser,
   ensureUser,
+  signinAdmin,
   signinUser,
   signupUser,
   signupAndSignin,

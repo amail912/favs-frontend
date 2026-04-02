@@ -1,5 +1,5 @@
 const base = require("@playwright/test");
-const { ensureUser, signinUser } = require("../support/auth-session");
+const { ensureApprovedUser, signinUser } = require("../support/auth-session");
 
 const API_BASE = process.env.E2E_API_URL || "http://localhost:1234/api";
 const E2E_PASSWORD = process.env.E2E_PASSWORD || "StrongPass123!";
@@ -10,7 +10,7 @@ const test = base.test.extend({
       process.env.E2E_USERNAME ||
       `e2e_worker_${testInfo.workerIndex}_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
     const password = E2E_PASSWORD;
-    await ensureUser({ apiBase: API_BASE, username, password });
+    await ensureApprovedUser({ apiBase: API_BASE, username, password });
     await use({ username, password });
   }, { scope: "worker" }],
   session: async ({ authIdentity }, use) => {
