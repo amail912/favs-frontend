@@ -38,9 +38,16 @@ module Pages.Calendar
   , SharedPeriodTrip
   , SharedPeriodTripGroup
   , SharedPresence
+  , SharedPresenceLoadState(..)
   , SharedPresenceGroup
   , SharedPresenceSegment
   , SharedPresenceState(..)
+  , SharedPresenceSegmentLayout
+  , shouldRenderSharedPresenceRail
+  , shouldRenderDayCalendarShell
+  , buildSharedPresenceSegmentLayouts
+  , sharedPresenceSegmentRailClass
+  , sharedPresenceLaneToneClass
   , tripWriteErrorMessage
   , validateShareUsername
   , shareWriteErrorMessage
@@ -261,15 +268,16 @@ renderAgendaView
   -> String
   -> String
   -> Array CalendarItem
+  -> SharedPresenceLoadState
   -> Boolean
   -> Array MobileOverlapPromotion
   -> Maybe String
   -> Maybe Int
   -> HTML w Action
-renderAgendaView viewMode focusDate todayDate items isMobile promotedOverlaps draggingId dragHoverIndex =
+renderAgendaView viewMode focusDate todayDate items sharedPresence isMobile promotedOverlaps draggingId dragHoverIndex =
   case viewMode of
     ViewDay ->
-      renderDayCalendar focusDate todayDate items isMobile promotedOverlaps draggingId dragHoverIndex
+      renderDayCalendar focusDate todayDate items sharedPresence isMobile promotedOverlaps draggingId dragHoverIndex
     ViewWeek ->
       renderRangeView "Semaine" (generateDateRange focusDate 7) items isMobile
     ViewMonth ->
@@ -1209,7 +1217,7 @@ subscribeToGlobalResize = do
 render :: State -> H.ComponentHTML Action Slots Aff
 render { calendar, sync, mouseDrag, view } =
   let
-    { items, shareList, subscriptionList } = calendar
+    { items, shareList, subscriptionList, sharedPresence } = calendar
     { updateError } = sync
     draggingId = mouseDrag.draggingId
     dragHoverIndex = mouseDrag.dragHoverIndex
@@ -1228,7 +1236,7 @@ render { calendar, sync, mouseDrag, view } =
             [ div [ class_ "calendar-main" ]
                 [ maybe (text "") renderUpdateError updateError
                 , section [ class_ $ "calendar-list-panel" <> guard (viewMode == ViewDay) " calendar-list-panel--calendar" ]
-                    [ renderAgendaView viewMode focusDate todayDate sortedItems isMobile promotedOverlaps draggingId dragHoverIndex ]
+                    [ renderAgendaView viewMode focusDate todayDate sortedItems sharedPresence isMobile promotedOverlaps draggingId dragHoverIndex ]
                 ]
             , div [ class_ "calendar-side" ]
                 [ map toAction (renderShareManager sharePanelConfig shareList)
@@ -1331,17 +1339,22 @@ renderDayCalendar
    . String
   -> String
   -> Array CalendarItem
+  -> SharedPresenceLoadState
   -> Boolean
   -> Array MobileOverlapPromotion
   -> Maybe String
   -> Maybe Int
   -> HTML w Action
-renderDayCalendar focusDate todayDate items isMobile promotedOverlaps draggingId dragHoverIndex =
+renderDayCalendar focusDate todayDate items sharedPresence isMobile promotedOverlaps draggingId dragHoverIndex =
   let
     itemsForDate = filter (isItemOnDate focusDate) items
     sorted = sortItems SortByTime itemsForDate
     focusTargetIdentity = map calendarItemIdentity (uncons sorted <#> _.head)
     dragPreview = renderDayDragPreview isMobile draggingId dragHoverIndex itemsForDate
+    showPresenceRail = shouldRenderSharedPresenceRail sharedPresence
+    railLayouts = case sharedPresence of
+      SharedPresenceLoaded groups -> buildSharedPresenceSegmentLayouts groups
+      _ -> []
     timelineItems =
       if isMobile then
         map (renderMobileOverlapStack draggingId focusTargetIdentity) (applyMobileOverlapPromotions promotedOverlaps (buildMobileOverlapStacks sorted))
@@ -1349,7 +1362,7 @@ renderDayCalendar focusDate todayDate items isMobile promotedOverlaps draggingId
         map (renderTimelineItem isMobile draggingId focusTargetIdentity) (buildTimelineLayout sorted)
     dayLabel = DateTime.formatCalendarDayDateLabelWithReference focusDate todayDate
   in
-    if null itemsForDate then emptyAgenda
+    if not (shouldRenderDayCalendarShell itemsForDate sharedPresence) then emptyAgenda
     else
       div [ class_ "calendar-calendar" ]
         [ div [ class_ "calendar-calendar-header" ]
@@ -1364,7 +1377,7 @@ renderDayCalendar focusDate todayDate items isMobile promotedOverlaps draggingId
             [ div [ class_ "calendar-calendar-hours" ]
                 (map renderHourLabel (enumFromTo 0 23) <> [ renderHourLabelEnd ])
             , div
-                [ class_ "calendar-calendar-grid"
+                [ class_ $ "calendar-calendar-grid" <> guard showPresenceRail " calendar-calendar-grid--with-presence"
                 , onDragEnter (\ev -> DragAction { log: "DragEnterCalendar@calendar-grid", dragAction: DragOverCalendar ev })
                 , onDragOver (\ev -> DragAction { log: "DragOverCalendar@calendar-grid", dragAction: DragOverCalendar ev })
                 , onDrop (\ev -> DragAction { log: "DropOnCalendar@calendar-grid", dragAction: DropOnCalendar ev })
@@ -1373,9 +1386,11 @@ renderDayCalendar focusDate todayDate items isMobile promotedOverlaps draggingId
                     (map renderHourLine (enumFromTo 0 23))
                 , maybe (text "") renderDropIndicator dragHoverIndex
                 , maybe (text "") identity dragPreview
+                , if showPresenceRail then renderSharedPresenceRail isMobile railLayouts else text ""
                 , div
                     [ class_ $
                         "calendar-calendar-items"
+                          <> guard showPresenceRail " calendar-calendar-items--with-presence"
                           <> if draggingId == Nothing || isMobile then "" else " calendar-calendar-items--dragging"
                     , ref (wrap "day-calendar-grid")
                     , onTouchMove (\ev -> DragAction { log: "TouchMove@calendar-grid", dragAction: TouchDragMove ev })
@@ -1398,6 +1413,40 @@ renderHourLabelEnd =
 renderHourLine :: forall w action. Int -> HTML w action
 renderHourLine _ =
   div [ class_ "calendar-calendar-line" ] []
+
+renderSharedPresenceRail :: forall w. Boolean -> Array SharedPresenceSegmentLayout -> HTML w Action
+renderSharedPresenceRail isMobile layouts =
+  let
+    railClass =
+      "calendar-presence-rail" <>
+        guard isMobile " calendar-presence-rail--mobile"
+  in
+    div [ class_ railClass, attr (AttrName "aria-hidden") "true" ]
+      (map renderSharedPresenceSegment layouts)
+
+renderSharedPresenceSegment :: forall w. SharedPresenceSegmentLayout -> HTML w Action
+renderSharedPresenceSegment layout =
+  div
+    [ class_ $
+        "calendar-presence-rail__segment"
+          <> " "
+          <> sharedPresenceSegmentRailClass layout.state
+          <> " "
+          <> sharedPresenceLaneToneClass layout.laneIndex
+    , style $
+        " --start:" <> show layout.startMin <> ";"
+          <> " --duration:"
+          <> show layout.duration
+          <> ";"
+          <> " --lane:"
+          <> show layout.laneIndex
+          <> ";"
+          <> " --lanes:"
+          <> show layout.laneCount
+          <> ";"
+    , attr (AttrName "data-username") layout.username
+    ]
+    []
 
 renderDayDragPreview
   :: forall w
@@ -3725,6 +3774,57 @@ dropSegments count =
 mapMaybeWithIndex :: forall a b. (Int -> a -> Maybe b) -> Array a -> Array b
 mapMaybeWithIndex fn items =
   mapMaybe identity (mapWithIndex fn items)
+
+shouldRenderSharedPresenceRail :: SharedPresenceLoadState -> Boolean
+shouldRenderSharedPresenceRail = case _ of
+  SharedPresenceLoaded groups -> not (null groups)
+  _ -> false
+
+shouldRenderDayCalendarShell :: Array CalendarItem -> SharedPresenceLoadState -> Boolean
+shouldRenderDayCalendarShell items sharedPresence =
+  not (null items) || shouldRenderSharedPresenceRail sharedPresence
+
+type SharedPresenceSegmentLayout =
+  { username :: String
+  , laneIndex :: Int
+  , laneCount :: Int
+  , startMin :: Int
+  , duration :: Int
+  , state :: SharedPresenceState
+  }
+
+buildSharedPresenceSegmentLayouts :: SharedPresence -> Array SharedPresenceSegmentLayout
+buildSharedPresenceSegmentLayouts groups =
+  let
+    laneCount = max 1 (length groups)
+  in
+    foldl (<>) []
+      ( mapWithIndex
+          ( \laneIndex group ->
+              map
+                ( \segment ->
+                    { username: group.username
+                    , laneIndex
+                    , laneCount
+                    , startMin: minuteOfDay segment.start
+                    , duration: durationMinutesBetween segment.start segment.end
+                    , state: segment.state
+                    }
+                )
+                group.segments
+          )
+          groups
+      )
+
+sharedPresenceSegmentRailClass :: SharedPresenceState -> String
+sharedPresenceSegmentRailClass = case _ of
+  PresenceUnknown -> "calendar-presence-rail__segment--unknown"
+  PresenceAtPlace _ -> "calendar-presence-rail__segment--place"
+  PresenceInTransit _ -> "calendar-presence-rail__segment--transit"
+
+sharedPresenceLaneToneClass :: Int -> String
+sharedPresenceLaneToneClass laneIndex =
+  "calendar-presence-rail__segment--tone-" <> show (Int.rem laneIndex 4)
 
 validateShareUsername :: String -> Either String String
 validateShareUsername raw =

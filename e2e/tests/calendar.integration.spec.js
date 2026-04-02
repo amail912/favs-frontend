@@ -283,6 +283,63 @@ test("calendar subscription panel: add and remove a subscribed user", async ({ a
   await expect(subscriptionRow).toHaveCount(0);
 });
 
+test("calendar day rail: shows shared presence without owner items", async ({ authenticatedPage: page }) => {
+  const focusDate = toLocalDateInput(isolatedFutureDate(2330));
+  const sharedUsername = "shared-rail-user";
+
+  await page.route("**/api/v1/trip-sharing/period-trips**", async route => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("start") === `${focusDate}T00:00`) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json; charset=utf-8",
+        body: JSON.stringify([
+          {
+            username: sharedUsername,
+            trips: [
+              {
+                windowStart: `${focusDate}T08:00`,
+                windowEnd: `${focusDate}T09:00`,
+                departurePlaceId: "Paris",
+                arrivalPlaceId: "St Clair"
+              }
+            ]
+          }
+        ])
+      });
+      return;
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json; charset=utf-8",
+      body: "[]"
+    });
+  });
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+
+  const periodTripsResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/trip-sharing/period-trips") &&
+      response.request().method() === "GET"
+  );
+
+  await setCalendarViewDate(page, focusDate);
+  expect((await periodTripsResponsePromise).ok()).toBeTruthy();
+
+  await expect(page.locator(".calendar-empty")).toHaveCount(0);
+  await expect(page.locator(".calendar-calendar-card")).toHaveCount(0);
+  await expect(page.locator(".calendar-presence-rail")).toBeVisible();
+
+  const sharedSegments = page.locator(`.calendar-presence-rail__segment[data-username="${sharedUsername}"]`);
+  await expect(sharedSegments).toHaveCount(3);
+  await expect(page.locator(`.calendar-presence-rail__segment--unknown[data-username="${sharedUsername}"]`)).toHaveCount(1);
+  await expect(page.locator(`.calendar-presence-rail__segment--transit[data-username="${sharedUsername}"]`)).toHaveCount(1);
+  await expect(page.locator(`.calendar-presence-rail__segment--place[data-username="${sharedUsername}"]`)).toHaveCount(1);
+});
+
 test("calendar integration: create item on a later day", async ({ authenticatedPage: page }) => {
   const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
   const focusDate = toLocalDateInput(tomorrow);

@@ -44,9 +44,9 @@ Let users share trip information in a controlled way so each person can understa
 - [005 Subscribe To Trip Users](done/005-subscribe-to-trip-users.md) - Let a user manage whose trips they follow through the subscription list endpoints.
 - [006 Period Trips Query](done/006-period-trips-query.md) - Consume the dedicated grouped shared-trips query needed for presence derivation.
 - [007 Presence Derivation](done/007-presence-derivation.md) - Derive deterministic location state from grouped ordered trips.
+- [008 Day View Side Rail](done/008-day-view-side-rail.md) - Render derived presence in Day view without competing with the owner agenda.
 
 ### To Refine
-- [008 Day View Side Rail](to-refine/008-day-view-side-rail.md) - Render derived presence in Day view without competing with the owner agenda.
 - [009 Day View Location Inspection](to-refine/009-day-view-location-inspection.md) - Reveal the exact derived location or in-transit state on interaction.
 - [010 Cue Personalization](to-refine/010-cue-personalization.md) - Let the owner configure cue colors without changing shared trip data.
 - [011 Unknown Location States](to-refine/011-unknown-location-states.md) - Keep non-derivable location explicit instead of implying a known place.

@@ -13,7 +13,7 @@ import Data.DateTime (DateTime)
 import Data.Either (Either(..))
 import Helpers.DateTime as DateTime
 import Helpers.DateTime (formatCalendarDayDateLabelWithReference)
-import Pages.Calendar (SharedPresenceState(..), decodeCalendarItemsResponse, decodePeriodTripsResponse, decodeSharedUsersResponse, decodeTripPlacesResponse, deriveSharedPresence, normalizePeriodTripGroups, shareWriteErrorMessage, subscriptionWriteErrorMessage, tripWriteErrorMessage, validateShareUsername)
+import Pages.Calendar (SharedPresenceLoadState(..), SharedPresenceState(..), buildSharedPresenceSegmentLayouts, decodeCalendarItemsResponse, decodePeriodTripsResponse, decodeSharedUsersResponse, decodeTripPlacesResponse, deriveSharedPresence, normalizePeriodTripGroups, shareWriteErrorMessage, sharedPresenceLaneToneClass, sharedPresenceSegmentRailClass, shouldRenderDayCalendarShell, shouldRenderSharedPresenceRail, subscriptionWriteErrorMessage, tripWriteErrorMessage, validateShareUsername)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (fail, shouldEqual)
 import Test.Support.Builders (unsafeDateTime)
@@ -146,6 +146,34 @@ spec =
                 , { start: "2026-04-02T11:00", end: "2026-04-03T00:00", state: "at-place:Lyon" }
                 ]
             }
+          ]
+
+    it "shows the rail only when shared presence data is loaded with users" do
+      let
+        loadedPresence = SharedPresenceLoaded (deriveSharedPresence (unsafeDateTime "2026-04-02T00:00") (unsafeDateTime "2026-04-03T00:00") (normalizePeriodTripGroups decodedPeriodTrips))
+      shouldRenderSharedPresenceRail SharedPresenceLoading `shouldEqual` false
+      shouldRenderSharedPresenceRail (SharedPresenceError "boom") `shouldEqual` false
+      shouldRenderSharedPresenceRail (SharedPresenceLoaded []) `shouldEqual` false
+      shouldRenderSharedPresenceRail loadedPresence `shouldEqual` true
+
+    it "keeps the day shell visible when there is shared presence but no owner items" do
+      let
+        loadedPresence = SharedPresenceLoaded (deriveSharedPresence (unsafeDateTime "2026-04-02T00:00") (unsafeDateTime "2026-04-03T00:00") (normalizePeriodTripGroups decodedPeriodTrips))
+      shouldRenderDayCalendarShell [] SharedPresenceLoading `shouldEqual` false
+      shouldRenderDayCalendarShell [] loadedPresence `shouldEqual` true
+
+    it "builds presence rail layouts in backend user order with lane metadata" do
+      let
+        layouts = buildSharedPresenceSegmentLayouts (deriveSharedPresence (unsafeDateTime "2026-04-02T00:00") (unsafeDateTime "2026-04-03T00:00") (normalizePeriodTripGroups decodedPeriodTrips))
+      summarizePresenceRailLayouts layouts
+        `shouldEqual`
+          [ { username: "alice", laneIndex: 0, laneCount: 2, startMin: 0, duration: 480, railClass: "calendar-presence-rail__segment--unknown", toneClass: "calendar-presence-rail__segment--tone-0" }
+          , { username: "alice", laneIndex: 0, laneCount: 2, startMin: 480, duration: 60, railClass: "calendar-presence-rail__segment--transit", toneClass: "calendar-presence-rail__segment--tone-0" }
+          , { username: "alice", laneIndex: 0, laneCount: 2, startMin: 540, duration: 180, railClass: "calendar-presence-rail__segment--place", toneClass: "calendar-presence-rail__segment--tone-0" }
+          , { username: "alice", laneIndex: 0, laneCount: 2, startMin: 720, duration: 60, railClass: "calendar-presence-rail__segment--transit", toneClass: "calendar-presence-rail__segment--tone-0" }
+          , { username: "alice", laneIndex: 0, laneCount: 2, startMin: 780, duration: 660, railClass: "calendar-presence-rail__segment--place", toneClass: "calendar-presence-rail__segment--tone-0" }
+          , { username: "bob", laneIndex: 1, laneCount: 2, startMin: 0, duration: 60, railClass: "calendar-presence-rail__segment--transit", toneClass: "calendar-presence-rail__segment--tone-1" }
+          , { username: "bob", laneIndex: 1, laneCount: 2, startMin: 60, duration: 1380, railClass: "calendar-presence-rail__segment--place", toneClass: "calendar-presence-rail__segment--tone-1" }
           ]
 
     it "encodes share add payloads" do
@@ -386,3 +414,15 @@ summarizePresenceState = case _ of
   PresenceUnknown -> "unknown"
   PresenceAtPlace placeId -> "at-place:" <> placeId
   PresenceInTransit { departurePlaceId, arrivalPlaceId } -> "in-transit:" <> departurePlaceId <> "->" <> arrivalPlaceId
+
+summarizePresenceRailLayouts :: Array { username :: String, laneIndex :: Int, laneCount :: Int, startMin :: Int, duration :: Int, state :: SharedPresenceState } -> Array { username :: String, laneIndex :: Int, laneCount :: Int, startMin :: Int, duration :: Int, railClass :: String, toneClass :: String }
+summarizePresenceRailLayouts =
+  map \layout ->
+    { username: layout.username
+    , laneIndex: layout.laneIndex
+    , laneCount: layout.laneCount
+    , startMin: layout.startMin
+    , duration: layout.duration
+    , railClass: sharedPresenceSegmentRailClass layout.state
+    , toneClass: sharedPresenceLaneToneClass layout.laneIndex
+    }
