@@ -29,11 +29,10 @@ Let users share trip information in a controlled way so each person can understa
 4. `005` Subscription list management.
 5. `006` Period trips query consumption.
 6. `007` Presence derivation.
-7. `011` Unknown state handling.
-8. `008` Day view side rail.
-9. `009` Day view inspection.
-10. `012` Multi-user readability rules.
-11. `010` Cue personalization.
+7. `008` Day view side rail.
+8. `009` Day view inspection.
+9. `012` Multi-user readability rules.
+10. `010` Cue personalization.
 
 ## Stories
 
@@ -49,11 +48,11 @@ Let users share trip information in a controlled way so each person can understa
 - [010 Cue Personalization](done/010-cue-personalization.md) - Let the owner configure cue colors without changing shared trip data.
 
 ### To Refine
-- [011 Unknown Location States](to-refine/011-unknown-location-states.md) - Keep non-derivable location explicit instead of implying a known place.
 - [012 Shared Users Readability](to-refine/012-shared-users-readability.md) - Define the supported simultaneous-user target and the fallback beyond it.
 
 ### Canceled
 - [001 Predefined Places Catalog](canceled/001-predefined-places-catalog.md) - Absorbed into the trip item and trip validation stories instead of remaining a standalone frontend outcome.
+- [011 Unknown Location States](canceled/011-unknown-location-states.md) - Absorbed by delivered derivation, rail, and inspection stories instead of shipping as a standalone increment.
 
 ### Postponed
 - [013 Week View Presence Cues](postponed/013-week-view-presence-cues.md) - Track Week view presence as a later extension.
