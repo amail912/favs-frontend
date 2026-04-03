@@ -36,6 +36,8 @@ Let users share trip information in a controlled way so each person can understa
 11. `015` Desktop hover continuity for presence inspection.
 12. `016` Viewport-safe stable presence inspection panel.
 13. `017` Mobile inspection visibility and interaction stability.
+14. `018` Connected user presence rail.
+15. `019` Connected user identity at a glance in calendar context.
 
 ## Stories
 
@@ -55,6 +57,8 @@ Let users share trip information in a controlled way so each person can understa
 - [017 Mobile Inspection Visibility And Interaction Stability](done/017-mobile-inspection-visibility-and-interaction-stability.md) - Ensure mobile inspection content remains reachable and stable for cue interactions.
 
 ### To Refine
+- [018 Connected User Presence Rail](to-refine/018-connected-user-presence-rail.md) - Add a thin Day view rail for the authenticated user with the same presence semantics as shared rails.
+- [019 Connected User At-A-Glance Identity In Calendar Context](to-refine/019-connected-user-at-a-glance-identity-in-calendar-context.md) - Keep the authenticated identity explicit in the calendar shell to remove ambiguity between self and shared users.
 
 ### Canceled
 - [001 Predefined Places Catalog](canceled/001-predefined-places-catalog.md) - Absorbed into the trip item and trip validation stories instead of remaining a standalone frontend outcome.
