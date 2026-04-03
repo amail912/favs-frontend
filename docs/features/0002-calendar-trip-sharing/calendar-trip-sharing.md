@@ -52,9 +52,9 @@ Let users share trip information in a controlled way so each person can understa
 - [012 Shared Users Readability](done/012-shared-users-readability.md) - Keep Day view readable with an explicit three-user rail limit and an inspectable overflow fallback.
 - [015 Desktop Hover Continuity For Presence Inspection](done/015-desktop-hover-continuity-presence-inspection.md) - Keep desktop inspection usable when moving pointer from rail to panel.
 - [016 Viewport-Safe Stable Presence Panel](done/016-viewport-safe-stable-presence-panel.md) - Keep the desktop inspection panel visible and stable near viewport limits.
+- [017 Mobile Inspection Visibility And Interaction Stability](done/017-mobile-inspection-visibility-and-interaction-stability.md) - Ensure mobile inspection content remains reachable and stable for cue interactions.
 
 ### To Refine
-- [017 Mobile Inspection Visibility And Interaction Stability](to-refine/017-mobile-inspection-visibility-and-interaction-stability.md) - Ensure mobile inspection content remains reachable and stable for cue interactions.
 
 ### Canceled
 - [001 Predefined Places Catalog](canceled/001-predefined-places-catalog.md) - Absorbed into the trip item and trip validation stories instead of remaining a standalone frontend outcome.

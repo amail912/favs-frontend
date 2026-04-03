@@ -651,6 +651,78 @@ test("calendar day rail: mobile inspection sheet edits place cue colors", async 
   await expect(placeSegment).toHaveClass(/calendar-presence-rail__segment--color-violet/);
 });
 
+test("calendar day rail: mobile inspection sheet keeps header stable with internal body scroll", async ({ authenticatedPage: page, authIdentity }) => {
+  const focusDate = toLocalDateInput(isolatedFutureDate(2356));
+  const sharedUsername = "shared-mobile-scroll-user";
+
+  await page.setViewportSize({ width: 390, height: 260 });
+  await mockSharedPresenceRoute(page, focusDate, sharedUsername);
+  await seedCuePreferenceOwner(page, authIdentity.username);
+  await page.reload();
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const placeSegment = page.locator(`.calendar-presence-rail__segment--place[data-username="${sharedUsername}"]`).first();
+  await placeSegment.click();
+
+  const sheet = page.locator(".app-bottom-sheet__dialog");
+  const header = sheet.locator(".app-modal__header");
+  const body = sheet.locator(".app-modal__body--bottom-sheet");
+  await expect(sheet).toBeVisible();
+  await expect(body).toBeVisible();
+
+  const beforeHeaderBox = await header.boundingBox();
+  const bodyMetrics = await body.evaluate(node => ({
+    scrollHeight: node.scrollHeight,
+    clientHeight: node.clientHeight
+  }));
+  expect(bodyMetrics.scrollHeight).toBeGreaterThan(bodyMetrics.clientHeight);
+
+  await body.evaluate(node => {
+    node.scrollTop = node.scrollHeight;
+    node.dispatchEvent(new Event("scroll", { bubbles: true }));
+  });
+
+  const bodyScrollTop = await body.evaluate(node => node.scrollTop);
+  expect(bodyScrollTop).toBeGreaterThan(0);
+
+  const afterHeaderBox = await header.boundingBox();
+  if (!beforeHeaderBox || !afterHeaderBox) {
+    throw new Error("Missing bottom sheet header bounding boxes");
+  }
+  expect(Math.abs(afterHeaderBox.y - beforeHeaderBox.y)).toBeLessThanOrEqual(1);
+
+  await sheet.locator('[data-cue-color-token="slate"]').click();
+  await expect(sheet).toBeVisible();
+  await expect(placeSegment).toHaveClass(/calendar-presence-rail__segment--color-slate/);
+});
+
+test("calendar day rail: mobile inspection keeps open on inside taps and closes on backdrop tap", async ({ authenticatedPage: page }) => {
+  const focusDate = toLocalDateInput(isolatedFutureDate(2357));
+  const sharedUsername = "shared-mobile-dismiss-user";
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockSharedPresenceRoute(page, focusDate, sharedUsername);
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const transitSegment = page.locator(`.calendar-presence-rail__segment--transit[data-username="${sharedUsername}"]`).first();
+  await transitSegment.click();
+
+  const sheet = page.locator(".app-bottom-sheet__dialog");
+  await expect(sheet).toBeVisible();
+
+  await sheet.locator(".calendar-presence-inspection__state").click();
+  await expect(sheet).toBeVisible();
+
+  await page.locator(".app-modal__backdrop").click();
+  await expect(sheet).toHaveCount(0);
+});
+
 test("calendar integration: create item on a later day", async ({ authenticatedPage: page }) => {
   const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
   const focusDate = toLocalDateInput(tomorrow);
