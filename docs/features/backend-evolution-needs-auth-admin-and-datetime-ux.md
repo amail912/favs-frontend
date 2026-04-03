@@ -4,7 +4,7 @@ This document lists backend capabilities required by upcoming frontend stories. 
 
 ## Related Feature Backlogs
 - [Admin User Governance](0003-admin-user-governance/admin-user-governance.md)
-- [Global French Date-Time UX](0004-global-french-datetime-ux/global-french-datetime-ux.md)
+- [Global UI UX](0004-global-ui-ux/global-ui-ux.md)
 - [Calendar Item Lifecycle UX](0005-calendar-item-lifecycle-ux/calendar-item-lifecycle-ux.md)
 
 ## 1) Authenticated Profile Contract

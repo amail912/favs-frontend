@@ -37,8 +37,7 @@ Let users share trip information in a controlled way so each person can understa
 12. `016` Viewport-safe stable presence inspection panel.
 13. `017` Mobile inspection visibility and interaction stability.
 14. `018` Connected user presence rail.
-15. `019` Connected user identity at a glance in calendar context.
-16. `020` Place-based cue personalization independent of represented user.
+15. `020` Place-based cue personalization independent of represented user.
 
 ## Stories
 
@@ -59,8 +58,9 @@ Let users share trip information in a controlled way so each person can understa
 - [018 Connected User Presence Rail](done/018-connected-user-presence-rail.md) - Add a thin Day view rail for the authenticated user with self/shared inspection parity and ready implementation decisions.
 
 ### To Refine
-- [019 Connected User At-A-Glance Identity In Calendar Context](to-refine/019-connected-user-at-a-glance-identity-in-calendar-context.md) - Keep the authenticated identity explicit in the calendar shell to remove ambiguity between self and shared users.
 - [020 Place-Based Cue Personalization Independent Of Represented User](to-refine/020-place-based-cue-personalization-independent-of-represented-user.md) - Make cue color preferences place-based and independent from represented username.
+
+Note: identity-at-a-glance scope is now tracked in feature `0004 Global UI UX` (story `001`).
 
 ### Canceled
 - [001 Predefined Places Catalog](canceled/001-predefined-places-catalog.md) - Absorbed into the trip item and trip validation stories instead of remaining a standalone frontend outcome.
