@@ -108,7 +108,7 @@ import Halogen (Component, ComponentHTML, HalogenM, Slot, defaultEval, getRef, m
 import Halogen (subscribe)
 import Halogen.HTML (HTML, button, div, h2, i, input, li, option, section, select, slot, span, text, ul)
 import Halogen.HTML.Core (AttrName(..))
-import Halogen.HTML.Events (handler', onClick, onDragEnter, onDragOver, onDrop, onMouseDown, onValueChange, onKeyDown, onDragEnd, onDragStart, onScroll, onTouchStart, onTouchMove, onTouchEnd, onTouchCancel)
+import Halogen.HTML.Events (handler', onClick, onDragEnter, onDragOver, onDrop, onMouseDown, onValueChange, onValueInput, onKeyDown, onDragEnd, onDragStart, onScroll, onTouchStart, onTouchMove, onTouchEnd, onTouchCancel)
 import Halogen.HTML.Properties (attr, style, IProp, value, placeholder, type_, draggable, ref, disabled)
 import Halogen.Query.Event as HQE
 import Type.Proxy (Proxy(..))
@@ -3213,7 +3213,7 @@ renderUserListManager config userList =
                 [ class_ "form-control calendar-input"
                 , placeholder "Nom d'utilisateur"
                 , value userList.usernameDraft
-                , onValueChange config.usernameChanged
+                , onValueInput config.usernameChanged
                 , disabled userList.isAdding
                 ]
             , button

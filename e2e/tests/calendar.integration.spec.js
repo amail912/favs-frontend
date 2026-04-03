@@ -249,7 +249,11 @@ test("calendar share panel: add and remove a shared user", async ({ authenticate
   const sharePanel = page.locator(".calendar-share-panel").filter({ hasText: "Qui peut voir mes trajets" });
   await expect(sharePanel).toBeVisible();
 
+  const addButton = sharePanel.getByRole("button", { name: "Ajouter" });
+  await expect(addButton).toBeDisabled();
+
   await setTextInputValue(sharePanel.getByPlaceholder("Nom d'utilisateur"), sharedUsername);
+  await expect(addButton).toBeEnabled();
 
   const addResponsePromise = page.waitForResponse(
     response =>
@@ -262,7 +266,7 @@ test("calendar share panel: add and remove a shared user", async ({ authenticate
       response.request().method() === "GET"
   );
 
-  await sharePanel.getByRole("button", { name: "Ajouter" }).click();
+  await addButton.click();
   expect((await addResponsePromise).ok()).toBeTruthy();
   expect((await addListResponsePromise).ok()).toBeTruthy();
 
@@ -298,7 +302,11 @@ test("calendar subscription panel: add and remove a subscribed user", async ({ a
   await expect(subscriptionPanel).toBeVisible();
   await expect(subscriptionPanel).toContainText("Vous ne verrez les trajets d'une personne que si elle vous les partage aussi.");
 
+  const addButton = subscriptionPanel.getByRole("button", { name: "Ajouter" });
+  await expect(addButton).toBeDisabled();
+
   await setTextInputValue(subscriptionPanel.getByPlaceholder("Nom d'utilisateur"), subscribedUsername);
+  await expect(addButton).toBeEnabled();
 
   const addResponsePromise = page.waitForResponse(
     response =>
@@ -311,7 +319,7 @@ test("calendar subscription panel: add and remove a subscribed user", async ({ a
       response.request().method() === "GET"
   );
 
-  await subscriptionPanel.getByRole("button", { name: "Ajouter" }).click();
+  await addButton.click();
   expect((await addResponsePromise).ok()).toBeTruthy();
   expect((await addListResponsePromise).ok()).toBeTruthy();
 
