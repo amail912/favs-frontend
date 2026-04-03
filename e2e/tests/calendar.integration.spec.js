@@ -634,6 +634,73 @@ test("calendar day rail: desktop cue personalization updates immediately and per
   await expect(page.locator(`.calendar-presence-rail__segment--place[data-username="${sharedUsername}"]`).first()).toHaveClass(/calendar-presence-rail__segment--color-green/);
 });
 
+test("calendar day rail: desktop place cue color applies to all shared users on the same place", async ({ authenticatedPage: page, authIdentity }) => {
+  const focusDate = toLocalDateInput(isolatedFutureDate(2346));
+  const sharedUsers = [
+    { username: "shared-same-place-alice" },
+    { username: "shared-same-place-bob" }
+  ];
+
+  await mockSharedPresenceRoute(page, focusDate, sharedUsers);
+  await seedCuePreferenceOwner(page, authIdentity.username);
+  await page.reload();
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const alicePlaceSegment = page.locator('.calendar-presence-rail__segment--place[data-username="shared-same-place-alice"]').first();
+  const bobPlaceSegment = page.locator('.calendar-presence-rail__segment--place[data-username="shared-same-place-bob"]').first();
+
+  await alicePlaceSegment.click();
+  const inspection = page.locator(".calendar-presence-inspection");
+  await expect(inspection).toBeVisible();
+  await inspection.locator('[data-cue-color-token="green"]').click();
+
+  await expect(alicePlaceSegment).toHaveClass(/calendar-presence-rail__segment--color-green/);
+  await expect(bobPlaceSegment).toHaveClass(/calendar-presence-rail__segment--color-green/);
+});
+
+test("calendar day rail: desktop place cue color is shared between shared and self rails", async ({ authenticatedPage: page, authIdentity }) => {
+  const focusDateDate = isolatedFutureDate(2347);
+  const seedDate = new Date(focusDateDate.getTime() - 24 * 60 * 60 * 1000);
+  const focusDate = toLocalDateInput(focusDateDate);
+  const seedDay = toLocalDateInput(seedDate);
+  const sharedUsername = "shared-same-place-self";
+
+  await mockCalendarItemsList(page, [
+    {
+      id: `self-place-cue-${Date.now()}`,
+      type: "trip",
+      windowStart: `${seedDay}T22:00`,
+      windowEnd: `${seedDay}T23:00`,
+      departurePlaceId: "Paris",
+      arrivalPlaceId: "St Clair"
+    }
+  ]);
+  await mockSharedPresenceRoute(page, focusDate, sharedUsername);
+  await seedCuePreferenceOwner(page, authIdentity.username);
+  await page.reload();
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const sharedPlaceSegment = page.locator(`.calendar-presence-rail__segment--place[data-username="${sharedUsername}"]`).first();
+  const selfPlaceSegment = page
+    .locator(`.calendar-presence-rail__segment--place[data-username="${authIdentity.username}"][data-self="true"]`)
+    .first();
+
+  await expect(selfPlaceSegment).toHaveCount(1);
+  await sharedPlaceSegment.click();
+  const inspection = page.locator(".calendar-presence-inspection");
+  await expect(inspection).toBeVisible();
+  await inspection.locator('[data-cue-color-token="amber"]').click();
+
+  await expect(sharedPlaceSegment).toHaveClass(/calendar-presence-rail__segment--color-amber/);
+  await expect(selfPlaceSegment).toHaveClass(/calendar-presence-rail__segment--color-amber/);
+});
+
 test("calendar day rail: tap reveals presence inspection on mobile", async ({ authenticatedPage: page }) => {
   const focusDate = toLocalDateInput(isolatedFutureDate(2350));
   const sharedUsername = "shared-mobile-user";

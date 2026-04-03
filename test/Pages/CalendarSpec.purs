@@ -220,27 +220,25 @@ spec =
       let
         preferences =
           [ SharedPresenceCuePreference
-              { sharedUsername: "alice"
-              , placeId: "Paris"
+              { placeId: "Paris"
               , colorToken: CueGreen
               }
           ]
       decodePresenceCuePreferencesJson (encodePresenceCuePreferencesJson preferences)
         `shouldEqual` Right preferences
 
-    it "resolves a personalized cue color for a matching user and place" do
+    it "resolves a personalized cue color for a matching place regardless of represented user" do
       let
         cuePreferences =
           { ownerUsername: Just "owner"
           , preferences:
               [ SharedPresenceCuePreference
-                  { sharedUsername: "alice"
-                  , placeId: "Paris"
+                  { placeId: "Paris"
                   , colorToken: CueGreen
                   }
               ]
           }
-        layout =
+        aliceLayout =
           { username: "alice"
           , isSelf: false
           , segmentIndex: 2
@@ -250,7 +248,19 @@ spec =
           , duration: 180
           , state: PresenceAtPlace "Paris"
           }
-      resolveSharedPresenceToneClass cuePreferences layout
+        bobLayout =
+          { username: "bob"
+          , isSelf: false
+          , segmentIndex: 1
+          , laneIndex: 1
+          , laneCount: 2
+          , startMin: 480
+          , duration: 60
+          , state: PresenceAtPlace "Paris"
+          }
+      resolveSharedPresenceToneClass cuePreferences aliceLayout
+        `shouldEqual` "calendar-presence-rail__segment--color-green"
+      resolveSharedPresenceToneClass cuePreferences bobLayout
         `shouldEqual` "calendar-presence-rail__segment--color-green"
 
     it "falls back to the lane tone when no cue preference exists" do
@@ -278,8 +288,7 @@ spec =
           { ownerUsername: Just "owner"
           , preferences:
               [ SharedPresenceCuePreference
-                  { sharedUsername: "alice"
-                  , placeId: "Paris"
+                  { placeId: "Paris"
                   , colorToken: CueRose
                   }
               ]
@@ -296,6 +305,15 @@ spec =
           }
       resolveSharedPresenceToneClass cuePreferences layout
         `shouldEqual` "calendar-presence-rail__segment--tone-2"
+
+    it "ignores legacy cue preference payload shape containing sharedUsername" do
+      let
+        legacyPayload =
+          "[{\"sharedUsername\":\"alice\",\"placeId\":\"Paris\",\"colorToken\":\"green\"}]"
+      case decodePresenceCuePreferencesJson legacyPayload of
+        Left _ -> pure unit
+        Right decoded ->
+          fail $ "Expected legacy payload decode failure, got: " <> show decoded
 
     it "formats presence inspection text for unknown, place and transit states" do
       presenceInspectionStateText PresenceUnknown `shouldEqual` "Lieu inconnu"

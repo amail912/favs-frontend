@@ -4452,7 +4452,7 @@ lookupPresenceCuePreference preferences target =
   map unwrapColorToken
     ( find
         ( \(SharedPresenceCuePreference preference) ->
-            preference.sharedUsername == target.sharedUsername && preference.placeId == target.placeId
+            preference.placeId == target.placeId
         )
         preferences
     )
@@ -4465,7 +4465,7 @@ setPresenceCuePreference target nextColorToken preferences =
     retained =
       filter
         ( \(SharedPresenceCuePreference preference) ->
-            preference.sharedUsername /= target.sharedUsername || preference.placeId /= target.placeId
+            preference.placeId /= target.placeId
         )
         preferences
   in
@@ -4474,8 +4474,7 @@ setPresenceCuePreference target nextColorToken preferences =
       Just colorToken ->
         retained <>
           [ SharedPresenceCuePreference
-              { sharedUsername: target.sharedUsername
-              , placeId: target.placeId
+              { placeId: target.placeId
               , colorToken
               }
           ]
@@ -4502,9 +4501,7 @@ resolveSharedPresenceToneClass presenceCuePreferences layout =
         ( presenceCueColorTokenClass
             <$> lookupPresenceCuePreference
               presenceCuePreferences.preferences
-              { sharedUsername: layout.username
-              , placeId
-              }
+              { placeId }
         )
     PresenceUnknown ->
       sharedPresenceLaneToneClass layout.laneIndex
@@ -4516,9 +4513,7 @@ presenceCueTargetFromInspection inspection =
   case inspection.state of
     PresenceAtPlace placeId ->
       Just
-        { sharedUsername: inspection.username
-        , placeId
-        }
+        { placeId }
     _ ->
       Nothing
 
@@ -5246,8 +5241,7 @@ instance showPresenceCueColorToken :: Show PresenceCueColorToken where
   show = genericShow
 
 newtype SharedPresenceCuePreference = SharedPresenceCuePreference
-  { sharedUsername :: String
-  , placeId :: String
+  { placeId :: String
   , colorToken :: PresenceCueColorToken
   }
 
@@ -5258,8 +5252,7 @@ instance showSharedPresenceCuePreference :: Show SharedPresenceCuePreference whe
   show = genericShow
 
 type SharedPresenceCueTarget =
-  { sharedUsername :: String
-  , placeId :: String
+  { placeId :: String
   }
 
 type PresenceCuePreferencesState =
@@ -5378,24 +5371,25 @@ instance presenceCueColorTokenDecodeJson :: DecodeJson PresenceCueColorToken whe
 
 instance sharedPresenceCuePreferenceEncodeJson :: EncodeJson SharedPresenceCuePreference where
   encodeJson (SharedPresenceCuePreference preference) =
-    "sharedUsername" := preference.sharedUsername
-      ~> "placeId" := preference.placeId
+    "placeId" := preference.placeId
       ~> "colorToken" := preference.colorToken
       ~> jsonEmptyObject
 
 instance sharedPresenceCuePreferenceDecodeJson :: DecodeJson SharedPresenceCuePreference where
   decodeJson json = do
     obj <- decodeJson json
-    sharedUsername <- obj .: "sharedUsername"
+    legacySharedUsername <- (obj .:? "sharedUsername" :: Either JsonDecodeError (Maybe String))
     placeId <- obj .: "placeId"
     colorToken <- obj .: "colorToken"
-    pure
-      ( SharedPresenceCuePreference
-          { sharedUsername
-          , placeId
-          , colorToken
-          }
-      )
+    case legacySharedUsername of
+      Just _ -> Left $ UnexpectedValue json
+      Nothing ->
+        pure
+          ( SharedPresenceCuePreference
+              { placeId
+              , colorToken
+              }
+          )
 
 instance itemTypeEncodeJson :: EncodeJson ItemType where
   encodeJson Task = encodeJson "BLOC_PLANIFIE"

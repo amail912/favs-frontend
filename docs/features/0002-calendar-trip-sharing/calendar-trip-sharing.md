@@ -56,9 +56,7 @@ Let users share trip information in a controlled way so each person can understa
 - [016 Viewport-Safe Stable Presence Panel](done/016-viewport-safe-stable-presence-panel.md) - Keep the desktop inspection panel visible and stable near viewport limits.
 - [017 Mobile Inspection Visibility And Interaction Stability](done/017-mobile-inspection-visibility-and-interaction-stability.md) - Ensure mobile inspection content remains reachable and stable for cue interactions.
 - [018 Connected User Presence Rail](done/018-connected-user-presence-rail.md) - Add a thin Day view rail for the authenticated user with self/shared inspection parity and ready implementation decisions.
-
-### To Refine
-- [020 Place-Based Cue Personalization Independent Of Represented User](to-refine/020-place-based-cue-personalization-independent-of-represented-user.md) - Make cue color preferences place-based and independent from represented username.
+- [020 Place-Based Cue Personalization Independent Of Represented User](done/020-place-based-cue-personalization-independent-of-represented-user.md) - Make cue color preferences place-based and independent from represented username, without legacy preference migration.
 
 Note: identity-at-a-glance scope is now tracked in feature `0004 Global UI UX` (story `001`).
 
