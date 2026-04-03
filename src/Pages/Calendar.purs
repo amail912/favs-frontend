@@ -153,6 +153,7 @@ import Data.Traversable (traverse)
 -- foldl comes from Data.Array in this module
 
 foreign import scrollElementIntoView :: Element -> Effect Unit
+foreign import viewportVisibleHeight :: Effect Number
 
 -- BEGIN src/Pages/Calendar.purs
 type NoOutput = Void
@@ -284,16 +285,17 @@ renderAgendaView
   -> SharedPresenceLoadState
   -> PresenceCuePreferencesState
   -> Maybe SharedPresenceInspection
+  -> Maybe Number
   -> Boolean
   -> Boolean
   -> Array MobileOverlapPromotion
   -> Maybe String
   -> Maybe Int
   -> HTML w Action
-renderAgendaView viewMode focusDate todayDate items sharedPresence presenceCuePreferences presenceInspection presenceInspectionPinned isMobile promotedOverlaps draggingId dragHoverIndex =
+renderAgendaView viewMode focusDate todayDate items sharedPresence presenceCuePreferences presenceInspection presenceInspectionInitialTopPx presenceInspectionPinned isMobile promotedOverlaps draggingId dragHoverIndex =
   case viewMode of
     ViewDay ->
-      renderDayCalendar focusDate todayDate items sharedPresence presenceCuePreferences presenceInspection presenceInspectionPinned isMobile promotedOverlaps draggingId dragHoverIndex
+      renderDayCalendar focusDate todayDate items sharedPresence presenceCuePreferences presenceInspection presenceInspectionInitialTopPx presenceInspectionPinned isMobile promotedOverlaps draggingId dragHoverIndex
     ViewWeek ->
       renderRangeView "Semaine" (generateDateRange focusDate 7) items isMobile
     ViewMonth ->
@@ -1262,7 +1264,7 @@ render { calendar, sync, mouseDrag, view } =
     { updateError } = sync
     draggingId = mouseDrag.draggingId
     dragHoverIndex = mouseDrag.dragHoverIndex
-    { viewMode, focusDate, todayDate, isMobile, promotedOverlaps, presenceInspection, presenceInspectionPinned } = view
+    { viewMode, focusDate, todayDate, isMobile, promotedOverlaps, presenceInspection, presenceInspectionInitialTopPx, presenceInspectionPinned } = view
     agendaModalsInput = buildAgendaModalsInput { calendar, sync, mouseDrag, view }
     sortedItems = sortItems SortByTime items
   in
@@ -1277,7 +1279,7 @@ render { calendar, sync, mouseDrag, view } =
             [ div [ class_ "calendar-main" ]
                 [ maybe (text "") renderUpdateError updateError
                 , section [ class_ $ "calendar-list-panel" <> guard (viewMode == ViewDay) " calendar-list-panel--calendar" ]
-                    [ renderAgendaView viewMode focusDate todayDate sortedItems sharedPresence presenceCuePreferences presenceInspection presenceInspectionPinned isMobile promotedOverlaps draggingId dragHoverIndex ]
+                    [ renderAgendaView viewMode focusDate todayDate sortedItems sharedPresence presenceCuePreferences presenceInspection presenceInspectionInitialTopPx presenceInspectionPinned isMobile promotedOverlaps draggingId dragHoverIndex ]
                 ]
             , div [ class_ "calendar-side" ]
                 [ map toAction (renderShareManager sharePanelConfig shareList)
@@ -1403,13 +1405,14 @@ renderDayCalendar
   -> SharedPresenceLoadState
   -> PresenceCuePreferencesState
   -> Maybe SharedPresenceInspection
+  -> Maybe Number
   -> Boolean
   -> Boolean
   -> Array MobileOverlapPromotion
   -> Maybe String
   -> Maybe Int
   -> HTML w Action
-renderDayCalendar focusDate todayDate items sharedPresence presenceCuePreferences presenceInspection presenceInspectionPinned isMobile promotedOverlaps draggingId dragHoverIndex =
+renderDayCalendar focusDate todayDate items sharedPresence presenceCuePreferences presenceInspection presenceInspectionInitialTopPx presenceInspectionPinned isMobile promotedOverlaps draggingId dragHoverIndex =
   let
     itemsForDate = filter (isItemOnDate focusDate) items
     sorted = sortItems SortByTime itemsForDate
@@ -1456,7 +1459,7 @@ renderDayCalendar focusDate todayDate items sharedPresence presenceCuePreference
                 , maybe (text "") renderDropIndicator dragHoverIndex
                 , maybe (text "") identity dragPreview
                 , if showPresenceRail then renderSharedPresenceRail isMobile presenceCuePreferences presenceInspection railView else text ""
-                , maybe (text "") (renderPresenceInspectionCard presenceCuePreferences presenceInspectionPinned) desktopInspection
+                , maybe (text "") (renderPresenceInspectionCard presenceCuePreferences presenceInspectionInitialTopPx presenceInspectionPinned) desktopInspection
                 , div
                     [ class_ $
                         "calendar-calendar-items"
@@ -1562,21 +1565,31 @@ renderSharedPresenceSegment _ presenceCuePreferences presenceInspection layout =
       ]
       []
 
-renderPresenceInspectionCard :: forall w. PresenceCuePreferencesState -> Boolean -> SharedPresenceInspection -> HTML w Action
-renderPresenceInspectionCard presenceCuePreferences isPinned inspection =
-  div
-    [ class_ "calendar-presence-inspection"
-    , style $
-        " --start:"
-          <> show inspection.startMin
-          <> ";"
-          <> " --duration:"
-          <> show inspection.duration
-          <> ";"
-    , onMouseEnterAction (ViewAction ViewPresenceInspectionPanelMouseEnter)
-    , onMouseLeaveAction (ViewAction ViewPresenceInspectionPanelMouseLeave)
-    ]
-    [ renderPresenceInspectionContent presenceCuePreferences inspection isPinned ]
+renderPresenceInspectionCard :: forall w. PresenceCuePreferencesState -> Maybe Number -> Boolean -> SharedPresenceInspection -> HTML w Action
+renderPresenceInspectionCard presenceCuePreferences presenceInspectionInitialTopPx isPinned inspection =
+  let
+    computedTopStyle = case presenceInspectionInitialTopPx of
+      Nothing -> ""
+      Just topPx ->
+        " --panel-top:"
+          <> show topPx
+          <> "px;"
+          <> " --panel-translate-y: 0;"
+  in
+    div
+      [ class_ "calendar-presence-inspection"
+      , style $
+          " --start:"
+            <> show inspection.startMin
+            <> ";"
+            <> " --duration:"
+            <> show inspection.duration
+            <> ";"
+            <> computedTopStyle
+      , onMouseEnterAction (ViewAction ViewPresenceInspectionPanelMouseEnter)
+      , onMouseLeaveAction (ViewAction ViewPresenceInspectionPanelMouseLeave)
+      ]
+      [ renderPresenceInspectionContent presenceCuePreferences inspection isPinned ]
 
 renderPresenceInspectionContent :: forall w. PresenceCuePreferencesState -> SharedPresenceInspection -> Boolean -> HTML w Action
 renderPresenceInspectionContent presenceCuePreferences inspection isPinned =
@@ -2686,6 +2699,7 @@ type ViewState =
   , sharedPresenceOverflowSheet :: Maybe SharedPresenceOverflowSheet
   , presenceInspection :: Maybe SharedPresenceInspection
   , presenceInspectionPinned :: Boolean
+  , presenceInspectionInitialTopPx :: Maybe Number
   , presenceInspectionHoverSegment :: Maybe SharedPresenceInspectionHoverSegment
   , presenceInspectionHoverPanel :: Boolean
   , presenceInspectionCloseToken :: Int
@@ -2708,6 +2722,7 @@ viewInitialState =
   , sharedPresenceOverflowSheet: Nothing
   , presenceInspection: Nothing
   , presenceInspectionPinned: false
+  , presenceInspectionInitialTopPx: Nothing
   , presenceInspectionHoverSegment: Nothing
   , presenceInspectionHoverPanel: false
   , presenceInspectionCloseToken: 0
@@ -2766,6 +2781,12 @@ _viewPresenceInspectionPinned =
   lens
     _.presenceInspectionPinned
     (_ { presenceInspectionPinned = _ })
+
+_viewPresenceInspectionInitialTopPx :: Lens' ViewState (Maybe Number)
+_viewPresenceInspectionInitialTopPx =
+  lens
+    _.presenceInspectionInitialTopPx
+    (_ { presenceInspectionInitialTopPx = _ })
 
 _viewPresenceInspectionHoverSegment :: Lens' ViewState (Maybe SharedPresenceInspectionHoverSegment)
 _viewPresenceInspectionHoverSegment =
@@ -2969,11 +2990,13 @@ handleViewAction = case _ of
     st <- get
     let isMobileNow = st ^. (_view <<< _viewIsMobile)
     let isPinned = st ^. (_view <<< _viewPresenceInspectionPinned)
-    when (not isMobileNow && not isPinned) $
+    when (not isMobileNow && not isPinned) do
+      panelTopPx <- computePresenceInspectionInitialTopPx inspection
       modify_
         ( _view %~
             ( (_viewPresenceInspection .~ Just inspection)
                 <<< (_viewPresenceInspectionPinned .~ false)
+                <<< (_viewPresenceInspectionInitialTopPx .~ panelTopPx)
                 <<< (_viewPresenceInspectionHoverSegment .~ Just (toPresenceInspectionHoverSegment inspection))
                 <<< (_viewPresenceInspectionCloseToken %~ (_ + 1))
             )
@@ -3009,12 +3032,18 @@ handleViewAction = case _ of
     st <- get
     let isMobileNow = st ^. (_view <<< _viewIsMobile)
     let isPinned = st ^. (_view <<< _viewPresenceInspectionPinned)
+    panelTopPx <-
+      if isMobileNow then
+        pure Nothing
+      else
+        computePresenceInspectionInitialTopPx inspection
     modify_
       ( _view %~
           case trigger, isMobileNow, isPinned of
             PresenceInspectTap, true, _ ->
               (_viewPresenceInspection .~ Just inspection)
                 <<< (_viewPresenceInspectionPinned .~ false)
+                <<< (_viewPresenceInspectionInitialTopPx .~ Nothing)
                 <<< clearPresenceInspectionHoverState
                 <<< (_viewActiveModal .~ Just ModalPresenceInspection)
                 <<< (_viewOverlapSheet .~ Nothing)
@@ -3022,14 +3051,17 @@ handleViewAction = case _ of
             PresenceInspectTap, false, _ ->
               (_viewPresenceInspection .~ Just inspection)
                 <<< (_viewPresenceInspectionPinned .~ true)
+                <<< (_viewPresenceInspectionInitialTopPx .~ panelTopPx)
                 <<< clearPresenceInspectionHoverState
                 <<< (_viewSharedPresenceOverflowSheet .~ Nothing)
                 <<< (_viewActiveModal %~ closePresenceModal)
             PresenceInspectHover, false, false ->
               (_viewPresenceInspection .~ Just inspection)
+                <<< (_viewPresenceInspectionInitialTopPx .~ panelTopPx)
                 <<< (_viewPresenceInspectionPinned .~ false)
             PresenceInspectFocus, false, false ->
               (_viewPresenceInspection .~ Just inspection)
+                <<< (_viewPresenceInspectionInitialTopPx .~ panelTopPx)
                 <<< (_viewPresenceInspectionPinned .~ false)
             _, _, _ ->
               identity
@@ -3046,6 +3078,7 @@ handleViewAction = case _ of
         ( _view %~
             ( (_viewPresenceInspection .~ Nothing)
                 <<< (_viewPresenceInspectionPinned .~ false)
+                <<< (_viewPresenceInspectionInitialTopPx .~ Nothing)
                 <<< clearPresenceInspectionHoverState
                 <<< (_viewActiveModal %~ closePresenceModal)
             )
@@ -3055,6 +3088,7 @@ handleViewAction = case _ of
       ( _view %~
           ( (_viewPresenceInspection .~ Nothing)
               <<< (_viewPresenceInspectionPinned .~ false)
+              <<< (_viewPresenceInspectionInitialTopPx .~ Nothing)
               <<< clearPresenceInspectionHoverState
               <<< (_viewActiveModal %~ closePresenceModal)
           )
@@ -3076,6 +3110,7 @@ handleViewAction = case _ of
               <<< (_viewSharedPresenceOverflowSheet .~ Nothing)
               <<< (_viewPresenceInspection .~ Nothing)
               <<< (_viewPresenceInspectionPinned .~ false)
+              <<< (_viewPresenceInspectionInitialTopPx .~ Nothing)
               <<< clearPresenceInspectionHoverState
           )
       )
@@ -3148,7 +3183,30 @@ handleViewAction = case _ of
   clearPresenceInspectionHoverState =
     (_viewPresenceInspectionHoverSegment .~ Nothing)
       <<< (_viewPresenceInspectionHoverPanel .~ false)
+      <<< (_viewPresenceInspectionInitialTopPx .~ Nothing)
       <<< (_viewPresenceInspectionCloseToken %~ (_ + 1))
+
+  computePresenceInspectionInitialTopPx inspection = do
+    timelineRef <- lift $ H.getRef (wrap "day-timeline-scroll")
+    gridRef <- lift $ H.getRef (wrap "day-calendar-grid")
+    case timelineRef, gridRef of
+      Just _, Just gridEl -> do
+        gridRect <- liftEffect $ getBoundingClientRect gridEl
+        viewportHeightPx <- liftEffect viewportVisibleHeight
+        let minuteHeightPx = if gridRect.height <= 0.0 then 0.0 else gridRect.height / 1440.0
+        if minuteHeightPx <= 0.0 then
+          pure Nothing
+        else do
+          let segmentCenterMin = Int.toNumber inspection.startMin + (Int.toNumber inspection.duration / 2.0)
+          let segmentCenterViewportY = gridRect.top + segmentCenterMin * minuteHeightPx
+          let desiredTopViewportY = segmentCenterViewportY - (presenceInspectionPanelInitialEstimatePx / 2.0)
+          let minTopViewportY = presenceInspectionPanelViewportPaddingPx
+          let maxTopViewportYRaw = viewportHeightPx - presenceInspectionPanelViewportPaddingPx - presenceInspectionPanelInitialEstimatePx
+          let maxTopViewportY = max minTopViewportY maxTopViewportYRaw
+          let clampedTopViewportY = max minTopViewportY (min maxTopViewportY desiredTopViewportY)
+          pure (Just (clampedTopViewportY - gridRect.top))
+      _, _ ->
+        pure Nothing
 
   schedulePresenceInspectionClose = do
     st <- get
@@ -4573,6 +4631,12 @@ sharedPresenceLaneToneClass laneIndex =
 
 presenceInspectionHoverCloseDelayMs :: Number
 presenceInspectionHoverCloseDelayMs = 140.0
+
+presenceInspectionPanelInitialEstimatePx :: Number
+presenceInspectionPanelInitialEstimatePx = 248.0
+
+presenceInspectionPanelViewportPaddingPx :: Number
+presenceInspectionPanelViewportPaddingPx = 12.0
 
 validateShareUsername :: String -> Either String String
 validateShareUsername raw =

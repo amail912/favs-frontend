@@ -9,3 +9,13 @@ export const scrollElementIntoView = element => () => {
     behavior: "auto"
   });
 };
+
+export const viewportVisibleHeight = () => {
+  if (typeof window === "undefined") {
+    return 0;
+  }
+  if (window.visualViewport && typeof window.visualViewport.height === "number") {
+    return window.visualViewport.height;
+  }
+  return window.innerHeight;
+};

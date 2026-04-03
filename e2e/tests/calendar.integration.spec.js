@@ -501,6 +501,54 @@ test("calendar day rail: desktop hover inspection closes after leaving segment a
   await expect(inspection).toHaveCount(0);
 });
 
+test("calendar day rail: desktop seeded-presence keeps inspection inside viewport at first hover", async ({ authenticatedPage: page }) => {
+  const focusDateDate = isolatedFutureDate(2344);
+  const seedDate = new Date(focusDateDate.getTime() - 24 * 60 * 60 * 1000);
+  const focusDate = toLocalDateInput(focusDateDate);
+  const seedDay = toLocalDateInput(seedDate);
+  const sharedUsername = "shared-unknown-only-user";
+
+  await mockSharedPresenceRoute(page, focusDate, [
+    {
+      username: sharedUsername,
+      trips: [
+        {
+          windowStart: `${seedDay}T22:00`,
+          windowEnd: `${seedDay}T23:00`,
+          departurePlaceId: "Paris",
+          arrivalPlaceId: "St Clair"
+        }
+      ]
+    }
+  ]);
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const timeline = page.locator(".calendar-calendar-body");
+  await timeline.evaluate(node => {
+    node.scrollTop = 0;
+    node.dispatchEvent(new Event("scroll", { bubbles: true }));
+  });
+
+  const placeSegment = page.locator(`.calendar-presence-rail__segment--place[data-username="${sharedUsername}"]`).first();
+  const inspection = page.locator(".calendar-presence-inspection");
+
+  await placeSegment.hover();
+  await expect(inspection).toBeVisible();
+  await expect(inspection).toHaveAttribute("style", /--panel-top:/);
+
+  const inspectionBox = await inspection.boundingBox();
+  const viewportHeight = await page.evaluate(() => window.innerHeight);
+  if (!inspectionBox) {
+    throw new Error("Missing inspection bounding box");
+  }
+
+  expect(inspectionBox.y).toBeGreaterThanOrEqual(0);
+  expect(inspectionBox.y + inspectionBox.height).toBeLessThanOrEqual(viewportHeight);
+});
+
 test("calendar day rail: desktop cue personalization updates immediately and persists after reload", async ({ authenticatedPage: page, authIdentity }) => {
   const focusDate = toLocalDateInput(isolatedFutureDate(2345));
   const sharedUsername = "shared-color-user";

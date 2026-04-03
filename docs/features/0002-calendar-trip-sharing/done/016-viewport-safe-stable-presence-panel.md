@@ -6,7 +6,7 @@ As a calendar user on desktop, I want the Day view presence inspection panel to 
 ## Outcome
 Inspection panel placement is viewport-aware: visible by default, stable while interacting, and repositioned only on boundary pressure.
 
-This pass is documentation refinement only. No code or test changes are included in this story write-up.
+Delivered: desktop Day view inspection now clamps to viewport-safe placement on first hover and remains stable, with the mobile-specific follow-up kept in `017`.
 
 ## In Scope
 - Desktop Day view inspection panel placement.

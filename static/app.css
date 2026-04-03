@@ -673,12 +673,12 @@ a.nav-link:hover {
 
 .calendar-presence-inspection {
   position: absolute;
-  top: calc((var(--start) + (var(--duration) / 2)) * var(--calendar-minute-height));
+  top: var(--panel-top, calc((var(--start) + (var(--duration) / 2)) * var(--calendar-minute-height)));
   left: calc(var(--calendar-presence-width) + 16px);
   z-index: 3;
   width: min(240px, calc(100% - var(--calendar-presence-width) - 24px));
   pointer-events: auto;
-  transform: translateY(-50%);
+  transform: translateY(var(--panel-translate-y, -50%));
 }
 
 .calendar-presence-inspection::before {
