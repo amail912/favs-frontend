@@ -6,8 +6,6 @@ As a calendar user on desktop, I want the Day view presence inspection to stay o
 ## Outcome
 Presence inspection becomes reliably interactive in desktop hover mode. Moving pointer from rail segment to panel no longer closes the panel prematurely.
 
-This pass is documentation refinement only. No code or test changes are included in this story write-up.
-
 ## In Scope
 - Define desktop hover continuity behavior between rail segment and inspection panel.
 - Define close behavior when pointer leaves the interaction zone.
@@ -17,6 +15,7 @@ This pass is documentation refinement only. No code or test changes are included
 - Mobile bottom-sheet interaction behavior.
 - Presence derivation logic and rail segment generation.
 - Any backend/API change.
+- Viewport clamping and boundary placement strategy (covered by `016`).
 
 ## Dependencies
 - Depends on `008 Day View Side Rail`.

@@ -455,6 +455,52 @@ test("calendar day rail: hover and focus reveal presence inspection on desktop",
   await expect(inspection).toContainText("De 09:00 à 24:00");
 });
 
+test("calendar day rail: desktop hover keeps inspection open while interacting with cue editor", async ({ authenticatedPage: page, authIdentity }) => {
+  const focusDate = toLocalDateInput(isolatedFutureDate(2342));
+  const sharedUsername = "shared-hover-panel-user";
+
+  await mockSharedPresenceRoute(page, focusDate, sharedUsername);
+  await seedCuePreferenceOwner(page, authIdentity.username);
+  await page.reload();
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const placeSegment = page.locator(`.calendar-presence-rail__segment--place[data-username="${sharedUsername}"]`).first();
+  const inspection = page.locator(".calendar-presence-inspection");
+
+  await placeSegment.hover();
+  await expect(inspection).toBeVisible();
+  await inspection.hover();
+  await inspection.locator('[data-cue-color-token="amber"]').click();
+
+  await expect(inspection).toBeVisible();
+  await expect(placeSegment).toHaveClass(/calendar-presence-rail__segment--color-amber/);
+});
+
+test("calendar day rail: desktop hover inspection closes after leaving segment and panel", async ({ authenticatedPage: page }) => {
+  const focusDate = toLocalDateInput(isolatedFutureDate(2343));
+  const sharedUsername = "shared-hover-close-user";
+
+  await mockSharedPresenceRoute(page, focusDate, sharedUsername);
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const placeSegment = page.locator(`.calendar-presence-rail__segment--place[data-username="${sharedUsername}"]`).first();
+  const inspection = page.locator(".calendar-presence-inspection");
+  const outsideTarget = page.locator(".calendar-calendar-title").first();
+
+  await placeSegment.hover();
+  await expect(inspection).toBeVisible();
+  await inspection.hover();
+  await outsideTarget.hover();
+
+  await expect(inspection).toHaveCount(0);
+});
+
 test("calendar day rail: desktop cue personalization updates immediately and persists after reload", async ({ authenticatedPage: page, authIdentity }) => {
   const focusDate = toLocalDateInput(isolatedFutureDate(2345));
   const sharedUsername = "shared-color-user";

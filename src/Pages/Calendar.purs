@@ -104,7 +104,7 @@ import Effect.Aff.Class (liftAff)
 import Effect.Class (liftEffect)
 import Effect.Console as Console
 import Effect.Now (nowDateTime)
-import Halogen (Component, ComponentHTML, HalogenM, Slot, defaultEval, getRef, mkComponent, mkEval) as H
+import Halogen (Component, ComponentHTML, HalogenM, Slot, defaultEval, fork, getRef, mkComponent, mkEval) as H
 import Halogen (subscribe)
 import Halogen.HTML (HTML, button, div, h2, i, input, li, option, section, select, slot, span, text, ul)
 import Halogen.HTML.Core (AttrName(..))
@@ -1555,8 +1555,8 @@ renderSharedPresenceSegment _ presenceCuePreferences presenceInspection layout =
       , attr (AttrName "data-username") layout.username
       , attr (AttrName "data-segment-index") (show layout.segmentIndex)
       , onClick (const (ViewAction (ViewInspectPresence PresenceInspectTap inspection)))
-      , onMouseEnterAction (ViewAction (ViewInspectPresence PresenceInspectHover inspection))
-      , onMouseLeaveAction (ViewAction ViewClearPresenceInspection)
+      , onMouseEnterAction (ViewAction (ViewPresenceSegmentMouseEnter inspection))
+      , onMouseLeaveAction (ViewAction (ViewPresenceSegmentMouseLeave inspection))
       , onFocusAction (ViewAction (ViewInspectPresence PresenceInspectFocus inspection))
       , onBlurAction (ViewAction ViewClearPresenceInspection)
       ]
@@ -1573,6 +1573,8 @@ renderPresenceInspectionCard presenceCuePreferences isPinned inspection =
           <> " --duration:"
           <> show inspection.duration
           <> ";"
+    , onMouseEnterAction (ViewAction ViewPresenceInspectionPanelMouseEnter)
+    , onMouseLeaveAction (ViewAction ViewPresenceInspectionPanelMouseLeave)
     ]
     [ renderPresenceInspectionContent presenceCuePreferences inspection isPinned ]
 
@@ -2670,6 +2672,11 @@ type SharedPresenceInspection =
   , state :: SharedPresenceState
   }
 
+type SharedPresenceInspectionHoverSegment =
+  { username :: String
+  , segmentIndex :: Int
+  }
+
 type ViewState =
   { viewMode :: CalendarView
   , focusDate :: String
@@ -2679,6 +2686,9 @@ type ViewState =
   , sharedPresenceOverflowSheet :: Maybe SharedPresenceOverflowSheet
   , presenceInspection :: Maybe SharedPresenceInspection
   , presenceInspectionPinned :: Boolean
+  , presenceInspectionHoverSegment :: Maybe SharedPresenceInspectionHoverSegment
+  , presenceInspectionHoverPanel :: Boolean
+  , presenceInspectionCloseToken :: Int
   , promotedOverlaps :: Array MobileOverlapPromotion
   , editPanel :: Maybe EditPanel
   , isMobile :: Boolean
@@ -2698,6 +2708,9 @@ viewInitialState =
   , sharedPresenceOverflowSheet: Nothing
   , presenceInspection: Nothing
   , presenceInspectionPinned: false
+  , presenceInspectionHoverSegment: Nothing
+  , presenceInspectionHoverPanel: false
+  , presenceInspectionCloseToken: 0
   , promotedOverlaps: []
   , editPanel: Nothing
   , isMobile: false
@@ -2753,6 +2766,24 @@ _viewPresenceInspectionPinned =
   lens
     _.presenceInspectionPinned
     (_ { presenceInspectionPinned = _ })
+
+_viewPresenceInspectionHoverSegment :: Lens' ViewState (Maybe SharedPresenceInspectionHoverSegment)
+_viewPresenceInspectionHoverSegment =
+  lens
+    _.presenceInspectionHoverSegment
+    (_ { presenceInspectionHoverSegment = _ })
+
+_viewPresenceInspectionHoverPanel :: Lens' ViewState Boolean
+_viewPresenceInspectionHoverPanel =
+  lens
+    _.presenceInspectionHoverPanel
+    (_ { presenceInspectionHoverPanel = _ })
+
+_viewPresenceInspectionCloseToken :: Lens' ViewState Int
+_viewPresenceInspectionCloseToken =
+  lens
+    _.presenceInspectionCloseToken
+    (_ { presenceInspectionCloseToken = _ })
 
 _viewPromotedOverlaps :: Lens' ViewState (Array MobileOverlapPromotion)
 _viewPromotedOverlaps =
@@ -2811,6 +2842,10 @@ data ViewAction
   | ViewOpenOverlapSheet OverlapSheet
   | ViewPromoteOverlapItem OverlapSheet CalendarItem
   | ViewOpenSharedPresenceOverflow SharedPresenceOverflowSheet
+  | ViewPresenceSegmentMouseEnter SharedPresenceInspection
+  | ViewPresenceSegmentMouseLeave SharedPresenceInspection
+  | ViewPresenceInspectionPanelMouseEnter
+  | ViewPresenceInspectionPanelMouseLeave
   | ViewInspectPresence SharedPresenceInspectionTrigger SharedPresenceInspection
   | ViewClearPresenceInspection
   | ViewDismissPresenceInspection
@@ -2860,6 +2895,7 @@ handleViewAction = case _ of
                   <<< resetPromotions
                   <<< (_viewPresenceInspection .~ Nothing)
                   <<< (_viewPresenceInspectionPinned .~ false)
+                  <<< clearPresenceInspectionHoverState
                   <<< (_viewSharedPresenceOverflowSheet .~ Nothing)
                   <<< (_viewDayFocusContext .~ Nothing)
                   <<< (_viewDayFocusApplied .~ false)
@@ -2874,6 +2910,7 @@ handleViewAction = case _ of
             ( (_viewFocusDateState .~ raw)
                 <<< (_viewPresenceInspection .~ Nothing)
                 <<< (_viewPresenceInspectionPinned .~ false)
+                <<< clearPresenceInspectionHoverState
                 <<< (_viewSharedPresenceOverflowSheet .~ Nothing)
                 <<< (_viewDayFocusContext .~ Nothing)
                 <<< (_viewDayFocusApplied .~ false)
@@ -2891,6 +2928,7 @@ handleViewAction = case _ of
     modify_
       ( _view %~
           ( (_viewActiveModal .~ Just modal)
+              <<< clearPresenceInspectionHoverState
               <<< (_viewSharedPresenceOverflowSheet .~ Nothing)
           )
       )
@@ -2902,6 +2940,7 @@ handleViewAction = case _ of
                 <<< (_viewSharedPresenceOverflowSheet .~ Nothing)
                 <<< (_viewPresenceInspection .~ Nothing)
                 <<< (_viewPresenceInspectionPinned .~ false)
+                <<< clearPresenceInspectionHoverState
                 <<< (_viewActiveModal .~ Just ModalOverlapGroup)
             )
       )
@@ -2922,9 +2961,50 @@ handleViewAction = case _ of
                 <<< (_viewOverlapSheet .~ Nothing)
                 <<< (_viewPresenceInspection .~ Nothing)
                 <<< (_viewPresenceInspectionPinned .~ false)
+                <<< clearPresenceInspectionHoverState
                 <<< (_viewActiveModal .~ Just ModalSharedPresenceOverflow)
             )
       )
+  ViewPresenceSegmentMouseEnter inspection -> do
+    st <- get
+    let isMobileNow = st ^. (_view <<< _viewIsMobile)
+    let isPinned = st ^. (_view <<< _viewPresenceInspectionPinned)
+    when (not isMobileNow && not isPinned) $
+      modify_
+        ( _view %~
+            ( (_viewPresenceInspection .~ Just inspection)
+                <<< (_viewPresenceInspectionPinned .~ false)
+                <<< (_viewPresenceInspectionHoverSegment .~ Just (toPresenceInspectionHoverSegment inspection))
+                <<< (_viewPresenceInspectionCloseToken %~ (_ + 1))
+            )
+        )
+  ViewPresenceSegmentMouseLeave inspection -> do
+    st <- get
+    let isMobileNow = st ^. (_view <<< _viewIsMobile)
+    let isPinned = st ^. (_view <<< _viewPresenceInspectionPinned)
+    let hoverSegment = st ^. (_view <<< _viewPresenceInspectionHoverSegment)
+    let leavingSegment = toPresenceInspectionHoverSegment inspection
+    when (not isMobileNow && not isPinned && hoverSegment == Just leavingSegment) do
+      modify_ (_view <<< _viewPresenceInspectionHoverSegment .~ Nothing)
+      schedulePresenceInspectionClose
+  ViewPresenceInspectionPanelMouseEnter -> do
+    st <- get
+    let isMobileNow = st ^. (_view <<< _viewIsMobile)
+    let isPinned = st ^. (_view <<< _viewPresenceInspectionPinned)
+    when (not isMobileNow && not isPinned) $
+      modify_
+        ( _view %~
+            ( (_viewPresenceInspectionHoverPanel .~ true)
+                <<< (_viewPresenceInspectionCloseToken %~ (_ + 1))
+            )
+        )
+  ViewPresenceInspectionPanelMouseLeave -> do
+    st <- get
+    let isMobileNow = st ^. (_view <<< _viewIsMobile)
+    let isPinned = st ^. (_view <<< _viewPresenceInspectionPinned)
+    when (not isMobileNow && not isPinned) do
+      modify_ (_view <<< _viewPresenceInspectionHoverPanel .~ false)
+      schedulePresenceInspectionClose
   ViewInspectPresence trigger inspection -> do
     st <- get
     let isMobileNow = st ^. (_view <<< _viewIsMobile)
@@ -2935,12 +3015,14 @@ handleViewAction = case _ of
             PresenceInspectTap, true, _ ->
               (_viewPresenceInspection .~ Just inspection)
                 <<< (_viewPresenceInspectionPinned .~ false)
+                <<< clearPresenceInspectionHoverState
                 <<< (_viewActiveModal .~ Just ModalPresenceInspection)
                 <<< (_viewOverlapSheet .~ Nothing)
                 <<< (_viewSharedPresenceOverflowSheet .~ Nothing)
             PresenceInspectTap, false, _ ->
               (_viewPresenceInspection .~ Just inspection)
                 <<< (_viewPresenceInspectionPinned .~ true)
+                <<< clearPresenceInspectionHoverState
                 <<< (_viewSharedPresenceOverflowSheet .~ Nothing)
                 <<< (_viewActiveModal %~ closePresenceModal)
             PresenceInspectHover, false, false ->
@@ -2964,6 +3046,7 @@ handleViewAction = case _ of
         ( _view %~
             ( (_viewPresenceInspection .~ Nothing)
                 <<< (_viewPresenceInspectionPinned .~ false)
+                <<< clearPresenceInspectionHoverState
                 <<< (_viewActiveModal %~ closePresenceModal)
             )
         )
@@ -2972,6 +3055,7 @@ handleViewAction = case _ of
       ( _view %~
           ( (_viewPresenceInspection .~ Nothing)
               <<< (_viewPresenceInspectionPinned .~ false)
+              <<< clearPresenceInspectionHoverState
               <<< (_viewActiveModal %~ closePresenceModal)
           )
       )
@@ -2992,6 +3076,7 @@ handleViewAction = case _ of
               <<< (_viewSharedPresenceOverflowSheet .~ Nothing)
               <<< (_viewPresenceInspection .~ Nothing)
               <<< (_viewPresenceInspectionPinned .~ false)
+              <<< clearPresenceInspectionHoverState
           )
       )
   ViewOpenCreate ->
@@ -3060,6 +3145,42 @@ handleViewAction = case _ of
   ViewSetIsMobile isMobile ->
     modify_ (_view <<< _viewIsMobile .~ isMobile)
   where
+  clearPresenceInspectionHoverState =
+    (_viewPresenceInspectionHoverSegment .~ Nothing)
+      <<< (_viewPresenceInspectionHoverPanel .~ false)
+      <<< (_viewPresenceInspectionCloseToken %~ (_ + 1))
+
+  schedulePresenceInspectionClose = do
+    st <- get
+    let nextToken = (st ^. (_view <<< _viewPresenceInspectionCloseToken)) + 1
+    modify_ (_view <<< _viewPresenceInspectionCloseToken .~ nextToken)
+    _ <- lift $ H.fork do
+      liftAff $ delay (Milliseconds presenceInspectionHoverCloseDelayMs)
+      stAfter <- get
+      let isMobileNow = stAfter ^. (_view <<< _viewIsMobile)
+      let isPinned = stAfter ^. (_view <<< _viewPresenceInspectionPinned)
+      let isHoveringPanel = stAfter ^. (_view <<< _viewPresenceInspectionHoverPanel)
+      let isHoveringSegment = stAfter ^. (_view <<< _viewPresenceInspectionHoverSegment) /= Nothing
+      let currentToken = stAfter ^. (_view <<< _viewPresenceInspectionCloseToken)
+      when
+        ( not isMobileNow
+            && not isPinned
+            && not isHoveringPanel
+            && not isHoveringSegment
+            &&
+              nextToken == currentToken
+        ) $
+        modify_
+          ( _view %~
+              ( (_viewPresenceInspection .~ Nothing)
+                  <<< (_viewPresenceInspectionPinned .~ false)
+                  <<< clearPresenceInspectionHoverState
+                  <<< (_viewActiveModal %~ closePresenceModal)
+              )
+          )
+      pure unit
+    pure unit
+
   closePresenceModal = case _ of
     Just ModalPresenceInspection -> Nothing
     value -> value
@@ -4405,6 +4526,12 @@ toPresenceInspection layout =
   , state: layout.state
   }
 
+toPresenceInspectionHoverSegment :: SharedPresenceInspection -> SharedPresenceInspectionHoverSegment
+toPresenceInspectionHoverSegment inspection =
+  { username: inspection.username
+  , segmentIndex: inspection.segmentIndex
+  }
+
 isSamePresenceInspection :: SharedPresenceInspection -> SharedPresenceSegmentLayout -> Boolean
 isSamePresenceInspection inspection layout =
   inspection.username == layout.username && inspection.segmentIndex == layout.segmentIndex
@@ -4443,6 +4570,9 @@ sharedPresenceSegmentRailClass = case _ of
 sharedPresenceLaneToneClass :: Int -> String
 sharedPresenceLaneToneClass laneIndex =
   "calendar-presence-rail__segment--tone-" <> show (Int.rem laneIndex 4)
+
+presenceInspectionHoverCloseDelayMs :: Number
+presenceInspectionHoverCloseDelayMs = 140.0
 
 validateShareUsername :: String -> Either String String
 validateShareUsername raw =
