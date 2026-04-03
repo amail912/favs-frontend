@@ -105,6 +105,21 @@ async function mockSharedPresenceRoute(page, focusDate, sharedUsers) {
   });
 }
 
+async function mockCalendarItemsList(page, items) {
+  await page.route("**/api/v1/calendar-items**", async route => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json; charset=utf-8",
+        body: JSON.stringify(items)
+      });
+      return;
+    }
+
+    await route.continue();
+  });
+}
+
 async function seedCuePreferenceOwner(page, username) {
   const cueStorageKey = `favs.calendar.presence-cues.${username}`;
   await page.evaluate(({ authKey, cueKey, nextUsername }) => {
@@ -370,6 +385,47 @@ test("calendar day rail: shows shared presence without owner items", async ({ au
   await expect(page.locator(`.calendar-presence-rail__segment--unknown[data-username="${sharedUsername}"]`)).toHaveCount(1);
   await expect(page.locator(`.calendar-presence-rail__segment--transit[data-username="${sharedUsername}"]`)).toHaveCount(1);
   await expect(page.locator(`.calendar-presence-rail__segment--place[data-username="${sharedUsername}"]`)).toHaveCount(1);
+});
+
+test("calendar day rail: shows self rail from historical owner trip and keeps cue editor usable on desktop", async ({ authenticatedPage: page, authIdentity }) => {
+  const focusDateDate = isolatedFutureDate(2331);
+  const seedDate = new Date(focusDateDate.getTime() - 24 * 60 * 60 * 1000);
+  const focusDate = toLocalDateInput(focusDateDate);
+  const seedDay = toLocalDateInput(seedDate);
+
+  await mockCalendarItemsList(page, [
+    {
+      id: `self-trip-history-${Date.now()}`,
+      type: "trip",
+      windowStart: `${seedDay}T22:00`,
+      windowEnd: `${seedDay}T23:00`,
+      departurePlaceId: "Paris",
+      arrivalPlaceId: "St Clair"
+    }
+  ]);
+  await mockSharedPresenceRoute(page, focusDate, []);
+  await seedCuePreferenceOwner(page, authIdentity.username);
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const selfPlaceSegment = page
+    .locator(`.calendar-presence-rail__segment--place[data-username="${authIdentity.username}"][data-self="true"]`)
+    .first();
+  const inspection = page.locator(".calendar-presence-inspection");
+
+  await expect(selfPlaceSegment).toHaveCount(1);
+  await expect(page.locator(".calendar-presence-overflow")).toHaveCount(0);
+
+  await selfPlaceSegment.hover();
+  await expect(inspection).toBeVisible();
+  await expect(inspection).toContainText(authIdentity.username);
+  await expect(inspection).toContainText("Lieu: St Clair");
+
+  await inspection.hover();
+  await inspection.locator('[data-cue-color-token="amber"]').click();
+  await expect(selfPlaceSegment).toHaveClass(/calendar-presence-rail__segment--color-amber/);
 });
 
 test("calendar day rail: keeps three shared users directly visible without overflow", async ({ authenticatedPage: page }) => {
@@ -649,6 +705,46 @@ test("calendar day rail: mobile inspection sheet edits place cue colors", async 
   await sheet.locator('[data-cue-color-token="violet"]').click();
 
   await expect(placeSegment).toHaveClass(/calendar-presence-rail__segment--color-violet/);
+});
+
+test("calendar day rail: self segment opens inspection and updates cue color on mobile", async ({ authenticatedPage: page, authIdentity }) => {
+  const focusDateDate = isolatedFutureDate(2354);
+  const seedDate = new Date(focusDateDate.getTime() - 24 * 60 * 60 * 1000);
+  const focusDate = toLocalDateInput(focusDateDate);
+  const seedDay = toLocalDateInput(seedDate);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockCalendarItemsList(page, [
+    {
+      id: `self-trip-mobile-${Date.now()}`,
+      type: "trip",
+      windowStart: `${seedDay}T22:00`,
+      windowEnd: `${seedDay}T23:00`,
+      departurePlaceId: "Paris",
+      arrivalPlaceId: "St Clair"
+    }
+  ]);
+  await mockSharedPresenceRoute(page, focusDate, []);
+  await seedCuePreferenceOwner(page, authIdentity.username);
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const selfPlaceSegment = page
+    .locator(`.calendar-presence-rail__segment--place[data-username="${authIdentity.username}"][data-self="true"]`)
+    .first();
+
+  await expect(selfPlaceSegment).toHaveCount(1);
+  await selfPlaceSegment.click();
+
+  const sheet = page.locator(".app-bottom-sheet__dialog");
+  await expect(sheet).toBeVisible();
+  await expect(sheet).toContainText(authIdentity.username);
+  await expect(sheet).toContainText("Lieu: St Clair");
+  await sheet.locator('[data-cue-color-token="violet"]').click();
+
+  await expect(selfPlaceSegment).toHaveClass(/calendar-presence-rail__segment--color-violet/);
 });
 
 test("calendar day rail: mobile inspection sheet keeps header stable with internal body scroll", async ({ authenticatedPage: page, authIdentity }) => {

@@ -1418,10 +1418,8 @@ renderDayCalendar focusDate todayDate items sharedPresence presenceCuePreference
     sorted = sortItems SortByTime itemsForDate
     focusTargetIdentity = map calendarItemIdentity (uncons sorted <#> _.head)
     dragPreview = renderDayDragPreview isMobile draggingId dragHoverIndex itemsForDate
-    showPresenceRail = shouldRenderSharedPresenceRail sharedPresence
-    railView = case sharedPresence of
-      SharedPresenceLoaded groups -> buildSharedPresenceRailView groups
-      _ -> emptySharedPresenceRailView
+    railView = buildDayPresenceRailView presenceCuePreferences.ownerUsername focusDate items sharedPresence
+    showPresenceRail = not (null railView.visibleLayouts)
     desktopInspection =
       if isMobile then
         Nothing
@@ -1434,7 +1432,7 @@ renderDayCalendar focusDate todayDate items sharedPresence presenceCuePreference
         map (renderTimelineItem isMobile draggingId focusTargetIdentity) (buildTimelineLayout sorted)
     dayLabel = DateTime.formatCalendarDayDateLabelWithReference focusDate todayDate
   in
-    if not (shouldRenderDayCalendarShell itemsForDate sharedPresence) then emptyAgenda
+    if null itemsForDate && not showPresenceRail then emptyAgenda
     else
       div [ class_ "calendar-calendar" ]
         [ div [ class_ "calendar-calendar-header" ]
@@ -1541,6 +1539,7 @@ renderSharedPresenceSegment _ presenceCuePreferences presenceInspection layout =
             <> sharedPresenceSegmentRailClass layout.state
             <> " "
             <> toneClass
+            <> guard layout.isSelf " calendar-presence-rail__segment--self"
             <> guard isActive " calendar-presence-rail__segment--active"
       , style $
           " --start:" <> show layout.startMin <> ";"
@@ -1556,6 +1555,7 @@ renderSharedPresenceSegment _ presenceCuePreferences presenceInspection layout =
       , attr (AttrName "type") "button"
       , attr (AttrName "aria-label") (presenceInspectionAriaLabel layout.username layout)
       , attr (AttrName "data-username") layout.username
+      , attr (AttrName "data-self") (if layout.isSelf then "true" else "false")
       , attr (AttrName "data-segment-index") (show layout.segmentIndex)
       , onClick (const (ViewAction (ViewInspectPresence PresenceInspectTap inspection)))
       , onMouseEnterAction (ViewAction (ViewPresenceSegmentMouseEnter inspection))
@@ -4362,6 +4362,7 @@ maxVisibleSharedPresenceUsers = 3
 
 type SharedPresenceSegmentLayout =
   { username :: String
+  , isSelf :: Boolean
   , segmentIndex :: Int
   , laneIndex :: Int
   , laneCount :: Int
@@ -4522,7 +4523,11 @@ presenceCueTargetFromInspection inspection =
       Nothing
 
 buildSharedPresenceSegmentLayouts :: SharedPresence -> Array SharedPresenceSegmentLayout
-buildSharedPresenceSegmentLayouts groups =
+buildSharedPresenceSegmentLayouts =
+  buildSharedPresenceSegmentLayoutsFor Nothing
+
+buildSharedPresenceSegmentLayoutsFor :: Maybe String -> SharedPresence -> Array SharedPresenceSegmentLayout
+buildSharedPresenceSegmentLayoutsFor ownerUsername groups =
   let
     laneCount = max 1 (length groups)
   in
@@ -4532,6 +4537,7 @@ buildSharedPresenceSegmentLayouts groups =
               mapWithIndex
                 ( \segmentIndex segment ->
                     { username: group.username
+                    , isSelf: ownerUsername == Just group.username
                     , segmentIndex
                     , laneIndex
                     , laneCount
@@ -4544,14 +4550,6 @@ buildSharedPresenceSegmentLayouts groups =
           )
           groups
       )
-
-emptySharedPresenceRailView :: SharedPresenceRailView
-emptySharedPresenceRailView =
-  { visibleGroups: []
-  , hiddenGroups: []
-  , visibleLayouts: []
-  , overflow: Nothing
-  }
 
 buildSharedPresenceRailView :: SharedPresence -> SharedPresenceRailView
 buildSharedPresenceRailView groups =
@@ -4572,6 +4570,76 @@ buildSharedPresenceRailView groups =
             , hiddenGroups
             }
     }
+
+buildDayPresenceRailView
+  :: Maybe String
+  -> String
+  -> Array CalendarItem
+  -> SharedPresenceLoadState
+  -> SharedPresenceRailView
+buildDayPresenceRailView ownerUsername focusDate items sharedPresence =
+  let
+    sharedGroups = case sharedPresence of
+      SharedPresenceLoaded groups -> groups
+      _ -> []
+    ownerGroup = deriveOwnerPresenceGroupForDay ownerUsername focusDate items
+    visibleSharedGroups = takeArray maxVisibleSharedPresenceUsers sharedGroups
+    hiddenSharedGroups = dropArray maxVisibleSharedPresenceUsers sharedGroups
+    visibleGroups =
+      case ownerGroup of
+        Nothing -> visibleSharedGroups
+        Just selfGroup -> [ selfGroup ] <> visibleSharedGroups
+    hiddenCount = length hiddenSharedGroups
+  in
+    { visibleGroups
+    , hiddenGroups: hiddenSharedGroups
+    , visibleLayouts: buildSharedPresenceSegmentLayoutsFor ownerUsername visibleGroups
+    , overflow:
+        if hiddenCount <= 0 then
+          Nothing
+        else
+          Just
+            { hiddenCount
+            , hiddenGroups: hiddenSharedGroups
+            }
+    }
+
+deriveOwnerPresenceGroupForDay
+  :: Maybe String
+  -> String
+  -> Array CalendarItem
+  -> Maybe SharedPresenceGroup
+deriveOwnerPresenceGroupForDay ownerUsername focusDate items = do
+  username <- ownerUsername
+  period <- buildDayPeriodDateTimeRange focusDate
+  ownerTrips <- ownerSharedPeriodTripsFromItems items
+  deriveSharedPresenceGroup period.start period.end { username, trips: ownerTrips }
+
+ownerSharedPeriodTripsFromItems :: Array CalendarItem -> Maybe (Array SharedPeriodTrip)
+ownerSharedPeriodTripsFromItems items =
+  if null trips then
+    Nothing
+  else
+    Just (sortBy compareTrip trips)
+  where
+  trips =
+    mapMaybe toOwnerTrip items
+
+  toOwnerTrip item =
+    case calendarItemContent item of
+      TripCalendarItemContent trip ->
+        Just
+          { windowStart: trip.windowStart
+          , windowEnd: trip.windowEnd
+          , departurePlaceId: trip.departurePlaceId
+          , arrivalPlaceId: trip.arrivalPlaceId
+          }
+      _ ->
+        Nothing
+
+  compareTrip a b =
+    compare a.windowStart b.windowStart
+      <> compare a.windowEnd b.windowEnd
 
 toPresenceInspection :: SharedPresenceSegmentLayout -> SharedPresenceInspection
 toPresenceInspection layout =

@@ -598,6 +598,11 @@ a.nav-link:hover {
   -webkit-appearance: none;
 }
 
+.calendar-presence-rail__segment--self {
+  transform: scaleX(0.62);
+  transform-origin: center;
+}
+
 .calendar-presence-rail__segment:focus-visible {
   outline: 2px solid rgba(19, 54, 118, 0.82);
   outline-offset: 2px;
@@ -1757,6 +1762,10 @@ a.nav-link:hover {
     left: calc((100% / var(--lanes)) * var(--lane) + 3px);
     width: calc((100% / var(--lanes)) - 6px);
     min-height: 6px;
+  }
+
+  .calendar-presence-rail__segment--self {
+    transform: scaleX(0.56);
   }
 
   .calendar-presence-overflow {

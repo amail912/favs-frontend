@@ -242,6 +242,7 @@ spec =
           }
         layout =
           { username: "alice"
+          , isSelf: false
           , segmentIndex: 2
           , laneIndex: 0
           , laneCount: 2
@@ -260,6 +261,7 @@ spec =
           }
         layout =
           { username: "alice"
+          , isSelf: false
           , segmentIndex: 2
           , laneIndex: 3
           , laneCount: 4
@@ -284,6 +286,7 @@ spec =
           }
         layout =
           { username: "alice"
+          , isSelf: false
           , segmentIndex: 1
           , laneIndex: 2
           , laneCount: 3
@@ -315,6 +318,7 @@ spec =
       let
         layout =
           { username: "alice"
+          , isSelf: false
           , segmentIndex: 1
           , laneIndex: 0
           , laneCount: 2
@@ -604,7 +608,10 @@ summarizePresenceState = case _ of
   PresenceAtPlace placeId -> "at-place:" <> placeId
   PresenceInTransit { departurePlaceId, arrivalPlaceId } -> "in-transit:" <> departurePlaceId <> "->" <> arrivalPlaceId
 
-summarizePresenceRailLayouts :: Array { username :: String, segmentIndex :: Int, laneIndex :: Int, laneCount :: Int, startMin :: Int, duration :: Int, state :: SharedPresenceState } -> Array { username :: String, segmentIndex :: Int, laneIndex :: Int, laneCount :: Int, startMin :: Int, duration :: Int, railClass :: String, toneClass :: String }
+summarizePresenceRailLayouts
+  :: forall r
+   . Array { username :: String, segmentIndex :: Int, laneIndex :: Int, laneCount :: Int, startMin :: Int, duration :: Int, state :: SharedPresenceState | r }
+  -> Array { username :: String, segmentIndex :: Int, laneIndex :: Int, laneCount :: Int, startMin :: Int, duration :: Int, railClass :: String, toneClass :: String }
 summarizePresenceRailLayouts =
   map \layout ->
     { username: layout.username
