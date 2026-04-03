@@ -9,12 +9,13 @@ import Data.Argonaut.Core (Json, fromArray, jsonEmptyObject)
 import Data.Argonaut.Decode (decodeJson)
 import Data.Argonaut.Decode.Error (JsonDecodeError)
 import Data.Argonaut.Encode (encodeJson, (:=), (~>))
+import Data.Array as Array
 import Data.DateTime (DateTime)
 import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
 import Helpers.DateTime as DateTime
 import Helpers.DateTime (formatCalendarDayDateLabelWithReference)
-import Pages.Calendar (PresenceCueColorToken(..), SharedPresenceCuePreference(..), SharedPresenceLoadState(..), SharedPresenceState(..), buildSharedPresenceSegmentLayouts, decodeCalendarItemsResponse, decodePeriodTripsResponse, decodePresenceCuePreferencesJson, decodeSharedUsersResponse, decodeTripPlacesResponse, deriveSharedPresence, encodePresenceCuePreferencesJson, normalizePeriodTripGroups, presenceInspectionAriaLabel, presenceInspectionStateText, presenceInspectionTimeText, resolveSharedPresenceToneClass, shareWriteErrorMessage, sharedPresenceLaneToneClass, sharedPresenceSegmentRailClass, shouldRenderDayCalendarShell, shouldRenderSharedPresenceRail, subscriptionWriteErrorMessage, tripWriteErrorMessage, validateShareUsername)
+import Pages.Calendar (PresenceCueColorToken(..), SharedPresenceCuePreference(..), SharedPresenceLoadState(..), SharedPresenceState(..), buildSharedPresenceRailView, buildSharedPresenceSegmentLayouts, decodeCalendarItemsResponse, decodePeriodTripsResponse, decodePresenceCuePreferencesJson, decodeSharedUsersResponse, decodeTripPlacesResponse, deriveSharedPresence, encodePresenceCuePreferencesJson, maxVisibleSharedPresenceUsers, normalizePeriodTripGroups, presenceInspectionAriaLabel, presenceInspectionStateText, presenceInspectionTimeText, resolveSharedPresenceToneClass, shareWriteErrorMessage, sharedPresenceLaneToneClass, sharedPresenceSegmentRailClass, shouldRenderDayCalendarShell, shouldRenderSharedPresenceRail, subscriptionWriteErrorMessage, tripWriteErrorMessage, validateShareUsername)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (fail, shouldEqual)
 import Test.Support.Builders (unsafeDateTime)
@@ -176,6 +177,44 @@ spec =
           , { username: "bob", segmentIndex: 0, laneIndex: 1, laneCount: 2, startMin: 0, duration: 60, railClass: "calendar-presence-rail__segment--transit", toneClass: "calendar-presence-rail__segment--tone-1" }
           , { username: "bob", segmentIndex: 1, laneIndex: 1, laneCount: 2, startMin: 60, duration: 1380, railClass: "calendar-presence-rail__segment--place", toneClass: "calendar-presence-rail__segment--tone-1" }
           ]
+
+    it "keeps all shared users visible when their count does not exceed the readability limit" do
+      let
+        oneUser = buildSharedPresenceRailView (takePresenceGroups 1 multiUserPresence)
+        twoUsers = buildSharedPresenceRailView (takePresenceGroups 2 multiUserPresence)
+        threeUsers = buildSharedPresenceRailView (takePresenceGroups maxVisibleSharedPresenceUsers multiUserPresence)
+      summarizeSharedPresenceRailView oneUser
+        `shouldEqual`
+          { visibleUsernames: [ "alice" ]
+          , hiddenUsernames: []
+          , visibleLaneCounts: [ 1 ]
+          , overflowHiddenCount: Nothing
+          }
+      summarizeSharedPresenceRailView twoUsers
+        `shouldEqual`
+          { visibleUsernames: [ "alice", "bob" ]
+          , hiddenUsernames: []
+          , visibleLaneCounts: [ 2, 2 ]
+          , overflowHiddenCount: Nothing
+          }
+      summarizeSharedPresenceRailView threeUsers
+        `shouldEqual`
+          { visibleUsernames: [ "alice", "bob", "carol" ]
+          , hiddenUsernames: []
+          , visibleLaneCounts: [ 3, 3, 3 ]
+          , overflowHiddenCount: Nothing
+          }
+
+    it "moves users beyond the readability limit into ordered overflow" do
+      let
+        railView = buildSharedPresenceRailView multiUserPresence
+      summarizeSharedPresenceRailView railView
+        `shouldEqual`
+          { visibleUsernames: [ "alice", "bob", "carol" ]
+          , hiddenUsernames: [ "dave" ]
+          , visibleLaneCounts: [ 3, 3, 3 ]
+          , overflowHiddenCount: Just 1
+          }
 
     it "encodes and decodes cue preferences json" do
       let
@@ -464,6 +503,46 @@ adjacentPresenceTrips =
       }
   ]
 
+multiUserPresence :: Array { username :: String, segments :: Array { start :: DateTime, end :: DateTime, state :: SharedPresenceState } }
+multiUserPresence =
+  [ { username: "alice"
+    , segments:
+        [ { start: unsafeDateTime "2026-04-02T00:00"
+          , end: unsafeDateTime "2026-04-03T00:00"
+          , state: PresenceAtPlace "Paris"
+          }
+        ]
+    }
+  , { username: "bob"
+    , segments:
+        [ { start: unsafeDateTime "2026-04-02T00:00"
+          , end: unsafeDateTime "2026-04-03T00:00"
+          , state: PresenceAtPlace "Lyon"
+          }
+        ]
+    }
+  , { username: "carol"
+    , segments:
+        [ { start: unsafeDateTime "2026-04-02T00:00"
+          , end: unsafeDateTime "2026-04-03T00:00"
+          , state: PresenceAtPlace "Nantes"
+          }
+        ]
+    }
+  , { username: "dave"
+    , segments:
+        [ { start: unsafeDateTime "2026-04-02T00:00"
+          , end: unsafeDateTime "2026-04-03T00:00"
+          , state: PresenceAtPlace "Lille"
+          }
+        ]
+    }
+  ]
+
+takePresenceGroups :: Int -> Array { username :: String, segments :: Array { start :: DateTime, end :: DateTime, state :: SharedPresenceState } } -> Array { username :: String, segments :: Array { start :: DateTime, end :: DateTime, state :: SharedPresenceState } }
+takePresenceGroups count =
+  mapMaybeWithIndexLocal (\index item -> if index < count then Just item else Nothing)
+
 mkTextResponse :: Int -> String -> Response String
 mkTextResponse code body =
   { status: StatusCode code
@@ -537,3 +616,15 @@ summarizePresenceRailLayouts =
     , railClass: sharedPresenceSegmentRailClass layout.state
     , toneClass: sharedPresenceLaneToneClass layout.laneIndex
     }
+
+summarizeSharedPresenceRailView :: forall r s t u. { visibleGroups :: Array { username :: String | r }, hiddenGroups :: Array { username :: String | s }, visibleLayouts :: Array { laneCount :: Int | t }, overflow :: Maybe { hiddenCount :: Int | u } } -> { visibleUsernames :: Array String, hiddenUsernames :: Array String, visibleLaneCounts :: Array Int, overflowHiddenCount :: Maybe Int }
+summarizeSharedPresenceRailView railView =
+  { visibleUsernames: map _.username railView.visibleGroups
+  , hiddenUsernames: map _.username railView.hiddenGroups
+  , visibleLaneCounts: map _.laneCount railView.visibleLayouts
+  , overflowHiddenCount: _.hiddenCount <$> railView.overflow
+  }
+
+mapMaybeWithIndexLocal :: forall a b. (Int -> a -> Maybe b) -> Array a -> Array b
+mapMaybeWithIndexLocal fn items =
+  Array.mapMaybe identity (Array.mapWithIndex fn items)

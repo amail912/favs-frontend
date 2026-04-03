@@ -648,6 +648,29 @@ a.nav-link:hover {
   background-color: rgba(198, 86, 113, 0.7);
 }
 
+.calendar-presence-overflow {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  bottom: 10px;
+  z-index: 2;
+  min-height: 28px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(23, 49, 94, 0.92);
+  color: #ffffff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  pointer-events: auto;
+  box-shadow: 0 8px 20px rgba(20, 31, 52, 0.18);
+}
+
+.calendar-presence-overflow:focus-visible {
+  outline: 2px solid rgba(19, 54, 118, 0.82);
+  outline-offset: 2px;
+}
+
 .calendar-presence-inspection {
   position: absolute;
   top: calc((var(--start) + (var(--duration) / 2)) * var(--calendar-minute-height));
@@ -791,6 +814,59 @@ a.nav-link:hover {
 .calendar-presence-cue-editor__option--color-slate {
   color: #ffffff;
   border-color: transparent;
+}
+
+.calendar-presence-overflow-sheet__hint {
+  margin-bottom: 0.75rem;
+  color: #5c6c86;
+  font-size: 0.92rem;
+}
+
+.calendar-presence-overflow-sheet__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.calendar-presence-overflow-sheet__item {
+  padding: 0.75rem 0.85rem;
+  border-radius: 16px;
+  border: 1px solid rgba(28, 46, 81, 0.12);
+  background: rgba(248, 250, 253, 0.98);
+}
+
+.calendar-presence-overflow-sheet__username {
+  font-weight: 700;
+  color: #17315e;
+}
+
+.calendar-presence-overflow-sheet__segments {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.55rem;
+}
+
+.calendar-presence-overflow-sheet__segment {
+  padding-top: 0.55rem;
+  border-top: 1px solid rgba(28, 46, 81, 0.08);
+}
+
+.calendar-presence-overflow-sheet__segment:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.calendar-presence-overflow-sheet__state {
+  color: #23344f;
+  font-weight: 600;
+}
+
+.calendar-presence-overflow-sheet__time {
+  margin-top: 0.15rem;
+  color: #617089;
+  font-size: 0.9rem;
 }
 
 .calendar-calendar-stack {
@@ -1681,6 +1757,14 @@ a.nav-link:hover {
     left: calc((100% / var(--lanes)) * var(--lane) + 3px);
     width: calc((100% / var(--lanes)) - 6px);
     min-height: 6px;
+  }
+
+  .calendar-presence-overflow {
+    left: 3px;
+    right: 3px;
+    bottom: 8px;
+    min-height: 26px;
+    font-size: 0.72rem;
   }
 
   .calendar-calendar-hour {

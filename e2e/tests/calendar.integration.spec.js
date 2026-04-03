@@ -62,26 +62,37 @@ async function setTextInputValue(locator, value) {
   }, value);
 }
 
-async function mockSharedPresenceRoute(page, focusDate, sharedUsername) {
+function defaultSharedPresenceTrips(focusDate) {
+  return [
+    {
+      windowStart: `${focusDate}T08:00`,
+      windowEnd: `${focusDate}T09:00`,
+      departurePlaceId: "Paris",
+      arrivalPlaceId: "St Clair"
+    }
+  ];
+}
+
+async function mockSharedPresenceRoute(page, focusDate, sharedUsers) {
+  const groups = Array.isArray(sharedUsers)
+    ? sharedUsers.map(group => ({
+        username: group.username,
+        trips: group.trips || defaultSharedPresenceTrips(focusDate)
+      }))
+    : [
+        {
+          username: sharedUsers,
+          trips: defaultSharedPresenceTrips(focusDate)
+        }
+      ];
+
   await page.route("**/api/v1/trip-sharing/period-trips**", async route => {
     const url = new URL(route.request().url());
     if (url.searchParams.get("start") === `${focusDate}T00:00`) {
       await route.fulfill({
         status: 200,
         contentType: "application/json; charset=utf-8",
-        body: JSON.stringify([
-          {
-            username: sharedUsername,
-            trips: [
-              {
-                windowStart: `${focusDate}T08:00`,
-                windowEnd: `${focusDate}T09:00`,
-                departurePlaceId: "Paris",
-                arrivalPlaceId: "St Clair"
-              }
-            ]
-          }
-        ])
+        body: JSON.stringify(groups)
       });
       return;
     }
@@ -353,6 +364,59 @@ test("calendar day rail: shows shared presence without owner items", async ({ au
   await expect(page.locator(`.calendar-presence-rail__segment--place[data-username="${sharedUsername}"]`)).toHaveCount(1);
 });
 
+test("calendar day rail: keeps three shared users directly visible without overflow", async ({ authenticatedPage: page }) => {
+  const focusDate = toLocalDateInput(isolatedFutureDate(2335));
+  const sharedUsers = [
+    { username: "shared-visible-alice" },
+    { username: "shared-visible-bob" },
+    { username: "shared-visible-carol" }
+  ];
+
+  await mockSharedPresenceRoute(page, focusDate, sharedUsers);
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  await expect(page.locator(".calendar-presence-overflow")).toHaveCount(0);
+  for (const sharedUser of sharedUsers) {
+    await expect(page.locator(`.calendar-presence-rail__segment[data-username="${sharedUser.username}"]`)).toHaveCount(3);
+  }
+});
+
+test("calendar day rail: desktop overflow shows hidden shared users", async ({ authenticatedPage: page }) => {
+  const focusDate = toLocalDateInput(isolatedFutureDate(2338));
+  const sharedUsers = [
+    { username: "shared-overflow-alice" },
+    { username: "shared-overflow-bob" },
+    { username: "shared-overflow-carol" },
+    { username: "shared-overflow-dave" }
+  ];
+
+  await mockSharedPresenceRoute(page, focusDate, sharedUsers);
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const overflowButton = page.locator(".calendar-presence-overflow");
+  await expect(overflowButton).toBeVisible();
+  await expect(overflowButton).toHaveText("+1");
+
+  await expect(page.locator('.calendar-presence-rail__segment[data-username="shared-overflow-alice"]')).toHaveCount(3);
+  await expect(page.locator('.calendar-presence-rail__segment[data-username="shared-overflow-bob"]')).toHaveCount(3);
+  await expect(page.locator('.calendar-presence-rail__segment[data-username="shared-overflow-carol"]')).toHaveCount(3);
+  await expect(page.locator('.calendar-presence-rail__segment[data-username="shared-overflow-dave"]')).toHaveCount(0);
+
+  await overflowButton.click();
+
+  const sheet = page.locator(".app-bottom-sheet__dialog");
+  await expect(sheet).toBeVisible();
+  await expect(sheet).toContainText("shared-overflow-dave");
+  await expect(sheet).toContainText("Trajet: Paris → St Clair");
+  await expect(sheet).toContainText("Lieu: St Clair");
+});
+
 test("calendar day rail: hover and focus reveal presence inspection on desktop", async ({ authenticatedPage: page }) => {
   const focusDate = toLocalDateInput(isolatedFutureDate(2340));
   const sharedUsername = "shared-inspection-user";
@@ -431,6 +495,35 @@ test("calendar day rail: tap reveals presence inspection on mobile", async ({ au
   await expect(sheet).toContainText(sharedUsername);
   await expect(sheet).toContainText("Trajet: Paris → St Clair");
   await expect(sheet).toContainText("De 08:00 à 09:00");
+});
+
+test("calendar day rail: mobile overflow opens hidden shared users sheet", async ({ authenticatedPage: page }) => {
+  const focusDate = toLocalDateInput(isolatedFutureDate(2352));
+  const sharedUsers = [
+    { username: "shared-mobile-overflow-alice" },
+    { username: "shared-mobile-overflow-bob" },
+    { username: "shared-mobile-overflow-carol" },
+    { username: "shared-mobile-overflow-dave" }
+  ];
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockSharedPresenceRoute(page, focusDate, sharedUsers);
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const overflowButton = page.locator(".calendar-presence-overflow");
+  await expect(overflowButton).toBeVisible();
+  await expect(overflowButton).toHaveText("+1");
+
+  await overflowButton.click();
+
+  const sheet = page.locator(".app-bottom-sheet__dialog");
+  await expect(sheet).toBeVisible();
+  await expect(sheet).toContainText("shared-mobile-overflow-dave");
+  await expect(sheet).toContainText("Lieu inconnu");
+  await expect(sheet).toContainText("Lieu: St Clair");
 });
 
 test("calendar day rail: mobile inspection sheet edits place cue colors", async ({ authenticatedPage: page, authIdentity }) => {
