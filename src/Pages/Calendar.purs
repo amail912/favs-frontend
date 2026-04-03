@@ -42,6 +42,11 @@ module Pages.Calendar
   , SharedPresenceGroup
   , SharedPresenceSegment
   , SharedPresenceState(..)
+  , PresenceCueColorToken(..)
+  , SharedPresenceCuePreference(..)
+  , encodePresenceCuePreferencesJson
+  , decodePresenceCuePreferencesJson
+  , resolveSharedPresenceToneClass
   , SharedPresenceSegmentLayout
   , shouldRenderSharedPresenceRail
   , shouldRenderDayCalendarShell
@@ -79,7 +84,7 @@ import Calendar.ExImport.Import as Import
 import Control.Monad.Except (ExceptT(..), withExceptT)
 import Control.Monad.State.Trans (get, modify_)
 import Control.Monad.Trans.Class (lift)
-import Data.Argonaut.Core (Json, jsonEmptyObject)
+import Data.Argonaut.Core (Json, jsonEmptyObject, stringify)
 import Data.Argonaut.Decode (class DecodeJson, decodeJson, (.:), (.:?))
 import Data.Argonaut.Decode.Error (JsonDecodeError(..))
 import Data.Argonaut.Parser (jsonParser)
@@ -107,6 +112,8 @@ import Halogen.Query.Event as HQE
 import Type.Proxy (Proxy(..))
 import Ui.Errors (FatalError, handleError, toFatalError)
 import Ui.Focus (focusElement, openDateInputPicker)
+import Ui.AuthSession as AuthSession
+import Ui.LocalStorage as LocalStorage
 import Ui.Modal (renderBottomSheet, renderModal, renderModalWithValidateState) as Modal
 import Ui.Utils (class_)
 import Web.Event.Event (EventType(..), preventDefault)
@@ -273,16 +280,18 @@ renderAgendaView
   -> String
   -> Array CalendarItem
   -> SharedPresenceLoadState
+  -> PresenceCuePreferencesState
   -> Maybe SharedPresenceInspection
+  -> Boolean
   -> Boolean
   -> Array MobileOverlapPromotion
   -> Maybe String
   -> Maybe Int
   -> HTML w Action
-renderAgendaView viewMode focusDate todayDate items sharedPresence presenceInspection isMobile promotedOverlaps draggingId dragHoverIndex =
+renderAgendaView viewMode focusDate todayDate items sharedPresence presenceCuePreferences presenceInspection presenceInspectionPinned isMobile promotedOverlaps draggingId dragHoverIndex =
   case viewMode of
     ViewDay ->
-      renderDayCalendar focusDate todayDate items sharedPresence presenceInspection isMobile promotedOverlaps draggingId dragHoverIndex
+      renderDayCalendar focusDate todayDate items sharedPresence presenceCuePreferences presenceInspection presenceInspectionPinned isMobile promotedOverlaps draggingId dragHoverIndex
     ViewWeek ->
       renderRangeView "Semaine" (generateDateRange focusDate 7) items isMobile
     ViewMonth ->
@@ -431,6 +440,9 @@ _calendarSubscriptionList = _calendar <<< _subscriptionList
 
 _calendarSharedPresence :: Lens' State SharedPresenceLoadState
 _calendarSharedPresence = _calendar <<< _sharedPresence
+
+_calendarPresenceCuePreferences :: Lens' State PresenceCuePreferencesState
+_calendarPresenceCuePreferences = _calendar <<< _presenceCuePreferences
 
 _syncUpdateErrorState :: Lens' State (Maybe String)
 _syncUpdateErrorState = _sync <<< _syncUpdateError
@@ -744,6 +756,7 @@ initAction = do
   handleViewAction (ViewSetIsMobile (viewport <= 768))
   subscribeToGlobalKeyDown
   subscribeToGlobalResize
+  lift loadPresenceCuePreferences
   lift loadTripPlaces
   lift loadSharedUsers
   lift loadSubscribedUsers
@@ -756,6 +769,20 @@ refreshItems = do
   jsonResponse <- withExceptT toFatalError $ ExceptT $ liftAff getItemsResponse
   items <- decodeCalendarItemsResponse jsonResponse # pure >>> ExceptT
   modify_ (_calendarItems .~ items)
+
+loadPresenceCuePreferences :: AgendaAppM Unit
+loadPresenceCuePreferences = do
+  ownerUsername <- liftEffect AuthSession.loadAuthenticatedUsername
+  preferences <-
+    case ownerUsername of
+      Nothing ->
+        pure []
+      Just username -> do
+        raw <- liftEffect $ LocalStorage.getItem (presenceCuePreferencesStorageKey username)
+        pure $ either (const []) identity (decodePresenceCuePreferencesJson raw)
+  modify_
+    ( _calendarPresenceCuePreferences .~ { ownerUsername, preferences }
+    )
 
 loadTripPlaces :: AgendaAppM Unit
 loadTripPlaces = do
@@ -873,6 +900,7 @@ loadSharedPresenceForFocusDate = do
   st <- get
   let focusDate = st ^. _viewFocusDatePage
   modify_ (_view <<< _viewPresenceInspection .~ Nothing)
+  modify_ (_view <<< _viewPresenceInspectionPinned .~ false)
   modify_ (_view <<< _viewActiveModal %~ clearPresenceInspectionModal)
   case buildDayPeriodRange focusDate of
     Nothing ->
@@ -1228,11 +1256,11 @@ subscribeToGlobalResize = do
 render :: State -> H.ComponentHTML Action Slots Aff
 render { calendar, sync, mouseDrag, view } =
   let
-    { items, shareList, subscriptionList, sharedPresence } = calendar
+    { items, shareList, subscriptionList, sharedPresence, presenceCuePreferences } = calendar
     { updateError } = sync
     draggingId = mouseDrag.draggingId
     dragHoverIndex = mouseDrag.dragHoverIndex
-    { viewMode, focusDate, todayDate, isMobile, promotedOverlaps, presenceInspection } = view
+    { viewMode, focusDate, todayDate, isMobile, promotedOverlaps, presenceInspection, presenceInspectionPinned } = view
     agendaModalsInput = buildAgendaModalsInput { calendar, sync, mouseDrag, view }
     sortedItems = sortItems SortByTime items
   in
@@ -1247,7 +1275,7 @@ render { calendar, sync, mouseDrag, view } =
             [ div [ class_ "calendar-main" ]
                 [ maybe (text "") renderUpdateError updateError
                 , section [ class_ $ "calendar-list-panel" <> guard (viewMode == ViewDay) " calendar-list-panel--calendar" ]
-                    [ renderAgendaView viewMode focusDate todayDate sortedItems sharedPresence presenceInspection isMobile promotedOverlaps draggingId dragHoverIndex ]
+                    [ renderAgendaView viewMode focusDate todayDate sortedItems sharedPresence presenceCuePreferences presenceInspection presenceInspectionPinned isMobile promotedOverlaps draggingId dragHoverIndex ]
                 ]
             , div [ class_ "calendar-side" ]
                 [ map toAction (renderShareManager sharePanelConfig shareList)
@@ -1270,11 +1298,13 @@ type AgendaModalsInput =
   , subscriptionList :: ShareListState
   , validationError :: Maybe String
   , editPanel :: Maybe EditPanel
+  , presenceCuePreferences :: PresenceCuePreferencesState
   , presenceInspection :: Maybe SharedPresenceInspection
+  , presenceInspectionPinned :: Boolean
   }
 
 renderAgendaModals :: AgendaModalsInput -> H.ComponentHTML Action Slots Aff
-renderAgendaModals { activeModal, overlapSheet, exportItems, draft, tripPlaces, shareList, subscriptionList, validationError, editPanel, presenceInspection } =
+renderAgendaModals { activeModal, overlapSheet, exportItems, draft, tripPlaces, shareList, subscriptionList, validationError, editPanel, presenceCuePreferences, presenceInspection, presenceInspectionPinned } =
   let
     renderModal title content = Modal.renderModal title content (ViewAction ViewCloseModal) (ViewAction ViewCloseModal)
     renderExportModal items =
@@ -1317,7 +1347,7 @@ renderAgendaModals { activeModal, overlapSheet, exportItems, draft, tripPlaces, 
           Nothing -> text ""
           Just inspection ->
             Modal.renderBottomSheet inspection.username
-              [ renderPresenceInspectionContent inspection ]
+              [ renderPresenceInspectionContent presenceCuePreferences inspection presenceInspectionPinned ]
               (ViewAction ViewCloseModal)
         ModalEditItem -> case editPanel of
           Nothing -> text ""
@@ -1331,8 +1361,8 @@ renderAgendaModals { activeModal, overlapSheet, exportItems, draft, tripPlaces, 
 buildAgendaModalsInput :: State -> AgendaModalsInput
 buildAgendaModalsInput { calendar, view } =
   let
-    { items, draft, tripPlaces, shareList, subscriptionList, validationError } = calendar
-    { activeModal, overlapSheet, editPanel, presenceInspection } = view
+    { items, draft, tripPlaces, shareList, subscriptionList, validationError, presenceCuePreferences } = calendar
+    { activeModal, overlapSheet, editPanel, presenceInspection, presenceInspectionPinned } = view
   in
     { activeModal
     , overlapSheet
@@ -1343,7 +1373,9 @@ buildAgendaModalsInput { calendar, view } =
     , subscriptionList
     , validationError
     , editPanel
+    , presenceCuePreferences
     , presenceInspection
+    , presenceInspectionPinned
     }
 
 -- END src/Pages/Calendar.purs
@@ -1359,13 +1391,15 @@ renderDayCalendar
   -> String
   -> Array CalendarItem
   -> SharedPresenceLoadState
+  -> PresenceCuePreferencesState
   -> Maybe SharedPresenceInspection
+  -> Boolean
   -> Boolean
   -> Array MobileOverlapPromotion
   -> Maybe String
   -> Maybe Int
   -> HTML w Action
-renderDayCalendar focusDate todayDate items sharedPresence presenceInspection isMobile promotedOverlaps draggingId dragHoverIndex =
+renderDayCalendar focusDate todayDate items sharedPresence presenceCuePreferences presenceInspection presenceInspectionPinned isMobile promotedOverlaps draggingId dragHoverIndex =
   let
     itemsForDate = filter (isItemOnDate focusDate) items
     sorted = sortItems SortByTime itemsForDate
@@ -1411,8 +1445,8 @@ renderDayCalendar focusDate todayDate items sharedPresence presenceInspection is
                     (map renderHourLine (enumFromTo 0 23))
                 , maybe (text "") renderDropIndicator dragHoverIndex
                 , maybe (text "") identity dragPreview
-                , if showPresenceRail then renderSharedPresenceRail isMobile presenceInspection railLayouts else text ""
-                , maybe (text "") renderPresenceInspectionCard desktopInspection
+                , if showPresenceRail then renderSharedPresenceRail isMobile presenceCuePreferences presenceInspection railLayouts else text ""
+                , maybe (text "") (renderPresenceInspectionCard presenceCuePreferences presenceInspectionPinned) desktopInspection
                 , div
                     [ class_ $
                         "calendar-calendar-items"
@@ -1468,21 +1502,22 @@ onBlurAction
 onBlurAction action =
   handler' (EventType "blur") (const (Just action))
 
-renderSharedPresenceRail :: forall w. Boolean -> Maybe SharedPresenceInspection -> Array SharedPresenceSegmentLayout -> HTML w Action
-renderSharedPresenceRail isMobile presenceInspection layouts =
+renderSharedPresenceRail :: forall w. Boolean -> PresenceCuePreferencesState -> Maybe SharedPresenceInspection -> Array SharedPresenceSegmentLayout -> HTML w Action
+renderSharedPresenceRail isMobile presenceCuePreferences presenceInspection layouts =
   let
     railClass =
       "calendar-presence-rail" <>
         guard isMobile " calendar-presence-rail--mobile"
   in
     div [ class_ railClass ]
-      (map (renderSharedPresenceSegment isMobile presenceInspection) layouts)
+      (map (renderSharedPresenceSegment isMobile presenceCuePreferences presenceInspection) layouts)
 
-renderSharedPresenceSegment :: forall w. Boolean -> Maybe SharedPresenceInspection -> SharedPresenceSegmentLayout -> HTML w Action
-renderSharedPresenceSegment _ presenceInspection layout =
+renderSharedPresenceSegment :: forall w. Boolean -> PresenceCuePreferencesState -> Maybe SharedPresenceInspection -> SharedPresenceSegmentLayout -> HTML w Action
+renderSharedPresenceSegment _ presenceCuePreferences presenceInspection layout =
   let
     isActive = maybe false (\activeInspection -> isSamePresenceInspection activeInspection layout) presenceInspection
     inspection = toPresenceInspection layout
+    toneClass = resolveSharedPresenceToneClass presenceCuePreferences layout
   in
     button
       [ class_ $
@@ -1490,7 +1525,7 @@ renderSharedPresenceSegment _ presenceInspection layout =
             <> " "
             <> sharedPresenceSegmentRailClass layout.state
             <> " "
-            <> sharedPresenceLaneToneClass layout.laneIndex
+            <> toneClass
             <> guard isActive " calendar-presence-rail__segment--active"
       , style $
           " --start:" <> show layout.startMin <> ";"
@@ -1515,8 +1550,8 @@ renderSharedPresenceSegment _ presenceInspection layout =
       ]
       []
 
-renderPresenceInspectionCard :: forall w. SharedPresenceInspection -> HTML w Action
-renderPresenceInspectionCard inspection =
+renderPresenceInspectionCard :: forall w. PresenceCuePreferencesState -> Boolean -> SharedPresenceInspection -> HTML w Action
+renderPresenceInspectionCard presenceCuePreferences isPinned inspection =
   div
     [ class_ "calendar-presence-inspection"
     , style $
@@ -1527,15 +1562,68 @@ renderPresenceInspectionCard inspection =
           <> show inspection.duration
           <> ";"
     ]
-    [ renderPresenceInspectionContent inspection ]
+    [ renderPresenceInspectionContent presenceCuePreferences inspection isPinned ]
 
-renderPresenceInspectionContent :: forall w. SharedPresenceInspection -> HTML w Action
-renderPresenceInspectionContent inspection =
+renderPresenceInspectionContent :: forall w. PresenceCuePreferencesState -> SharedPresenceInspection -> Boolean -> HTML w Action
+renderPresenceInspectionContent presenceCuePreferences inspection isPinned =
   div [ class_ "calendar-presence-inspection__content" ]
-    [ div [ class_ "calendar-presence-inspection__title" ] [ text inspection.username ]
+    [ div [ class_ "calendar-presence-inspection__header" ]
+        [ div [ class_ "calendar-presence-inspection__title" ] [ text inspection.username ]
+        , if isPinned then
+            button
+              [ class_ "calendar-presence-inspection__close"
+              , attr (AttrName "type") "button"
+              , attr (AttrName "aria-label") "Fermer l'inspection"
+              , onClick (const (ViewAction ViewDismissPresenceInspection))
+              ]
+              [ text "Fermer" ]
+          else
+            text ""
+        ]
     , div [ class_ "calendar-presence-inspection__state" ] [ text (presenceInspectionStateText inspection.state) ]
     , div [ class_ "calendar-presence-inspection__time" ] [ text (presenceInspectionTimeText inspection) ]
+    , maybe (text "") (renderPresenceCueEditor presenceCuePreferences) (presenceCueTargetFromInspection inspection)
     ]
+
+renderPresenceCueEditor :: forall w. PresenceCuePreferencesState -> SharedPresenceCueTarget -> HTML w Action
+renderPresenceCueEditor presenceCuePreferences target =
+  let
+    currentColorToken =
+      lookupPresenceCuePreference presenceCuePreferences.preferences target
+    renderTokenButton token =
+      let
+        isActive = currentColorToken == Just token
+      in
+        button
+          [ class_ $
+              "calendar-presence-cue-editor__option "
+                <> presenceCueEditorTokenClass token
+                <> guard isActive " calendar-presence-cue-editor__option--active"
+          , attr (AttrName "type") "button"
+          , attr (AttrName "aria-label") ("Utiliser la couleur " <> presenceCueColorTokenLabel token)
+          , attr (AttrName "data-cue-color-token") (presenceCueColorTokenValue token)
+          , onClick (const (ViewAction (ViewSetPresenceCueColor target (Just token))))
+          ]
+          [ text (presenceCueColorTokenLabel token) ]
+    defaultIsActive = currentColorToken == Nothing
+  in
+    div [ class_ "calendar-presence-cue-editor" ]
+      [ div [ class_ "calendar-presence-cue-editor__label" ] [ text "Couleur du lieu" ]
+      , div [ class_ "calendar-presence-cue-editor__options" ]
+          ( [ button
+                [ class_ $
+                    "calendar-presence-cue-editor__option calendar-presence-cue-editor__option--default"
+                      <> guard defaultIsActive " calendar-presence-cue-editor__option--active"
+                , attr (AttrName "type") "button"
+                , attr (AttrName "aria-label") "Revenir à la couleur par défaut"
+                , attr (AttrName "data-cue-color-token") "default"
+                , onClick (const (ViewAction (ViewSetPresenceCueColor target Nothing)))
+                ]
+                [ text "Par défaut" ]
+            ]
+              <> map renderTokenButton allPresenceCueColorTokens
+          )
+      ]
 
 renderDayDragPreview
   :: forall w
@@ -2178,6 +2266,7 @@ type CalendarState =
   , shareList :: ShareListState
   , subscriptionList :: ShareListState
   , sharedPresence :: SharedPresenceLoadState
+  , presenceCuePreferences :: PresenceCuePreferencesState
   }
 
 calendarInitialState :: CalendarState
@@ -2190,6 +2279,7 @@ calendarInitialState =
   , shareList: shareListInitialState
   , subscriptionList: shareListInitialState
   , sharedPresence: SharedPresenceLoading
+  , presenceCuePreferences: presenceCuePreferencesInitialState
   }
 
 shareListInitialState :: ShareListState
@@ -2252,6 +2342,9 @@ _subscriptionList = prop (Proxy :: _ "subscriptionList")
 
 _sharedPresence :: Lens' CalendarState SharedPresenceLoadState
 _sharedPresence = prop (Proxy :: _ "sharedPresence")
+
+_presenceCuePreferences :: Lens' CalendarState PresenceCuePreferencesState
+_presenceCuePreferences = prop (Proxy :: _ "presenceCuePreferences")
 
 -- END src/Calendar/Calendar/State.purs
 
@@ -2521,6 +2614,7 @@ type ViewState =
   , activeModal :: Maybe AgendaModal
   , overlapSheet :: Maybe OverlapSheet
   , presenceInspection :: Maybe SharedPresenceInspection
+  , presenceInspectionPinned :: Boolean
   , promotedOverlaps :: Array MobileOverlapPromotion
   , editPanel :: Maybe EditPanel
   , isMobile :: Boolean
@@ -2538,6 +2632,7 @@ viewInitialState =
   , activeModal: Nothing
   , overlapSheet: Nothing
   , presenceInspection: Nothing
+  , presenceInspectionPinned: false
   , promotedOverlaps: []
   , editPanel: Nothing
   , isMobile: false
@@ -2581,6 +2676,12 @@ _viewPresenceInspection =
   lens
     _.presenceInspection
     (_ { presenceInspection = _ })
+
+_viewPresenceInspectionPinned :: Lens' ViewState Boolean
+_viewPresenceInspectionPinned =
+  lens
+    _.presenceInspectionPinned
+    (_ { presenceInspectionPinned = _ })
 
 _viewPromotedOverlaps :: Lens' ViewState (Array MobileOverlapPromotion)
 _viewPromotedOverlaps =
@@ -2640,6 +2741,8 @@ data ViewAction
   | ViewPromoteOverlapItem OverlapSheet CalendarItem
   | ViewInspectPresence SharedPresenceInspectionTrigger SharedPresenceInspection
   | ViewClearPresenceInspection
+  | ViewDismissPresenceInspection
+  | ViewSetPresenceCueColor SharedPresenceCueTarget (Maybe PresenceCueColorToken)
   | ViewCloseModal
   | ViewOpenCreate
   | ViewCloseCreate
@@ -2684,6 +2787,7 @@ handleViewAction = case _ of
               ( (_viewMode .~ nextView)
                   <<< resetPromotions
                   <<< (_viewPresenceInspection .~ Nothing)
+                  <<< (_viewPresenceInspectionPinned .~ false)
                   <<< (_viewDayFocusContext .~ Nothing)
                   <<< (_viewDayFocusApplied .~ false)
                   <<< (_viewDayFocusUserScrolled .~ false)
@@ -2696,6 +2800,7 @@ handleViewAction = case _ of
           %~
             ( (_viewFocusDateState .~ raw)
                 <<< (_viewPresenceInspection .~ Nothing)
+                <<< (_viewPresenceInspectionPinned .~ false)
                 <<< (_viewDayFocusContext .~ Nothing)
                 <<< (_viewDayFocusApplied .~ false)
                 <<< (_viewDayFocusUserScrolled .~ false)
@@ -2716,6 +2821,7 @@ handleViewAction = case _ of
           %~
             ( (_viewOverlapSheet .~ Just overlapSheet)
                 <<< (_viewPresenceInspection .~ Nothing)
+                <<< (_viewPresenceInspectionPinned .~ false)
                 <<< (_viewActiveModal .~ Just ModalOverlapGroup)
             )
       )
@@ -2731,41 +2837,67 @@ handleViewAction = case _ of
   ViewInspectPresence trigger inspection -> do
     st <- get
     let isMobileNow = st ^. (_view <<< _viewIsMobile)
+    let isPinned = st ^. (_view <<< _viewPresenceInspectionPinned)
     modify_
       ( _view %~
-          case trigger, isMobileNow of
-            PresenceInspectTap, true ->
+          case trigger, isMobileNow, isPinned of
+            PresenceInspectTap, true, _ ->
               (_viewPresenceInspection .~ Just inspection)
+                <<< (_viewPresenceInspectionPinned .~ false)
                 <<< (_viewActiveModal .~ Just ModalPresenceInspection)
                 <<< (_viewOverlapSheet .~ Nothing)
-            PresenceInspectTap, false ->
+            PresenceInspectTap, false, _ ->
               (_viewPresenceInspection .~ Just inspection)
-            PresenceInspectHover, false ->
+                <<< (_viewPresenceInspectionPinned .~ true)
+                <<< (_viewActiveModal %~ closePresenceModal)
+            PresenceInspectHover, false, false ->
               (_viewPresenceInspection .~ Just inspection)
-            PresenceInspectFocus, false ->
+                <<< (_viewPresenceInspectionPinned .~ false)
+            PresenceInspectFocus, false, false ->
               (_viewPresenceInspection .~ Just inspection)
-            _, _ ->
+                <<< (_viewPresenceInspectionPinned .~ false)
+            _, _, _ ->
               identity
       )
   ViewClearPresenceInspection -> do
     st <- get
     let isMobileNow = st ^. (_view <<< _viewIsMobile)
     let activeModal = st ^. (_view <<< _viewActiveModal)
-    if isMobileNow && activeModal == Just ModalPresenceInspection then
+    let isPinned = st ^. (_view <<< _viewPresenceInspectionPinned)
+    if (isMobileNow && activeModal == Just ModalPresenceInspection) || isPinned then
       pure unit
     else
       modify_
         ( _view %~
             ( (_viewPresenceInspection .~ Nothing)
+                <<< (_viewPresenceInspectionPinned .~ false)
                 <<< (_viewActiveModal %~ closePresenceModal)
             )
         )
+  ViewDismissPresenceInspection ->
+    modify_
+      ( _view %~
+          ( (_viewPresenceInspection .~ Nothing)
+              <<< (_viewPresenceInspectionPinned .~ false)
+              <<< (_viewActiveModal %~ closePresenceModal)
+          )
+      )
+  ViewSetPresenceCueColor target nextColorToken -> do
+    st <- get
+    let cuePreferences = st ^. _calendarPresenceCuePreferences
+    let
+      nextPreferences =
+        setPresenceCuePreference target nextColorToken cuePreferences.preferences
+    let nextState = cuePreferences { preferences = nextPreferences }
+    modify_ (_calendarPresenceCuePreferences .~ nextState)
+    liftEffect $ persistPresenceCuePreferences nextState
   ViewCloseModal ->
     modify_
       ( _view %~
           ( (_viewActiveModal .~ Nothing)
               <<< (_viewOverlapSheet .~ Nothing)
               <<< (_viewPresenceInspection .~ Nothing)
+              <<< (_viewPresenceInspectionPinned .~ false)
           )
       )
   ViewOpenCreate ->
@@ -3954,6 +4086,145 @@ type SharedPresenceSegmentLayout =
   , state :: SharedPresenceState
   }
 
+allPresenceCueColorTokens :: Array PresenceCueColorToken
+allPresenceCueColorTokens =
+  [ CueBlue
+  , CueGreen
+  , CueAmber
+  , CueRose
+  , CueViolet
+  , CueSlate
+  ]
+
+presenceCueColorTokenValue :: PresenceCueColorToken -> String
+presenceCueColorTokenValue = case _ of
+  CueBlue -> "blue"
+  CueGreen -> "green"
+  CueAmber -> "amber"
+  CueRose -> "rose"
+  CueViolet -> "violet"
+  CueSlate -> "slate"
+
+parsePresenceCueColorToken :: String -> Maybe PresenceCueColorToken
+parsePresenceCueColorToken = case _ of
+  "blue" -> Just CueBlue
+  "green" -> Just CueGreen
+  "amber" -> Just CueAmber
+  "rose" -> Just CueRose
+  "violet" -> Just CueViolet
+  "slate" -> Just CueSlate
+  _ -> Nothing
+
+presenceCueColorTokenLabel :: PresenceCueColorToken -> String
+presenceCueColorTokenLabel = case _ of
+  CueBlue -> "Bleu"
+  CueGreen -> "Vert"
+  CueAmber -> "Ambre"
+  CueRose -> "Rose"
+  CueViolet -> "Violet"
+  CueSlate -> "Gris"
+
+presenceCueColorTokenClass :: PresenceCueColorToken -> String
+presenceCueColorTokenClass token =
+  "calendar-presence-rail__segment--color-" <> presenceCueColorTokenValue token
+
+presenceCueEditorTokenClass :: PresenceCueColorToken -> String
+presenceCueEditorTokenClass token =
+  "calendar-presence-cue-editor__option--color-" <> presenceCueColorTokenValue token
+
+encodePresenceCuePreferencesJson :: Array SharedPresenceCuePreference -> String
+encodePresenceCuePreferencesJson =
+  stringify <<< encodeJson
+
+decodePresenceCuePreferencesJson :: String -> Either String (Array SharedPresenceCuePreference)
+decodePresenceCuePreferencesJson raw =
+  if StringCommon.trim raw == "" then
+    Right []
+  else
+    case jsonParser raw of
+      Left err -> Left err
+      Right json ->
+        lmap show (decodeJson json :: Either JsonDecodeError (Array SharedPresenceCuePreference))
+
+presenceCuePreferencesStorageKey :: String -> String
+presenceCuePreferencesStorageKey ownerUsername =
+  "favs.calendar.presence-cues." <> ownerUsername
+
+lookupPresenceCuePreference :: Array SharedPresenceCuePreference -> SharedPresenceCueTarget -> Maybe PresenceCueColorToken
+lookupPresenceCuePreference preferences target =
+  map unwrapColorToken
+    ( find
+        ( \(SharedPresenceCuePreference preference) ->
+            preference.sharedUsername == target.sharedUsername && preference.placeId == target.placeId
+        )
+        preferences
+    )
+  where
+  unwrapColorToken (SharedPresenceCuePreference preference) = preference.colorToken
+
+setPresenceCuePreference :: SharedPresenceCueTarget -> Maybe PresenceCueColorToken -> Array SharedPresenceCuePreference -> Array SharedPresenceCuePreference
+setPresenceCuePreference target nextColorToken preferences =
+  let
+    retained =
+      filter
+        ( \(SharedPresenceCuePreference preference) ->
+            preference.sharedUsername /= target.sharedUsername || preference.placeId /= target.placeId
+        )
+        preferences
+  in
+    case nextColorToken of
+      Nothing -> retained
+      Just colorToken ->
+        retained <>
+          [ SharedPresenceCuePreference
+              { sharedUsername: target.sharedUsername
+              , placeId: target.placeId
+              , colorToken
+              }
+          ]
+
+persistPresenceCuePreferences :: PresenceCuePreferencesState -> Effect Unit
+persistPresenceCuePreferences { ownerUsername, preferences } =
+  case ownerUsername of
+    Nothing ->
+      pure unit
+    Just username ->
+      if null preferences then
+        LocalStorage.removeItem (presenceCuePreferencesStorageKey username)
+      else
+        LocalStorage.setItem
+          (presenceCuePreferencesStorageKey username)
+          (encodePresenceCuePreferencesJson preferences)
+
+resolveSharedPresenceToneClass :: PresenceCuePreferencesState -> SharedPresenceSegmentLayout -> String
+resolveSharedPresenceToneClass presenceCuePreferences layout =
+  case layout.state of
+    PresenceAtPlace placeId ->
+      fromMaybe
+        (sharedPresenceLaneToneClass layout.laneIndex)
+        ( presenceCueColorTokenClass
+            <$> lookupPresenceCuePreference
+              presenceCuePreferences.preferences
+              { sharedUsername: layout.username
+              , placeId
+              }
+        )
+    PresenceUnknown ->
+      sharedPresenceLaneToneClass layout.laneIndex
+    PresenceInTransit _ ->
+      sharedPresenceLaneToneClass layout.laneIndex
+
+presenceCueTargetFromInspection :: SharedPresenceInspection -> Maybe SharedPresenceCueTarget
+presenceCueTargetFromInspection inspection =
+  case inspection.state of
+    PresenceAtPlace placeId ->
+      Just
+        { sharedUsername: inspection.username
+        , placeId
+        }
+    _ ->
+      Nothing
+
 buildSharedPresenceSegmentLayouts :: SharedPresence -> Array SharedPresenceSegmentLayout
 buildSharedPresenceSegmentLayouts groups =
   let
@@ -4553,6 +4824,48 @@ type ShareListState =
   , deletingUsernames :: Array String
   }
 
+data PresenceCueColorToken
+  = CueBlue
+  | CueGreen
+  | CueAmber
+  | CueRose
+  | CueViolet
+  | CueSlate
+
+derive instance presenceCueColorTokenEq :: Eq PresenceCueColorToken
+derive instance presenceCueColorTokenGeneric :: Generic PresenceCueColorToken _
+
+instance showPresenceCueColorToken :: Show PresenceCueColorToken where
+  show = genericShow
+
+newtype SharedPresenceCuePreference = SharedPresenceCuePreference
+  { sharedUsername :: String
+  , placeId :: String
+  , colorToken :: PresenceCueColorToken
+  }
+
+derive instance sharedPresenceCuePreferenceEq :: Eq SharedPresenceCuePreference
+derive instance sharedPresenceCuePreferenceGeneric :: Generic SharedPresenceCuePreference _
+
+instance showSharedPresenceCuePreference :: Show SharedPresenceCuePreference where
+  show = genericShow
+
+type SharedPresenceCueTarget =
+  { sharedUsername :: String
+  , placeId :: String
+  }
+
+type PresenceCuePreferencesState =
+  { ownerUsername :: Maybe String
+  , preferences :: Array SharedPresenceCuePreference
+  }
+
+presenceCuePreferencesInitialState :: PresenceCuePreferencesState
+presenceCuePreferencesInitialState =
+  { ownerUsername: Nothing
+  , preferences: []
+  }
+
 type SharedPeriodTrip =
   { windowStart :: DateTime
   , windowEnd :: DateTime
@@ -4645,6 +4958,37 @@ derive instance agendaViewGeneric :: Generic CalendarView _
 derive instance agendaViewEq :: Eq CalendarView
 instance agendaViewShow :: Show CalendarView where
   show = genericShow
+
+instance presenceCueColorTokenEncodeJson :: EncodeJson PresenceCueColorToken where
+  encodeJson = encodeJson <<< presenceCueColorTokenValue
+
+instance presenceCueColorTokenDecodeJson :: DecodeJson PresenceCueColorToken where
+  decodeJson json = do
+    raw <- decodeJson json
+    case parsePresenceCueColorToken raw of
+      Just token -> pure token
+      Nothing -> Left $ UnexpectedValue json
+
+instance sharedPresenceCuePreferenceEncodeJson :: EncodeJson SharedPresenceCuePreference where
+  encodeJson (SharedPresenceCuePreference preference) =
+    "sharedUsername" := preference.sharedUsername
+      ~> "placeId" := preference.placeId
+      ~> "colorToken" := preference.colorToken
+      ~> jsonEmptyObject
+
+instance sharedPresenceCuePreferenceDecodeJson :: DecodeJson SharedPresenceCuePreference where
+  decodeJson json = do
+    obj <- decodeJson json
+    sharedUsername <- obj .: "sharedUsername"
+    placeId <- obj .: "placeId"
+    colorToken <- obj .: "colorToken"
+    pure
+      ( SharedPresenceCuePreference
+          { sharedUsername
+          , placeId
+          , colorToken
+          }
+      )
 
 instance itemTypeEncodeJson :: EncodeJson ItemType where
   encodeJson Task = encodeJson "BLOC_PLANIFIE"

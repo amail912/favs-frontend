@@ -4,6 +4,7 @@ const { calendarTab, appTitle } = require("../support/ui");
 
 const API_BASE = process.env.E2E_API_URL || "http://localhost:1234/api";
 const E2E_PASSWORD = process.env.E2E_PASSWORD || "StrongPass123!";
+const AUTH_USERNAME_STORAGE_KEY = "favs.auth.username";
 
 function toLocalDatetimeInput(date) {
   const pad = value => `${value}`.padStart(2, "0");
@@ -91,6 +92,14 @@ async function mockSharedPresenceRoute(page, focusDate, sharedUsername) {
       body: "[]"
     });
   });
+}
+
+async function seedCuePreferenceOwner(page, username) {
+  const cueStorageKey = `favs.calendar.presence-cues.${username}`;
+  await page.evaluate(({ authKey, cueKey, nextUsername }) => {
+    window.localStorage.setItem(authKey, nextUsername);
+    window.localStorage.removeItem(cueKey);
+  }, { authKey: AUTH_USERNAME_STORAGE_KEY, cueKey: cueStorageKey, nextUsername: username });
 }
 
 async function dragCalendarItemToMinute(page, title, targetMinuteOfDay) {
@@ -374,6 +383,35 @@ test("calendar day rail: hover and focus reveal presence inspection on desktop",
   await expect(inspection).toContainText("De 09:00 à 24:00");
 });
 
+test("calendar day rail: desktop cue personalization updates immediately and persists after reload", async ({ authenticatedPage: page, authIdentity }) => {
+  const focusDate = toLocalDateInput(isolatedFutureDate(2345));
+  const sharedUsername = "shared-color-user";
+
+  await mockSharedPresenceRoute(page, focusDate, sharedUsername);
+  await seedCuePreferenceOwner(page, authIdentity.username);
+  await page.reload();
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const placeSegment = page.locator(`.calendar-presence-rail__segment--place[data-username="${sharedUsername}"]`).first();
+  await placeSegment.click();
+
+  const inspection = page.locator(".calendar-presence-inspection");
+  await expect(inspection).toBeVisible();
+  await inspection.locator('[data-cue-color-token="green"]').click();
+
+  await expect(placeSegment).toHaveClass(/calendar-presence-rail__segment--color-green/);
+
+  await page.reload();
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  await expect(page.locator(`.calendar-presence-rail__segment--place[data-username="${sharedUsername}"]`).first()).toHaveClass(/calendar-presence-rail__segment--color-green/);
+});
+
 test("calendar day rail: tap reveals presence inspection on mobile", async ({ authenticatedPage: page }) => {
   const focusDate = toLocalDateInput(isolatedFutureDate(2350));
   const sharedUsername = "shared-mobile-user";
@@ -393,6 +431,29 @@ test("calendar day rail: tap reveals presence inspection on mobile", async ({ au
   await expect(sheet).toContainText(sharedUsername);
   await expect(sheet).toContainText("Trajet: Paris → St Clair");
   await expect(sheet).toContainText("De 08:00 à 09:00");
+});
+
+test("calendar day rail: mobile inspection sheet edits place cue colors", async ({ authenticatedPage: page, authIdentity }) => {
+  const focusDate = toLocalDateInput(isolatedFutureDate(2355));
+  const sharedUsername = "shared-mobile-color-user";
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockSharedPresenceRoute(page, focusDate, sharedUsername);
+  await seedCuePreferenceOwner(page, authIdentity.username);
+  await page.reload();
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const placeSegment = page.locator(`.calendar-presence-rail__segment--place[data-username="${sharedUsername}"]`).first();
+  await placeSegment.click();
+
+  const sheet = page.locator(".app-bottom-sheet__dialog");
+  await expect(sheet).toBeVisible();
+  await sheet.locator('[data-cue-color-token="violet"]').click();
+
+  await expect(placeSegment).toHaveClass(/calendar-presence-rail__segment--color-violet/);
 });
 
 test("calendar integration: create item on a later day", async ({ authenticatedPage: page }) => {

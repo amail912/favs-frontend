@@ -42,6 +42,7 @@ import Routing.Duplex.Generic (noArgs, sum)
 import Routing.Duplex.Generic.Syntax ((/))
 import Routing.PushState (PushStateInterface, makeInterface, matchesWith)
 import Type.Prelude (Proxy(..))
+import Ui.AuthSession as AuthSession
 import Ui.Utils (class_)
 import Web.Event.Event (Event, preventDefault)
 
@@ -151,7 +152,7 @@ probeAuth = do
   resp <- liftAff $ AffjaxWeb.get string "/api/note"
   pure $ either (const false) statusOk resp
 
-data AuthOutput = SignupSucceeded | SigninSucceeded
+data AuthOutput = SignupSucceeded String | SigninSucceeded String
 type AuthSlot slot = forall query. H.Slot query AuthOutput slot
 
 handleAction :: Action -> H.HalogenM State Action ChildSlots Void Aff Unit
@@ -165,17 +166,20 @@ handleAction (NavigateTo route) = do
   st <- get
   modify_ _ { currentRoute = Route route }
   navigateWith _.pushState st.nav route
-handleAction (HandleAuthOutput SignupSucceeded) = do
+handleAction (HandleAuthOutput (SignupSucceeded username)) = do
   st <- get
+  liftEffect $ AuthSession.storeAuthenticatedUsername username
   modify_ _ { currentRoute = Route Signin, isAuthenticated = false }
   navigateWith _.pushState st.nav Signin
-handleAction (HandleAuthOutput SigninSucceeded) = do
+handleAction (HandleAuthOutput (SigninSucceeded username)) = do
   st <- get
+  liftEffect $ AuthSession.storeAuthenticatedUsername username
   modify_ _ { currentRoute = Route Note, isAuthenticated = true }
   navigateWith _.pushState st.nav Note
 handleAction SignOut = do
   st <- get
   _ <- liftAff $ post string "/api/signout" Nothing
+  liftEffect AuthSession.clearAuthenticatedUsername
   modify_ _ { isAuthenticated = false, currentRoute = Route Signup }
   navigateWith _.pushState st.nav Signin
 handleAction InitializeRouting = do
@@ -289,7 +293,7 @@ type AuthSubmitConfig action output =
   { endpoint :: String
   , networkError :: String
   , responseError :: String
-  , onSuccess :: HalogenM AuthState action () output Aff Unit
+  , onSuccess :: String -> HalogenM AuthState action () output Aff Unit
   , resetPasswordOnSuccess :: Boolean
   }
 
@@ -298,7 +302,7 @@ signupSubmitConfig =
   { endpoint: "/api/signup"
   , networkError: "Signup failed. Please try again."
   , responseError: "Signup failed."
-  , onSuccess: raise SignupSucceeded
+  , onSuccess: raise <<< SignupSucceeded
   , resetPasswordOnSuccess: true
   }
 
@@ -307,7 +311,7 @@ signinSubmitConfig =
   { endpoint: "/api/signin"
   , networkError: "Signin failed. Please try again."
   , responseError: "Signin failed."
-  , onSuccess: raise SigninSucceeded
+  , onSuccess: raise <<< SigninSucceeded
   , resetPasswordOnSuccess: false
   }
 
@@ -395,7 +399,7 @@ handleAuthSubmit cfg e = do
               { submitting = false
               , password = if cfg.resetPasswordOnSuccess then "" else formData.password
               }
-            cfg.onSuccess
+            cfg.onSuccess formData.username
           else
             modify_ $ _ { feedbackMessage = Just (if String.length r.body > 0 then r.body else cfg.responseError), submitting = false }
       )

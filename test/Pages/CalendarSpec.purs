@@ -11,9 +11,10 @@ import Data.Argonaut.Decode.Error (JsonDecodeError)
 import Data.Argonaut.Encode (encodeJson, (:=), (~>))
 import Data.DateTime (DateTime)
 import Data.Either (Either(..))
+import Data.Maybe (Maybe(..))
 import Helpers.DateTime as DateTime
 import Helpers.DateTime (formatCalendarDayDateLabelWithReference)
-import Pages.Calendar (SharedPresenceLoadState(..), SharedPresenceState(..), buildSharedPresenceSegmentLayouts, decodeCalendarItemsResponse, decodePeriodTripsResponse, decodeSharedUsersResponse, decodeTripPlacesResponse, deriveSharedPresence, normalizePeriodTripGroups, presenceInspectionAriaLabel, presenceInspectionStateText, presenceInspectionTimeText, shareWriteErrorMessage, sharedPresenceLaneToneClass, sharedPresenceSegmentRailClass, shouldRenderDayCalendarShell, shouldRenderSharedPresenceRail, subscriptionWriteErrorMessage, tripWriteErrorMessage, validateShareUsername)
+import Pages.Calendar (PresenceCueColorToken(..), SharedPresenceCuePreference(..), SharedPresenceLoadState(..), SharedPresenceState(..), buildSharedPresenceSegmentLayouts, decodeCalendarItemsResponse, decodePeriodTripsResponse, decodePresenceCuePreferencesJson, decodeSharedUsersResponse, decodeTripPlacesResponse, deriveSharedPresence, encodePresenceCuePreferencesJson, normalizePeriodTripGroups, presenceInspectionAriaLabel, presenceInspectionStateText, presenceInspectionTimeText, resolveSharedPresenceToneClass, shareWriteErrorMessage, sharedPresenceLaneToneClass, sharedPresenceSegmentRailClass, shouldRenderDayCalendarShell, shouldRenderSharedPresenceRail, subscriptionWriteErrorMessage, tripWriteErrorMessage, validateShareUsername)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (fail, shouldEqual)
 import Test.Support.Builders (unsafeDateTime)
@@ -175,6 +176,84 @@ spec =
           , { username: "bob", segmentIndex: 0, laneIndex: 1, laneCount: 2, startMin: 0, duration: 60, railClass: "calendar-presence-rail__segment--transit", toneClass: "calendar-presence-rail__segment--tone-1" }
           , { username: "bob", segmentIndex: 1, laneIndex: 1, laneCount: 2, startMin: 60, duration: 1380, railClass: "calendar-presence-rail__segment--place", toneClass: "calendar-presence-rail__segment--tone-1" }
           ]
+
+    it "encodes and decodes cue preferences json" do
+      let
+        preferences =
+          [ SharedPresenceCuePreference
+              { sharedUsername: "alice"
+              , placeId: "Paris"
+              , colorToken: CueGreen
+              }
+          ]
+      decodePresenceCuePreferencesJson (encodePresenceCuePreferencesJson preferences)
+        `shouldEqual` Right preferences
+
+    it "resolves a personalized cue color for a matching user and place" do
+      let
+        cuePreferences =
+          { ownerUsername: Just "owner"
+          , preferences:
+              [ SharedPresenceCuePreference
+                  { sharedUsername: "alice"
+                  , placeId: "Paris"
+                  , colorToken: CueGreen
+                  }
+              ]
+          }
+        layout =
+          { username: "alice"
+          , segmentIndex: 2
+          , laneIndex: 0
+          , laneCount: 2
+          , startMin: 540
+          , duration: 180
+          , state: PresenceAtPlace "Paris"
+          }
+      resolveSharedPresenceToneClass cuePreferences layout
+        `shouldEqual` "calendar-presence-rail__segment--color-green"
+
+    it "falls back to the lane tone when no cue preference exists" do
+      let
+        cuePreferences =
+          { ownerUsername: Just "owner"
+          , preferences: []
+          }
+        layout =
+          { username: "alice"
+          , segmentIndex: 2
+          , laneIndex: 3
+          , laneCount: 4
+          , startMin: 540
+          , duration: 180
+          , state: PresenceAtPlace "Paris"
+          }
+      resolveSharedPresenceToneClass cuePreferences layout
+        `shouldEqual` "calendar-presence-rail__segment--tone-3"
+
+    it "keeps transit cues on the default tone even when a place preference exists" do
+      let
+        cuePreferences =
+          { ownerUsername: Just "owner"
+          , preferences:
+              [ SharedPresenceCuePreference
+                  { sharedUsername: "alice"
+                  , placeId: "Paris"
+                  , colorToken: CueRose
+                  }
+              ]
+          }
+        layout =
+          { username: "alice"
+          , segmentIndex: 1
+          , laneIndex: 2
+          , laneCount: 3
+          , startMin: 480
+          , duration: 60
+          , state: PresenceInTransit { departurePlaceId: "Paris", arrivalPlaceId: "St Clair" }
+          }
+      resolveSharedPresenceToneClass cuePreferences layout
+        `shouldEqual` "calendar-presence-rail__segment--tone-2"
 
     it "formats presence inspection text for unknown, place and transit states" do
       presenceInspectionStateText PresenceUnknown `shouldEqual` "Lieu inconnu"

@@ -654,7 +654,7 @@ a.nav-link:hover {
   left: calc(var(--calendar-presence-width) + 16px);
   z-index: 3;
   width: min(240px, calc(100% - var(--calendar-presence-width) - 24px));
-  pointer-events: none;
+  pointer-events: auto;
   transform: translateY(-50%);
 }
 
@@ -680,9 +680,25 @@ a.nav-link:hover {
   box-shadow: 0 12px 32px rgba(20, 31, 52, 0.16);
 }
 
+.calendar-presence-inspection__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
 .calendar-presence-inspection__title {
   font-weight: 700;
   color: #17315e;
+}
+
+.calendar-presence-inspection__close {
+  border: 0;
+  background: transparent;
+  color: #4b6287;
+  font-size: 0.83rem;
+  font-weight: 600;
+  padding: 0;
 }
 
 .calendar-presence-inspection__state {
@@ -694,6 +710,87 @@ a.nav-link:hover {
   margin-top: 0.2rem;
   font-size: 0.88rem;
   color: #617089;
+}
+
+.calendar-presence-cue-editor {
+  margin-top: 0.65rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid rgba(28, 46, 81, 0.1);
+}
+
+.calendar-presence-cue-editor__label {
+  margin-bottom: 0.45rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #30476e;
+}
+
+.calendar-presence-cue-editor__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.calendar-presence-cue-editor__option {
+  border: 1px solid rgba(28, 46, 81, 0.12);
+  border-radius: 999px;
+  padding: 0.28rem 0.6rem;
+  background: #f8fbff;
+  color: #23406d;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.calendar-presence-cue-editor__option--active {
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.86),
+    0 0 0 2px rgba(19, 54, 118, 0.16);
+  border-color: rgba(19, 54, 118, 0.3);
+}
+
+.calendar-presence-cue-editor__option--default {
+  background: #f3f6fb;
+}
+
+.calendar-presence-cue-editor__option--color-blue,
+.calendar-presence-rail__segment--color-blue {
+  background-color: rgba(39, 110, 241, 0.72);
+}
+
+.calendar-presence-cue-editor__option--color-green,
+.calendar-presence-rail__segment--color-green {
+  background-color: rgba(23, 158, 121, 0.7);
+}
+
+.calendar-presence-cue-editor__option--color-amber,
+.calendar-presence-rail__segment--color-amber {
+  background-color: rgba(210, 124, 38, 0.72);
+}
+
+.calendar-presence-cue-editor__option--color-rose,
+.calendar-presence-rail__segment--color-rose {
+  background-color: rgba(198, 86, 113, 0.7);
+}
+
+.calendar-presence-cue-editor__option--color-violet,
+.calendar-presence-rail__segment--color-violet {
+  background-color: rgba(104, 91, 214, 0.72);
+}
+
+.calendar-presence-cue-editor__option--color-slate,
+.calendar-presence-rail__segment--color-slate {
+  background-color: rgba(92, 108, 130, 0.74);
+}
+
+.calendar-presence-cue-editor__option--color-blue,
+.calendar-presence-cue-editor__option--color-green,
+.calendar-presence-cue-editor__option--color-amber,
+.calendar-presence-cue-editor__option--color-rose,
+.calendar-presence-cue-editor__option--color-violet,
+.calendar-presence-cue-editor__option--color-slate {
+  color: #ffffff;
+  border-color: transparent;
 }
 
 .calendar-calendar-stack {
