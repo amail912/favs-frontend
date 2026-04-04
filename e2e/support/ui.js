@@ -10,6 +10,10 @@ function calendarTab(page) {
   return page.locator("a.nav-link", { hasText: "Calendar" });
 }
 
+function adminTab(page) {
+  return page.locator("a.nav-link", { hasText: "Admin" });
+}
+
 function signupMenuButton(page) {
   return page.getByRole("button", { name: "Signup" });
 }
@@ -51,6 +55,7 @@ function appTitle(page) {
 }
 
 module.exports = {
+  adminTab,
   calendarTab,
   appTitle,
   checklistsTab,

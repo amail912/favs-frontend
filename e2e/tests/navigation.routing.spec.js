@@ -1,14 +1,36 @@
 const base = require("@playwright/test");
 const { test: authTest, expect: authExpect } = require("../fixtures/authenticated");
 const {
+  adminTab,
   checklistsTab,
   notesTab,
   signupMenuButton,
   signupUsernameInput,
   signoutMenuButton
 } = require("../support/ui");
+const { ensureAdminUser, signinAdmin } = require("../support/auth-session");
 
 const { test, expect } = base;
+
+async function signInAsAdmin(context, page, baseURL) {
+  await ensureAdminUser();
+  const session = await signinAdmin();
+  const hostname = new URL(baseURL).hostname;
+
+  await context.addCookies([
+    {
+      name: session.cookie.name,
+      value: session.cookie.value,
+      domain: hostname,
+      path: "/",
+      httpOnly: true,
+      secure: false,
+      sameSite: "Lax"
+    }
+  ]);
+
+  await page.goto("/");
+}
 
 test("root route redirects to /notes", async ({ page }) => {
   await page.goto("/");
@@ -46,4 +68,33 @@ authTest("authenticated user can sign out from auth menu", async ({ authenticate
   await signoutMenuButton(page).click();
   await authExpect(page).toHaveURL(/\/signin$/);
   await authExpect(signupMenuButton(page)).toBeVisible();
+});
+
+authTest("approved non-admin user cannot discover or open the admin route", async ({ authenticatedPage: page }) => {
+  await page.goto("/notes");
+  await authExpect(adminTab(page)).toHaveCount(0);
+
+  await page.goto("/admin");
+  await authExpect(page.getByText("404")).toBeVisible();
+  await authExpect(page.getByText("Page introuvable")).toBeVisible();
+});
+
+test("admin user sees admin navigation and can open admin page", async ({ context, page, baseURL }) => {
+  await signInAsAdmin(context, page, baseURL);
+
+  await expect(adminTab(page)).toBeVisible();
+  await adminTab(page).click();
+  await expect(page).toHaveURL(/\/admin$/);
+  await expect(page.getByRole("heading", { name: "Administration utilisateurs" })).toBeVisible();
+});
+
+test("admin user keeps access to /admin after reload", async ({ context, page, baseURL }) => {
+  await signInAsAdmin(context, page, baseURL);
+
+  await page.goto("/admin");
+  await expect(page.getByRole("heading", { name: "Administration utilisateurs" })).toBeVisible();
+
+  await page.reload();
+  await expect(page).toHaveURL(/\/admin$/);
+  await expect(page.getByRole("heading", { name: "Administration utilisateurs" })).toBeVisible();
 });

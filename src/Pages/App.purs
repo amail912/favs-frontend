@@ -1,11 +1,20 @@
-module Pages.App (component) where
+module Pages.App
+  ( component
+  , AuthStatus(..)
+  , DefinedRoute(..)
+  , Route(..)
+  , parseRouteString
+  , resolveGuardedRoute
+  , visibleTabs
+  ) where
 
 import Prelude hiding (div, (/))
 
 import Affjax.Web (Response, post)
-import Affjax.Web as AffjaxWeb
 import Affjax.RequestBody (RequestBody(..))
 import Affjax.ResponseFormat (string)
+import Api.Auth (AuthenticatedProfile(..), getAuthProfileResponse, isAdminProfile)
+import Pages.Admin (component) as Admin
 import Pages.Calendar (component) as Calendar
 import Pages.Checklists (component) as Checklists
 import Control.Monad.RWS (get, modify_)
@@ -13,7 +22,10 @@ import Data.Array (head)
 import DOM.HTML.Indexed.ButtonType (ButtonType(..))
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Data.Argonaut.Core (Json, jsonEmptyObject)
+import Data.Argonaut.Decode (decodeJson)
+import Data.Argonaut.Decode.Parser (parseJson)
 import Data.Argonaut.Encode (class EncodeJson, encodeJson, (:=), (~>))
+import Data.Bifunctor (lmap)
 import Data.Char (toCharCode)
 import Data.Either (Either(..), either)
 import Data.Foldable (all, foldMap)
@@ -51,11 +63,12 @@ type ChildSlots =
   ( notes :: OpaqueSlot Unit
   , checklists :: OpaqueSlot Unit
   , calendar :: OpaqueSlot Unit
+  , admin :: OpaqueSlot Unit
   , signup :: AuthSlot Unit
   , signin :: AuthSlot Unit
   )
 
-data DefinedRoute = Note | Checklist | Calendar | Signup | Signin
+data DefinedRoute = Note | Checklist | Calendar | Admin | Signup | Signin
 
 derive instance definedRouteGeneric :: Generic DefinedRoute _
 derive instance definedRouteEq :: Eq DefinedRoute
@@ -76,6 +89,7 @@ routeCodec = root $ sum
   { "Note": "notes" / noArgs
   , "Checklist": "checklists" / noArgs
   , "Calendar": "calendar" / noArgs
+  , "Admin": "admin" / noArgs
   , "Signup": "signup" / noArgs
   , "Signin": "signin" / noArgs
   }
@@ -113,8 +127,13 @@ data Action
 type State =
   { currentRoute :: Route
   , nav :: Maybe PushStateInterface
-  , isAuthenticated :: Boolean
+  , authStatus :: AuthStatus
   }
+
+data AuthStatus
+  = AuthUnknown
+  | Unauthenticated
+  | Authenticated AuthenticatedProfile
 
 component :: forall q i. H.Component q i Void Aff
 component =
@@ -131,7 +150,7 @@ initialState :: forall i. i -> State
 initialState = const
   { currentRoute: Route Note
   , nav: Nothing
-  , isAuthenticated: false
+  , authStatus: AuthUnknown
   }
 
 historyState :: Foreign
@@ -147,12 +166,39 @@ navigateWith navFn maybeNav route = maybe (pure unit) (\nav -> liftEffect $ navF
 statusOk :: forall a. Response a -> Boolean
 statusOk r = unwrap r.status >= 200 && unwrap r.status < 300
 
-probeAuth :: forall state action slots. H.HalogenM state action slots Void Aff Boolean
-probeAuth = do
-  resp <- liftAff $ AffjaxWeb.get string "/api/note"
-  pure $ either (const false) statusOk resp
+resolveGuardedRoute :: AuthStatus -> Route -> Maybe Route
+resolveGuardedRoute authStatus route = case route of
+  Route Admin ->
+    case authStatus of
+      AuthUnknown -> Nothing
+      Authenticated profile | isAdminProfile profile -> Just route
+      _ -> Just NotFound
+  _ -> Just route
 
-data AuthOutput = SignupSucceeded String | SigninSucceeded String
+visibleTabs :: AuthStatus -> Array DefinedRoute
+visibleTabs authStatus =
+  [ Note, Checklist, Calendar ] <> guard (canViewAdminNav authStatus) [ Admin ]
+  where
+  canViewAdminNav (Authenticated profile) = isAdminProfile profile
+  canViewAdminNav _ = false
+
+loadProfileAuthStatus :: forall state action slots. H.HalogenM state action slots Void Aff AuthStatus
+loadProfileAuthStatus = do
+  resp <- liftAff getAuthProfileResponse
+  pure $
+    case resp of
+      Left _ -> Unauthenticated
+      Right response ->
+        if unwrap response.status == 401 then
+          Unauthenticated
+        else if statusOk response then
+          case lmap show (decodeJson response.body) of
+            Right profile -> Authenticated profile
+            Left _ -> Unauthenticated
+        else
+          Unauthenticated
+
+data AuthOutput = SignupSucceeded String | SigninSucceeded AuthenticatedProfile
 type AuthSlot slot = forall query. H.Slot query AuthOutput slot
 
 handleAction :: Action -> H.HalogenM State Action ChildSlots Void Aff Unit
@@ -169,18 +215,18 @@ handleAction (NavigateTo route) = do
 handleAction (HandleAuthOutput (SignupSucceeded username)) = do
   st <- get
   liftEffect $ AuthSession.storeAuthenticatedUsername username
-  modify_ _ { currentRoute = Route Signin, isAuthenticated = false }
+  modify_ _ { currentRoute = Route Signin, authStatus = Unauthenticated }
   navigateWith _.pushState st.nav Signin
-handleAction (HandleAuthOutput (SigninSucceeded username)) = do
+handleAction (HandleAuthOutput (SigninSucceeded profile@(AuthenticatedProfile { username }))) = do
   st <- get
   liftEffect $ AuthSession.storeAuthenticatedUsername username
-  modify_ _ { currentRoute = Route Note, isAuthenticated = true }
+  modify_ _ { currentRoute = Route Note, authStatus = Authenticated profile }
   navigateWith _.pushState st.nav Note
 handleAction SignOut = do
   st <- get
   _ <- liftAff $ post string "/api/signout" Nothing
   liftEffect AuthSession.clearAuthenticatedUsername
-  modify_ _ { isAuthenticated = false, currentRoute = Route Signup }
+  modify_ _ { authStatus = Unauthenticated, currentRoute = Route Signin }
   navigateWith _.pushState st.nav Signin
 handleAction InitializeRouting = do
   nav <- liftEffect makeInterface
@@ -188,24 +234,47 @@ handleAction InitializeRouting = do
   subscribeToRouting nav
   handleAction RefreshAuthStatus
 handleAction RefreshAuthStatus = do
-  authed <- probeAuth
-  modify_ _ { isAuthenticated = authed }
+  authStatus <- loadProfileAuthStatus
+  case authStatus of
+    Authenticated (AuthenticatedProfile { username }) ->
+      liftEffect $ AuthSession.storeAuthenticatedUsername username
+    _ ->
+      liftEffect AuthSession.clearAuthenticatedUsername
+  modify_ _ { authStatus = authStatus }
 
 render :: State -> H.ComponentHTML Action ChildSlots Aff
-render { currentRoute: Route route, isAuthenticated } =
-  div [ class_ "container" ]
-    ( [ h1 [ class_ "text-center" ] [ text "FAVS" ]
-      , authMenu isAuthenticated
-      ]
-        <> (if route /= Signup && route /= Signin then [ nav [ class_ "row nav nav-tabs" ] [ tab Note route, tab Checklist route, tab Calendar route ] ] else [])
-        <>
-          [ currentComponent route
+render { currentRoute, authStatus } =
+  case resolveGuardedRoute authStatus currentRoute of
+    Nothing -> renderLoading authStatus
+    Just (Route route) ->
+      div [ class_ "container" ]
+        ( [ h1 [ class_ "text-center" ] [ text "FAVS" ]
+          , authMenu authStatus
           ]
-    )
-render { currentRoute: Root } = text ""
-render { currentRoute: NotFound, isAuthenticated } =
+            <> (if route /= Signup && route /= Signin then [ nav [ class_ "row nav nav-tabs" ] (map (\tabRoute -> tab tabRoute route) (visibleTabs authStatus)) ] else [])
+            <> [ currentComponent route ]
+        )
+    Just Root -> text ""
+    Just NotFound -> renderNotFound authStatus
+
+renderLoading :: AuthStatus -> H.ComponentHTML Action ChildSlots Aff
+renderLoading authStatus =
   div [ class_ "container py-5" ]
-    [ authMenu isAuthenticated
+    [ authMenu authStatus
+    , div [ class_ "row justify-content-center" ]
+        [ div [ class_ "col-12 col-md-10 col-lg-7" ]
+            [ div [ class_ "card shadow-sm border-0" ]
+                [ div [ class_ "card-body p-5 text-center text-muted" ]
+                    [ text "Chargement..." ]
+                ]
+            ]
+        ]
+    ]
+
+renderNotFound :: AuthStatus -> H.ComponentHTML Action ChildSlots Aff
+renderNotFound authStatus =
+  div [ class_ "container py-5" ]
+    [ authMenu authStatus
     , div [ class_ "row justify-content-center" ]
         [ div [ class_ "col-12 col-md-10 col-lg-7" ]
             [ div [ class_ "card shadow-sm border-0" ]
@@ -223,19 +292,23 @@ render { currentRoute: NotFound, isAuthenticated } =
         ]
     ]
 
-authMenu :: forall w. Boolean -> HTML w Action
-authMenu isAuthenticated =
+authMenu :: forall w. AuthStatus -> HTML w Action
+authMenu authStatus =
   div [ class_ "auth-menu d-flex justify-content-end mb-2" ]
-    if isAuthenticated then [ button [ class_ "btn btn-outline-secondary btn-sm", onClick (const SignOut) ] [ text "Se deconnecter" ] ]
-    else
-      [ button [ class_ "btn btn-outline-secondary btn-sm", onClick (const $ NavigateTo Signin) ] [ text "Signin" ]
-      , button [ class_ "btn btn-outline-secondary btn-sm", onClick (const $ NavigateTo Signup) ] [ text "Signup" ]
-      ]
+    case authStatus of
+      Authenticated _ ->
+        [ button [ class_ "btn btn-outline-secondary btn-sm", onClick (const SignOut) ] [ text "Se deconnecter" ] ]
+      Unauthenticated ->
+        [ button [ class_ "btn btn-outline-secondary btn-sm", onClick (const $ NavigateTo Signin) ] [ text "Signin" ]
+        , button [ class_ "btn btn-outline-secondary btn-sm", onClick (const $ NavigateTo Signup) ] [ text "Signup" ]
+        ]
+      AuthUnknown -> []
 
 currentComponent :: DefinedRoute -> H.ComponentHTML Action ChildSlots Aff
 currentComponent Note = slot_ (Proxy :: _ "notes") unit Notes.component unit
 currentComponent Checklist = slot_ (Proxy :: _ "checklists") unit Checklists.component unit
 currentComponent Calendar = slot_ (Proxy :: _ "calendar") unit Calendar.component unit
+currentComponent Admin = slot_ (Proxy :: _ "admin") unit Admin.component unit
 currentComponent Signup = slot (Proxy :: _ "signup") unit signupComponent unit HandleAuthOutput
 currentComponent Signin = slot (Proxy :: _ "signin") unit signinComponent unit HandleAuthOutput
 
@@ -253,6 +326,7 @@ tabLabel :: DefinedRoute -> String
 tabLabel Note = "Notes"
 tabLabel Checklist = "Checklists"
 tabLabel Calendar = "Calendar"
+tabLabel Admin = "Admin"
 tabLabel Signup = "Signup"
 tabLabel Signin = "Signin"
 
@@ -293,16 +367,22 @@ type AuthSubmitConfig action output =
   { endpoint :: String
   , networkError :: String
   , responseError :: String
-  , onSuccess :: String -> HalogenM AuthState action () output Aff Unit
+  , onSuccess :: AuthSuccess -> HalogenM AuthState action () output Aff Unit
   , resetPasswordOnSuccess :: Boolean
   }
+
+data AuthSuccess
+  = SignupSuccess String
+  | SigninSuccess AuthenticatedProfile
 
 signupSubmitConfig :: AuthSubmitConfig AuthAction AuthOutput
 signupSubmitConfig =
   { endpoint: "/api/signup"
   , networkError: "Signup failed. Please try again."
   , responseError: "Signup failed."
-  , onSuccess: raise <<< SignupSucceeded
+  , onSuccess: case _ of
+      SignupSuccess username -> raise (SignupSucceeded username)
+      _ -> pure unit
   , resetPasswordOnSuccess: true
   }
 
@@ -311,7 +391,9 @@ signinSubmitConfig =
   { endpoint: "/api/signin"
   , networkError: "Signin failed. Please try again."
   , responseError: "Signin failed."
-  , onSuccess: raise <<< SigninSucceeded
+  , onSuccess: case _ of
+      SigninSuccess profile -> raise (SigninSucceeded profile)
+      _ -> pure unit
   , resetPasswordOnSuccess: false
   }
 
@@ -390,20 +472,40 @@ handleAuthSubmit cfg e = do
   if hasErrors then pure unit
   else do
     modify_ $ _ { submitting = true }
-    resp <- liftAff $ post string cfg.endpoint (jsonRequestBody $ AuthRequestData { username: formData.username, password: formData.password })
-    either
-      (\_ -> modify_ $ _ { feedbackMessage = Just cfg.networkError, submitting = false })
-      ( \r ->
-          if statusOk r then do
-            modify_ $ _
-              { submitting = false
-              , password = if cfg.resetPasswordOnSuccess then "" else formData.password
-              }
-            cfg.onSuccess formData.username
-          else
-            modify_ $ _ { feedbackMessage = Just (if String.length r.body > 0 then r.body else cfg.responseError), submitting = false }
-      )
-      resp
+    if cfg.endpoint == "/api/signin" then do
+      resp <- liftAff $ post string cfg.endpoint (jsonRequestBody $ AuthRequestData { username: formData.username, password: formData.password })
+      either
+        (\_ -> modify_ $ _ { feedbackMessage = Just cfg.networkError, submitting = false })
+        ( \r ->
+            if statusOk r then
+              case (parseJson r.body >>= decodeJson) of
+                Right profile -> do
+                  modify_ $ _
+                    { submitting = false
+                    , password = if cfg.resetPasswordOnSuccess then "" else formData.password
+                    }
+                  cfg.onSuccess (SigninSuccess profile)
+                Left _ ->
+                  modify_ $ _ { feedbackMessage = Just cfg.responseError, submitting = false }
+            else
+              modify_ $ _ { feedbackMessage = Just (if String.length r.body > 0 then r.body else cfg.responseError), submitting = false }
+        )
+        resp
+    else do
+      resp <- liftAff $ post string cfg.endpoint (jsonRequestBody $ AuthRequestData { username: formData.username, password: formData.password })
+      either
+        (\_ -> modify_ $ _ { feedbackMessage = Just cfg.networkError, submitting = false })
+        ( \r ->
+            if statusOk r then do
+              modify_ $ _
+                { submitting = false
+                , password = if cfg.resetPasswordOnSuccess then "" else formData.password
+                }
+              cfg.onSuccess (SignupSuccess formData.username)
+            else
+              modify_ $ _ { feedbackMessage = Just (if String.length r.body > 0 then r.body else cfg.responseError), submitting = false }
+        )
+        resp
 
 handleUsernameChanged :: forall action output. String -> HalogenM AuthState action () output Aff Unit
 handleUsernameChanged newUsername =
