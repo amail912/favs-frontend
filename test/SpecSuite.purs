@@ -5,6 +5,7 @@ import Prelude
 import Effect.Aff (Aff)
 import Test.Calendar.DragSpec as DragSpec
 import Test.Domain.Calendar.Spec as CalendarSpec
+import Test.Helpers.DateTimeSpec as DateTimeSpec
 import Test.Pages.AdminSpec as AdminSpec
 import Test.Pages.AppSpec as AppSpec
 import Test.Pages.CalendarSpec as CalendarPageSpec
@@ -20,6 +21,7 @@ runSpecSuite = runSpec [ consoleReporter ] do
   DragSpec.spec
   AdminSpec.spec
   AppSpec.spec
+  DateTimeSpec.spec
   NotesSpec.spec
   ChecklistsSpec.spec
   CalendarPageSpec.spec

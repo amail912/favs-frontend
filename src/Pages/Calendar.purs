@@ -4112,6 +4112,9 @@ formatDateOnly = DateTime.formatLocalDate
 formatDateTimeLocal :: DateTime -> String
 formatDateTimeLocal = DateTime.formatLocalDateTime
 
+formatDateTimeDisplay :: DateTime -> String
+formatDateTimeDisplay = DateTime.formatDisplayDateTime
+
 computeDayFocusTarget :: String -> DateTime -> Array CalendarItem -> DayFocusTarget
 computeDayFocusTarget selectedDate now itemsForDate
   | selectedDate == formatDate now = FocusCurrentTime
@@ -4992,7 +4995,7 @@ calendarItemSecondaryText :: CalendarItem -> String
 calendarItemSecondaryText item =
   case calendarItemContent item of
     TaskCalendarItemContent content ->
-      formatDateTimeLocal content.windowStart <> " → " <> formatDateTimeLocal content.windowEnd
+      formatDateTimeDisplay content.windowStart <> " → " <> formatDateTimeDisplay content.windowEnd
     TripCalendarItemContent content ->
       "Départ " <> timeLabel content.windowStart <> " · Arrivée " <> timeLabel content.windowEnd
 

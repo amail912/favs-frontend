@@ -105,6 +105,12 @@ spec = do
       calendarItemTimelineCardClass trip `shouldEqual` "calendar-calendar-card calendar-calendar-item--trip"
       calendarItemSupportsEdit trip `shouldEqual` true
 
+    it "renders task secondary text with the shared French display format" do
+      let
+        task = serverCalendarItem "task-render" (calendarContent Task "Deep work" "2026-02-19T08:30" "2026-02-19T09:45")
+      calendarItemPrimaryText task `shouldEqual` "Deep work"
+      calendarItemSecondaryText task `shouldEqual` "19/02/2026 08:30 → 19/02/2026 09:45"
+
   describe "Calendar validation" do
     it "fails validation when title is blank" do
       let

@@ -1,12 +1,18 @@
 module Helpers.DateTime
   ( parseLocalDateTime
   , formatLocalDateTime
+  , formatDisplayDateTime
+  , formatDisplayDateTimeRaw
   , parseLocalDate
   , formatLocalDate
+  , formatDisplayDate
+  , formatDisplayDateRaw
   , formatCalendarDayDateLabel
   , formatCalendarDayDateLabelWithReference
   , parseLocalTime
   , formatLocalTime
+  , formatDisplayTime
+  , formatDisplayTimeRaw
   , timeFromParts
   , formatLocalTimeParts
   , isLocalDateTime
@@ -43,6 +49,15 @@ formatLocalDateTime dt =
   formatDateTime localDateTimePattern dt
     # either (const "") identity
 
+formatDisplayDateTime :: DateTime -> String
+formatDisplayDateTime = formatDisplayDateTimeRaw <<< formatLocalDateTime
+
+formatDisplayDateTimeRaw :: String -> String
+formatDisplayDateTimeRaw raw =
+  case parseLocalDateTime raw of
+    Just _ -> formatFrenchDateTimeImpl raw
+    Nothing -> raw
+
 parseLocalDate :: String -> Maybe Date
 parseLocalDate raw =
   unformatDateTime localDatePattern raw
@@ -54,6 +69,15 @@ formatLocalDate date' =
     midnight <- timeFromParts 0 0
     pure $ formatDateTime localDatePattern (DateTime date' midnight)
       # either (const "") identity
+
+formatDisplayDate :: Date -> String
+formatDisplayDate = formatDisplayDateRaw <<< formatLocalDate
+
+formatDisplayDateRaw :: String -> String
+formatDisplayDateRaw raw =
+  case parseLocalDate raw of
+    Just _ -> formatFrenchDateImpl raw
+    Nothing -> raw
 
 formatCalendarDayDateLabel :: String -> String
 formatCalendarDayDateLabel raw =
@@ -79,6 +103,15 @@ formatLocalTime time' =
     Just date' ->
       formatDateTime localTimePattern (DateTime date' time')
         # either (const "") identity
+
+formatDisplayTime :: Time -> String
+formatDisplayTime = formatDisplayTimeRaw <<< formatLocalTime
+
+formatDisplayTimeRaw :: String -> String
+formatDisplayTimeRaw raw =
+  case parseLocalTime raw of
+    Just _ -> formatFrenchTimeImpl raw
+    Nothing -> raw
 
 timeFromParts :: Int -> Int -> Maybe Time
 timeFromParts hour minute = do
@@ -106,3 +139,6 @@ isLocalTime raw = isJust (parseLocalTime raw)
 foreign import currentLocalDate :: String
 
 foreign import formatFrenchDayLabelImpl :: Boolean -> String -> String
+foreign import formatFrenchDateTimeImpl :: String -> String
+foreign import formatFrenchDateImpl :: String -> String
+foreign import formatFrenchTimeImpl :: String -> String
