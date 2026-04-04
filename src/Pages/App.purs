@@ -252,7 +252,7 @@ render { currentRoute, authStatus } =
           , authMenu authStatus
           ]
             <> (if route /= Signup && route /= Signin then [ nav [ class_ "row nav nav-tabs" ] (map (\tabRoute -> tab tabRoute route) (visibleTabs authStatus)) ] else [])
-            <> [ currentComponent route ]
+            <> [ currentComponent authStatus route ]
         )
     Just Root -> text ""
     Just NotFound -> renderNotFound authStatus
@@ -304,13 +304,15 @@ authMenu authStatus =
         ]
       AuthUnknown -> []
 
-currentComponent :: DefinedRoute -> H.ComponentHTML Action ChildSlots Aff
-currentComponent Note = slot_ (Proxy :: _ "notes") unit Notes.component unit
-currentComponent Checklist = slot_ (Proxy :: _ "checklists") unit Checklists.component unit
-currentComponent Calendar = slot_ (Proxy :: _ "calendar") unit Calendar.component unit
-currentComponent Admin = slot_ (Proxy :: _ "admin") unit Admin.component unit
-currentComponent Signup = slot (Proxy :: _ "signup") unit signupComponent unit HandleAuthOutput
-currentComponent Signin = slot (Proxy :: _ "signin") unit signinComponent unit HandleAuthOutput
+currentComponent :: AuthStatus -> DefinedRoute -> H.ComponentHTML Action ChildSlots Aff
+currentComponent _ Note = slot_ (Proxy :: _ "notes") unit Notes.component unit
+currentComponent _ Checklist = slot_ (Proxy :: _ "checklists") unit Checklists.component unit
+currentComponent _ Calendar = slot_ (Proxy :: _ "calendar") unit Calendar.component unit
+currentComponent (Authenticated (AuthenticatedProfile { username })) Admin =
+  slot_ (Proxy :: _ "admin") unit Admin.component { currentUsername: username }
+currentComponent _ Admin = text ""
+currentComponent _ Signup = slot (Proxy :: _ "signup") unit signupComponent unit HandleAuthOutput
+currentComponent _ Signin = slot (Proxy :: _ "signin") unit signinComponent unit HandleAuthOutput
 
 tab :: forall w. DefinedRoute -> DefinedRoute -> HTML w Action
 tab tabRoute activeRoute =

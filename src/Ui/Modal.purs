@@ -1,6 +1,7 @@
 module Ui.Modal
   ( renderModal
   , renderModalWithValidateState
+  , renderModalWithActionState
   , renderBottomSheet
   ) where
 
@@ -24,7 +25,7 @@ renderModal
   -> i
   -> HTML w i
 renderModal title content onCancel onValidate =
-  renderSurface "app-modal__dialog" false title content onCancel (Just { action: onValidate, disabled: false })
+  renderSurface "app-modal__dialog" false title content onCancel (Just { action: onValidate, disabled: false, label: "Valider" })
 
 renderModalWithValidateState
   :: forall w i
@@ -34,6 +35,16 @@ renderModalWithValidateState
   -> { action :: i, disabled :: Boolean }
   -> HTML w i
 renderModalWithValidateState title content onCancel onValidate =
+  renderSurface "app-modal__dialog" false title content onCancel (Just { action: onValidate.action, disabled: onValidate.disabled, label: "Valider" })
+
+renderModalWithActionState
+  :: forall w i
+   . String
+  -> Array (HTML w i)
+  -> i
+  -> { action :: i, disabled :: Boolean, label :: String }
+  -> HTML w i
+renderModalWithActionState title content onCancel onValidate =
   renderSurface "app-modal__dialog" false title content onCancel (Just onValidate)
 
 renderBottomSheet
@@ -52,7 +63,7 @@ renderSurface
   -> String
   -> Array (HTML w i)
   -> i
-  -> Maybe { action :: i, disabled :: Boolean }
+  -> Maybe { action :: i, disabled :: Boolean, label :: String }
   -> HTML w i
 renderSurface dialogClass isBottomSheet title content onCancel onValidate =
   let
@@ -101,7 +112,7 @@ renderSurface dialogClass isBottomSheet title content onCancel onValidate =
                       , onClick (const onValidate'.action)
                       , disabled onValidate'.disabled
                       ]
-                      [ text "Valider" ]
+                      [ text onValidate'.label ]
                   ]
           ]
       ]
