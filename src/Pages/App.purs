@@ -3,6 +3,7 @@ module Pages.App
   , AuthStatus(..)
   , DefinedRoute(..)
   , Route(..)
+  , connectedIdentityLabel
   , parseRouteString
   , resolveGuardedRoute
   , visibleTabs
@@ -292,12 +293,19 @@ renderNotFound authStatus =
         ]
     ]
 
+connectedIdentityLabel :: AuthStatus -> Maybe String
+connectedIdentityLabel = case _ of
+  Authenticated (AuthenticatedProfile { username }) -> Just ("Connecté: " <> username)
+  _ -> Nothing
+
 authMenu :: forall w. AuthStatus -> HTML w Action
 authMenu authStatus =
-  div [ class_ "auth-menu d-flex justify-content-end mb-2" ]
+  div [ class_ "auth-menu d-flex justify-content-end align-items-center gap-2 flex-wrap mb-2" ]
     case authStatus of
       Authenticated _ ->
-        [ button [ class_ "btn btn-outline-secondary btn-sm", onClick (const SignOut) ] [ text "Se deconnecter" ] ]
+        [ div [ class_ "text-muted small auth-menu__identity" ] [ text (fromMaybe "" (connectedIdentityLabel authStatus)) ]
+        , button [ class_ "btn btn-outline-secondary btn-sm", onClick (const SignOut) ] [ text "Se deconnecter" ]
+        ]
       Unauthenticated ->
         [ button [ class_ "btn btn-outline-secondary btn-sm", onClick (const $ NavigateTo Signin) ] [ text "Signin" ]
         , button [ class_ "btn btn-outline-secondary btn-sm", onClick (const $ NavigateTo Signup) ] [ text "Signup" ]

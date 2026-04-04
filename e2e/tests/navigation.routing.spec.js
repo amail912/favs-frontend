@@ -3,6 +3,7 @@ const { test: authTest, expect: authExpect } = require("../fixtures/authenticate
 const {
   adminTab,
   checklistsTab,
+  connectedIdentity,
   notesTab,
   signupMenuButton,
   signupUsernameInput,
@@ -47,27 +48,39 @@ test("unknown route displays styled 404 page", async ({ page }) => {
 
 test("unauthenticated user can navigate to signup from auth menu", async ({ page }) => {
   await page.goto("/notes");
+  await expect(connectedIdentity(page)).toHaveCount(0);
   await expect(signupMenuButton(page)).toBeVisible();
   await signupMenuButton(page).click();
   await expect(page).toHaveURL(/\/signup$/);
+  await expect(connectedIdentity(page)).toHaveCount(0);
   await expect(signupUsernameInput(page)).toBeVisible();
 });
 
 authTest("navigation tabs update browser URL", async ({ authenticatedPage: page }) => {
   await page.goto("/notes");
+  await authExpect(connectedIdentity(page)).toHaveText(/Connecté: /);
   await checklistsTab(page).click();
   await authExpect(page).toHaveURL(/\/checklists$/);
+  await authExpect(connectedIdentity(page)).toHaveText(/Connecté: /);
 
   await notesTab(page).click();
   await authExpect(page).toHaveURL(/\/notes$/);
+  await authExpect(connectedIdentity(page)).toHaveText(/Connecté: /);
 });
 
 authTest("authenticated user can sign out from auth menu", async ({ authenticatedPage: page }) => {
   await page.goto("/notes");
+  await authExpect(connectedIdentity(page)).toHaveText(/Connecté: /);
   await authExpect(signoutMenuButton(page)).toBeVisible();
   await signoutMenuButton(page).click();
   await authExpect(page).toHaveURL(/\/signin$/);
+  await authExpect(connectedIdentity(page)).toHaveCount(0);
   await authExpect(signupMenuButton(page)).toBeVisible();
+});
+
+authTest("authenticated shell shows the connected username", async ({ authenticatedPage: page, authIdentity }) => {
+  await page.goto("/notes");
+  await authExpect(connectedIdentity(page)).toHaveText(`Connecté: ${authIdentity.username}`);
 });
 
 authTest("approved non-admin user cannot discover or open the admin route", async ({ authenticatedPage: page }) => {

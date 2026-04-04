@@ -22,6 +22,10 @@ function signoutMenuButton(page) {
   return page.getByRole("button", { name: "Se deconnecter" });
 }
 
+function connectedIdentity(page) {
+  return page.locator(".auth-menu__identity");
+}
+
 function createButton(page) {
   return page.getByRole("button", { name: "+" });
 }
@@ -59,6 +63,7 @@ module.exports = {
   calendarTab,
   appTitle,
   checklistsTab,
+  connectedIdentity,
   createAccountButton,
   createButton,
   notesTab,

@@ -27,9 +27,9 @@ Provide coherent, reusable global UI/UX behavior across shell identity surfaces,
 ## Stories
 
 ### Done
+- [001 Connected User At-A-Glance Identity](done/001-connected-user-at-a-glance-identity.md) - Show `Connecté: <username>` across app pages when authenticated, hidden when unauthenticated.
 
 ### Ready
-- [001 Connected User At-A-Glance Identity](ready/001-connected-user-at-a-glance-identity.md) - Show `Connecté: <username>` across app pages when authenticated, hidden when unauthenticated.
 
 ### To Refine
 - [002 Shared French Date-Time Display Policy](to-refine/002-shared-french-datetime-display-policy.md) - Standardize date-time rendering to `dd/MM/yyyy HH:mm` with reusable helpers/components.

@@ -5,7 +5,7 @@ import Prelude
 import Api.Auth (AuthenticatedProfile(..))
 import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
-import Pages.App (AuthStatus(..), DefinedRoute(..), Route(..), parseRouteString, resolveGuardedRoute, visibleTabs)
+import Pages.App (AuthStatus(..), DefinedRoute(..), Route(..), connectedIdentityLabel, parseRouteString, resolveGuardedRoute, visibleTabs)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
 
@@ -34,6 +34,12 @@ spec =
     it "keeps non-admin routes unchanged" do
       resolveGuardedRoute Unauthenticated (Route Note) `shouldEqual` Just (Route Note)
       resolveGuardedRoute (Authenticated adminProfile) (Route Calendar) `shouldEqual` Just (Route Calendar)
+
+    it "renders the connected identity label only for authenticated users" do
+      connectedIdentityLabel AuthUnknown `shouldEqual` Nothing
+      connectedIdentityLabel Unauthenticated `shouldEqual` Nothing
+      connectedIdentityLabel (Authenticated memberProfile) `shouldEqual` Just "Connecté: member"
+      connectedIdentityLabel (Authenticated adminProfile) `shouldEqual` Just "Connecté: admin"
 
 memberProfile :: AuthenticatedProfile
 memberProfile =
