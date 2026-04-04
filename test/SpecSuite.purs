@@ -11,6 +11,7 @@ import Test.Pages.AppSpec as AppSpec
 import Test.Pages.CalendarSpec as CalendarPageSpec
 import Test.Pages.ChecklistsSpec as ChecklistsSpec
 import Test.Pages.NotesSpec as NotesSpec
+import Test.Ui.DateTimePickerSpec as DateTimePickerSpec
 import Test.Ui.ErrorsSpec as ErrorsSpec
 import Test.Ui.PageFlowSpec as PageFlowSpec
 import Test.Spec.Reporter.Console (consoleReporter)
@@ -26,5 +27,6 @@ runSpecSuite = runSpec [ consoleReporter ] do
   ChecklistsSpec.spec
   CalendarPageSpec.spec
   CalendarSpec.spec
+  DateTimePickerSpec.spec
   ErrorsSpec.spec
   PageFlowSpec.spec

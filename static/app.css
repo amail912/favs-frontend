@@ -1314,6 +1314,23 @@ a.nav-link:hover {
   border-radius: 12px;
 }
 
+.ui-datetime-picker {
+  width: 100%;
+}
+
+.ui-datetime-picker--desktop {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.ui-datetime-picker__date,
+.ui-datetime-picker__time,
+.ui-datetime-picker__native {
+  min-width: 0;
+}
+
 .calendar-submit {
   border-radius: 999px;
   font-weight: 650;

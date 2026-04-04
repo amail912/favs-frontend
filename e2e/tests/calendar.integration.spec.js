@@ -62,6 +62,28 @@ async function setTextInputValue(locator, value) {
   }, value);
 }
 
+function splitLocalDatetimeInput(value) {
+  const [datePart = "", timePart = ""] = value.split("T");
+  return { datePart, timePart };
+}
+
+async function fillCalendarDateTimeField(container, label, isoLocalValue) {
+  const picker = container.locator(`.ui-datetime-picker[data-datetime-label="${label}"]`);
+  await expect(picker).toBeVisible();
+
+  const desktopDate = picker.locator(".ui-datetime-picker__date");
+  const desktopTime = picker.locator(".ui-datetime-picker__time");
+
+  if (await desktopDate.count()) {
+    const { datePart, timePart } = splitLocalDatetimeInput(isoLocalValue);
+    await desktopDate.fill(datePart);
+    await desktopTime.fill(timePart);
+    return;
+  }
+
+  await picker.locator(".ui-datetime-picker__native").fill(isoLocalValue);
+}
+
 function defaultSharedPresenceTrips(focusDate) {
   return [
     {
@@ -221,8 +243,11 @@ test("calendar integration: create task in day view", async ({ authenticatedPage
 
   const modal = await openCreateModal(page);
   await modal.getByPlaceholder("Titre").fill(title);
-  await modal.getByPlaceholder("Début").fill(toLocalDatetimeInput(start));
-  await modal.getByPlaceholder("Fin").fill(toLocalDatetimeInput(end));
+  await expect(modal.locator('.ui-datetime-picker[data-datetime-label="Début"] .ui-datetime-picker__date')).toBeVisible();
+  await expect(modal.locator('.ui-datetime-picker[data-datetime-label="Début"] .ui-datetime-picker__time')).toBeVisible();
+  await expect(modal.locator('.ui-datetime-picker[data-datetime-label="Début"] .ui-datetime-picker__native')).toHaveCount(0);
+  await fillCalendarDateTimeField(modal, "Début", toLocalDatetimeInput(start));
+  await fillCalendarDateTimeField(modal, "Fin", toLocalDatetimeInput(end));
   const createResponsePromise = page.waitForResponse(
     response =>
       response.url().includes("/api/v1/calendar-items") &&
@@ -907,8 +932,8 @@ test("calendar integration: create item on a later day", async ({ authenticatedP
 
   const modal = await openCreateModal(page);
   await modal.getByPlaceholder("Titre").fill(title);
-  await modal.getByPlaceholder("Début").fill(toLocalDatetimeInput(start));
-  await modal.getByPlaceholder("Fin").fill(toLocalDatetimeInput(end));
+  await fillCalendarDateTimeField(modal, "Début", toLocalDatetimeInput(start));
+  await fillCalendarDateTimeField(modal, "Fin", toLocalDatetimeInput(end));
 
   const createResponsePromise = page.waitForResponse(
     response =>
@@ -956,8 +981,8 @@ test("calendar desktop: drag and drop keeps the focused date and dropped time", 
 
   const createModal = await openCreateModal(page);
   await createModal.getByPlaceholder("Titre").fill(title);
-  await createModal.getByPlaceholder("Début").fill(`${focusDate}T09:00`);
-  await createModal.getByPlaceholder("Fin").fill(`${focusDate}T10:00`);
+  await fillCalendarDateTimeField(createModal, "Début", `${focusDate}T09:00`);
+  await fillCalendarDateTimeField(createModal, "Fin", `${focusDate}T10:00`);
 
   const createResponsePromise = page.waitForResponse(
     response =>
@@ -1040,8 +1065,8 @@ test("calendar integration: edit item via modal", async ({ authenticatedPage: pa
 
   const createModal = await openCreateModal(page);
   await createModal.getByPlaceholder("Titre").fill(title);
-  await createModal.getByPlaceholder("Début").fill(toLocalDatetimeInput(start));
-  await createModal.getByPlaceholder("Fin").fill(toLocalDatetimeInput(end));
+  await fillCalendarDateTimeField(createModal, "Début", toLocalDatetimeInput(start));
+  await fillCalendarDateTimeField(createModal, "Fin", toLocalDatetimeInput(end));
 
   const createResponsePromise = page.waitForResponse(
     response =>
@@ -1063,6 +1088,8 @@ test("calendar integration: edit item via modal", async ({ authenticatedPage: pa
   await row.locator("..").getByRole("button", { name: "Editer" }).click({ force: true });
   const modal = page.locator(".app-modal__dialog");
   await expect(modal.getByText("Modifier l'item")).toBeVisible();
+  await expect(modal.locator('.ui-datetime-picker[data-datetime-label="Début"] .ui-datetime-picker__date')).toBeVisible();
+  await expect(modal.locator('.ui-datetime-picker[data-datetime-label="Fin"] .ui-datetime-picker__time')).toBeVisible();
 
   const updatedTitle = `${title} (modifie)`;
   await modal.getByPlaceholder("Titre").fill(updatedTitle);
@@ -1102,8 +1129,10 @@ test("calendar integration: escape closes edit modal", async ({ authenticatedPag
 
   const createModal = await openCreateModal(page);
   await createModal.getByPlaceholder("Titre").fill(title);
-  await createModal.getByPlaceholder("Début").fill(toLocalDatetimeInput(start));
-  await createModal.getByPlaceholder("Fin").fill(toLocalDatetimeInput(end));
+  await expect(createModal.locator('.ui-datetime-picker[data-datetime-label="Début"] .ui-datetime-picker__date')).toBeVisible();
+  await expect(createModal.locator('.ui-datetime-picker[data-datetime-label="Début"] .ui-datetime-picker__native')).toHaveCount(0);
+  await fillCalendarDateTimeField(createModal, "Début", toLocalDatetimeInput(start));
+  await fillCalendarDateTimeField(createModal, "Fin", toLocalDatetimeInput(end));
 
   const createResponsePromise = page.waitForResponse(
     response =>
@@ -1143,8 +1172,10 @@ test("calendar desktop: edit button is visible in timeline", async ({ authentica
 
   const createModal = await openCreateModal(page);
   await createModal.getByPlaceholder("Titre").fill(title);
-  await createModal.getByPlaceholder("Début").fill(toLocalDatetimeInput(start));
-  await createModal.getByPlaceholder("Fin").fill(toLocalDatetimeInput(end));
+  await expect(createModal.locator('.ui-datetime-picker[data-datetime-label="Début"] .ui-datetime-picker__date')).toBeVisible();
+  await expect(createModal.locator('.ui-datetime-picker[data-datetime-label="Début"] .ui-datetime-picker__native')).toHaveCount(0);
+  await fillCalendarDateTimeField(createModal, "Début", toLocalDatetimeInput(start));
+  await fillCalendarDateTimeField(createModal, "Fin", toLocalDatetimeInput(end));
 
   const createResponsePromise = page.waitForResponse(
     response =>
@@ -1180,8 +1211,10 @@ test("calendar desktop: double click does not open edit modal", async ({ authent
 
   const createModal = await openCreateModal(page);
   await createModal.getByPlaceholder("Titre").fill(title);
-  await createModal.getByPlaceholder("Début").fill(toLocalDatetimeInput(start));
-  await createModal.getByPlaceholder("Fin").fill(toLocalDatetimeInput(end));
+  await expect(createModal.locator('.ui-datetime-picker[data-datetime-label="Début"] .ui-datetime-picker__date')).toBeVisible();
+  await expect(createModal.locator('.ui-datetime-picker[data-datetime-label="Début"] .ui-datetime-picker__native')).toHaveCount(0);
+  await fillCalendarDateTimeField(createModal, "Début", toLocalDatetimeInput(start));
+  await fillCalendarDateTimeField(createModal, "Fin", toLocalDatetimeInput(end));
 
   const createResponsePromise = page.waitForResponse(
     response =>
@@ -1232,8 +1265,8 @@ test("calendar mobile: overlapping items render as a stacked deck", async ({ aut
 
   const firstModal = await openCreateModal(page);
   await firstModal.getByPlaceholder("Titre").fill(firstTitle);
-  await firstModal.getByPlaceholder("Début").fill(`${focusDate}T${startLabel}`);
-  await firstModal.getByPlaceholder("Fin").fill(`${focusDate}T${endLabel}`);
+  await fillCalendarDateTimeField(firstModal, "Début", `${focusDate}T${startLabel}`);
+  await fillCalendarDateTimeField(firstModal, "Fin", `${focusDate}T${endLabel}`);
   let createResponsePromise = page.waitForResponse(
     response =>
       response.url().includes("/api/v1/calendar-items") &&
@@ -1244,8 +1277,8 @@ test("calendar mobile: overlapping items render as a stacked deck", async ({ aut
 
   const secondModal = await openCreateModal(page);
   await secondModal.getByPlaceholder("Titre").fill(secondTitle);
-  await secondModal.getByPlaceholder("Début").fill(`${focusDate}T${overlapLabel}`);
-  await secondModal.getByPlaceholder("Fin").fill(`${focusDate}T${overlapEndLabel}`);
+  await fillCalendarDateTimeField(secondModal, "Début", `${focusDate}T${overlapLabel}`);
+  await fillCalendarDateTimeField(secondModal, "Fin", `${focusDate}T${overlapEndLabel}`);
   createResponsePromise = page.waitForResponse(
     response =>
       response.url().includes("/api/v1/calendar-items") &&
@@ -1303,8 +1336,8 @@ test("calendar mobile: hidden cards communicate different start and end times", 
   for (const item of createItems) {
     const modal = await openCreateModal(page);
     await modal.getByPlaceholder("Titre").fill(item.title);
-    await modal.getByPlaceholder("Début").fill(item.start);
-    await modal.getByPlaceholder("Fin").fill(item.end);
+    await fillCalendarDateTimeField(modal, "Début", item.start);
+    await fillCalendarDateTimeField(modal, "Fin", item.end);
     const createResponsePromise = page.waitForResponse(
       response =>
         response.url().includes("/api/v1/calendar-items") &&
@@ -1363,8 +1396,8 @@ test("calendar mobile: overlap summary opens a bottom sheet in chronological ord
   for (const item of createItems) {
     const modal = await openCreateModal(page);
     await modal.getByPlaceholder("Titre").fill(item.title);
-    await modal.getByPlaceholder("Début").fill(item.start);
-    await modal.getByPlaceholder("Fin").fill(item.end);
+    await fillCalendarDateTimeField(modal, "Début", item.start);
+    await fillCalendarDateTimeField(modal, "Fin", item.end);
     const createResponsePromise = page.waitForResponse(
       response =>
         response.url().includes("/api/v1/calendar-items") &&
@@ -1429,8 +1462,8 @@ test("calendar mobile: overlap summary tap and long-press drag both work", async
   for (const item of createItems) {
     const modal = await openCreateModal(page);
     await modal.getByPlaceholder("Titre").fill(item.title);
-    await modal.getByPlaceholder("Début").fill(item.start);
-    await modal.getByPlaceholder("Fin").fill(item.end);
+    await fillCalendarDateTimeField(modal, "Début", item.start);
+    await fillCalendarDateTimeField(modal, "Fin", item.end);
     const createResponsePromise = page.waitForResponse(
       response =>
         response.url().includes("/api/v1/calendar-items") &&
@@ -1506,8 +1539,8 @@ test("calendar mobile: selecting a hidden overlap item promotes it until leaving
   for (const item of createItems) {
     const modal = await openCreateModal(page);
     await modal.getByPlaceholder("Titre").fill(item.title);
-    await modal.getByPlaceholder("Début").fill(item.start);
-    await modal.getByPlaceholder("Fin").fill(item.end);
+    await fillCalendarDateTimeField(modal, "Début", item.start);
+    await fillCalendarDateTimeField(modal, "Fin", item.end);
     const createResponsePromise = page.waitForResponse(
       response =>
         response.url().includes("/api/v1/calendar-items") &&
@@ -1575,8 +1608,8 @@ test("calendar mobile: localized date chip stays aligned with the Day header", a
 
   const createModal = await openCreateModal(page);
   await createModal.getByPlaceholder("Titre").fill(title);
-  await createModal.getByPlaceholder("Début").fill(toLocalDatetimeInput(start));
-  await createModal.getByPlaceholder("Fin").fill(toLocalDatetimeInput(end));
+  await fillCalendarDateTimeField(createModal, "Début", toLocalDatetimeInput(start));
+  await fillCalendarDateTimeField(createModal, "Fin", toLocalDatetimeInput(end));
 
   const createResponsePromise = page.waitForResponse(
     response =>
@@ -1618,8 +1651,8 @@ test("calendar mobile: double tap does not open edit modal", async ({ authentica
 
   const createModal = await openCreateModal(page);
   await createModal.getByPlaceholder("Titre").fill(title);
-  await createModal.getByPlaceholder("Début").fill(toLocalDatetimeInput(start));
-  await createModal.getByPlaceholder("Fin").fill(toLocalDatetimeInput(end));
+  await fillCalendarDateTimeField(createModal, "Début", toLocalDatetimeInput(start));
+  await fillCalendarDateTimeField(createModal, "Fin", toLocalDatetimeInput(end));
 
   const createResponsePromise = page.waitForResponse(
     response =>
@@ -1696,8 +1729,8 @@ test("calendar mobile: edit button is not rendered", async ({ authenticatedPage:
 
   const createModal = await openCreateModal(page);
   await createModal.getByPlaceholder("Titre").fill(title);
-  await createModal.getByPlaceholder("Début").fill(toLocalDatetimeInput(start));
-  await createModal.getByPlaceholder("Fin").fill(toLocalDatetimeInput(end));
+  await fillCalendarDateTimeField(createModal, "Début", toLocalDatetimeInput(start));
+  await fillCalendarDateTimeField(createModal, "Fin", toLocalDatetimeInput(end));
 
   const createResponsePromise = page.waitForResponse(
     response =>

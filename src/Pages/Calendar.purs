@@ -115,6 +115,7 @@ import Type.Proxy (Proxy(..))
 import Ui.Errors (FatalError, handleError, toFatalError)
 import Ui.Focus (focusElement, openDateInputPicker)
 import Ui.AuthSession as AuthSession
+import Ui.DateTimePicker as DateTimePicker
 import Ui.LocalStorage as LocalStorage
 import Ui.Modal (renderBottomSheet, renderModal, renderModalWithValidateState) as Modal
 import Ui.Utils (class_)
@@ -234,6 +235,16 @@ derive instance eqExportSlot :: Eq ExportSlot
 derive instance ordExportSlot :: Ord ExportSlot
 type ExportSlotDef slot = forall query. H.Slot query Void slot
 
+data DateTimePickerSlot
+  = CreateStartPicker
+  | CreateEndPicker
+  | EditStartPicker
+  | EditEndPicker
+
+derive instance eqDateTimePickerSlot :: Eq DateTimePickerSlot
+derive instance ordDateTimePickerSlot :: Ord DateTimePickerSlot
+type DateTimePickerSlotDef slot = forall query. H.Slot query String slot
+
 data ImportSlot
   = ImportCsv
   | ImportIcs
@@ -244,6 +255,7 @@ type ImportSlotDef slot = forall query. H.Slot query Import.Output slot
 
 type Slots =
   ( recurrence :: RecurrenceSlotDef RecurrenceSlot
+  , dateTimePicker :: DateTimePickerSlotDef DateTimePickerSlot
   , export :: ExportSlotDef ExportSlot
   , importCsv :: ImportSlotDef ImportSlot
   , importIcs :: ImportSlotDef ImportSlot
@@ -1306,10 +1318,11 @@ type AgendaModalsInput =
   , presenceCuePreferences :: PresenceCuePreferencesState
   , presenceInspection :: Maybe SharedPresenceInspection
   , presenceInspectionPinned :: Boolean
+  , isMobile :: Boolean
   }
 
 renderAgendaModals :: AgendaModalsInput -> H.ComponentHTML Action Slots Aff
-renderAgendaModals { activeModal, overlapSheet, sharedPresenceOverflowSheet, exportItems, draft, tripPlaces, shareList, subscriptionList, validationError, editPanel, presenceCuePreferences, presenceInspection, presenceInspectionPinned } =
+renderAgendaModals { activeModal, overlapSheet, sharedPresenceOverflowSheet, exportItems, draft, tripPlaces, shareList, subscriptionList, validationError, editPanel, presenceCuePreferences, presenceInspection, presenceInspectionPinned, isMobile } =
   let
     renderModal title content = Modal.renderModal title content (ViewAction ViewCloseModal) (ViewAction ViewCloseModal)
     renderExportModal items =
@@ -1328,7 +1341,7 @@ renderAgendaModals { activeModal, overlapSheet, sharedPresenceOverflowSheet, exp
         ModalTools -> renderModal "Actions" [ map toAction renderToolsContent ]
         ModalTripShares -> renderModal "Partage des trajets" [ map toAction (renderShareManager sharePanelConfig shareList) ]
         ModalTripSubscriptions -> renderModal "Abonnements trajets" [ map toAction (renderSubscriptionManager subscriptionPanelConfig subscriptionList) ]
-        ModalCreateItem -> Modal.renderModalWithValidateState "Créer un item" [ renderCreateContent draft tripPlaces validationError ]
+        ModalCreateItem -> Modal.renderModalWithValidateState "Créer un item" [ renderCreateContent draft tripPlaces validationError isMobile ]
           (ViewAction ViewCloseCreate)
           createValidateState
         ModalImportCsv ->
@@ -1364,7 +1377,7 @@ renderAgendaModals { activeModal, overlapSheet, sharedPresenceOverflowSheet, exp
           Nothing -> text ""
           Just panel ->
             Modal.renderModalWithValidateState "Modifier l'item"
-              [ renderEditContent panel tripPlaces ]
+              [ renderEditContent panel tripPlaces isMobile ]
               (ViewAction ViewEditCancel)
               (editValidateState panel)
       activeModal
@@ -1388,6 +1401,7 @@ buildAgendaModalsInput { calendar, view } =
     , presenceCuePreferences
     , presenceInspection
     , presenceInspectionPinned
+    , isMobile: view.isMobile
     }
 
 -- END src/Pages/Calendar.purs
@@ -2174,15 +2188,16 @@ renderCreateContent
   :: CreateDraft
   -> TripPlacesState
   -> Maybe String
+  -> Boolean
   -> H.ComponentHTML Action Slots Aff
-renderCreateContent draft tripPlaces validationError =
+renderCreateContent draft tripPlaces validationError isMobile =
   case draft of
     CreateTaskDraft taskDraft ->
       div [ class_ "calendar-modal-stack" ]
         [ modeField CreateTask
         , field "Titre" (taskTitleInput taskDraft)
-        , dateTimeField "Début" CreateFormDraftStartChanged taskDraft.windowStart
-        , dateTimeField "Fin" CreateFormDraftEndChanged taskDraft.windowEnd
+        , dateTimeField CreateStartPicker "Début" CreateFormDraftStartChanged taskDraft.windowStart
+        , dateTimeField CreateEndPicker "Fin" CreateFormDraftEndChanged taskDraft.windowEnd
         , field "Catégorie" (taskCategoryInput taskDraft)
         , field "Statut" (taskStatusInput taskDraft)
         , field "Durée réelle (minutes)" (taskDurationInput taskDraft)
@@ -2194,8 +2209,8 @@ renderCreateContent draft tripPlaces validationError =
         [ modeField CreateTrip
         , renderTripPlacesField "Départ" CreateFormDraftDeparturePlaceChanged tripDraft.departurePlaceId tripPlaces
         , renderTripPlacesField "Arrivée" CreateFormDraftArrivalPlaceChanged tripDraft.arrivalPlaceId tripPlaces
-        , dateTimeField "Départ" CreateFormDraftStartChanged tripDraft.windowStart
-        , dateTimeField "Arrivée" CreateFormDraftEndChanged tripDraft.windowEnd
+        , dateTimeField CreateStartPicker "Départ" CreateFormDraftStartChanged tripDraft.windowStart
+        , dateTimeField CreateEndPicker "Arrivée" CreateFormDraftEndChanged tripDraft.windowEnd
         , renderTripPlacesFeedback tripPlaces
         , errorInput validationError
         ]
@@ -2206,16 +2221,14 @@ renderCreateContent draft tripPlaces validationError =
       , content
       ]
 
-  dateTimeField label onChange currentValue =
+  dateTimeField slotId label onChange currentValue =
     field label $
-      input
-        [ class_ "form-control calendar-input"
-        , type_ InputDatetimeLocal
-        , attr (AttrName "lang") "fr"
-        , placeholder label
-        , onValueChange (CreateFormAction <<< onChange)
-        , value currentValue
-        ]
+      slot
+        (Proxy :: _ "dateTimePicker")
+        slotId
+        DateTimePicker.component
+        { label, value: currentValue, isMobile }
+        (CreateFormAction <<< onChange)
 
   modeField currentMode =
     field "Type" $
@@ -3441,15 +3454,15 @@ renderUserListManagerBody config userList
               [ text "Retirer" ]
           ]
 
-renderEditContent :: EditPanel -> TripPlacesState -> H.ComponentHTML Action Slots Aff
-renderEditContent panel tripPlaces =
+renderEditContent :: EditPanel -> TripPlacesState -> Boolean -> H.ComponentHTML Action Slots Aff
+renderEditContent panel tripPlaces isMobile =
   case panel.draft of
     EditTaskDraft draft ->
       div [ class_ "calendar-modal-stack" ]
         [ staticTypeBadge "Tâche"
         , editTextField "Titre" ViewEditTitleChanged draft.title
-        , editDateTimeField "Début" ViewEditStartChanged draft.windowStart
-        , editDateTimeField "Fin" ViewEditEndChanged draft.windowEnd
+        , editDateTimeField EditStartPicker "Début" ViewEditStartChanged draft.windowStart
+        , editDateTimeField EditEndPicker "Fin" ViewEditEndChanged draft.windowEnd
         , editTextField "Catégorie" ViewEditCategoryChanged draft.category
         , div [ class_ "calendar-modal-field" ]
             [ div [ class_ "calendar-notifications-label" ] [ text "Statut" ]
@@ -3482,8 +3495,8 @@ renderEditContent panel tripPlaces =
         [ staticTypeBadge "Trajet"
         , renderTripPlacesEditField "Départ" ViewEditDeparturePlaceChanged draft.departurePlaceId tripPlaces
         , renderTripPlacesEditField "Arrivée" ViewEditArrivalPlaceChanged draft.arrivalPlaceId tripPlaces
-        , editDateTimeField "Départ" ViewEditStartChanged draft.windowStart
-        , editDateTimeField "Arrivée" ViewEditEndChanged draft.windowEnd
+        , editDateTimeField EditStartPicker "Départ" ViewEditStartChanged draft.windowStart
+        , editDateTimeField EditEndPicker "Arrivée" ViewEditEndChanged draft.windowEnd
         , renderTripPlacesFeedback tripPlaces
         , renderEditError panel.validationError
         ]
@@ -3505,17 +3518,15 @@ renderEditContent panel tripPlaces =
           ]
       ]
 
-  editDateTimeField label onChange currentValue =
+  editDateTimeField slotId label onChange currentValue =
     div [ class_ "calendar-modal-field" ]
       [ div [ class_ "calendar-notifications-label" ] [ text label ]
-      , input
-          [ class_ "form-control calendar-input"
-          , type_ InputDatetimeLocal
-          , attr (AttrName "lang") "fr"
-          , placeholder label
-          , onValueChange (ViewAction <<< onChange)
-          , value currentValue
-          ]
+      , slot
+          (Proxy :: _ "dateTimePicker")
+          slotId
+          DateTimePicker.component
+          { label, value: currentValue, isMobile }
+          (ViewAction <<< onChange)
       ]
 
   renderEditError =
