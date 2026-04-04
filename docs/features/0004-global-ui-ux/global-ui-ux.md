@@ -30,9 +30,9 @@ Provide coherent, reusable global UI/UX behavior across shell identity surfaces,
 - [001 Connected User At-A-Glance Identity](done/001-connected-user-at-a-glance-identity.md) - Show `Connecté: <username>` across app pages when authenticated, hidden when unauthenticated.
 - [002 Shared French Date-Time Display Policy](done/002-shared-french-datetime-display-policy.md) - Standardize visible date/time rendering with shared French display helpers while keeping ISO-local formats for inputs and payloads.
 - [003 Desktop Custom Date-Time Picker](done/003-desktop-custom-datetime-picker.md) - Add a reusable desktop split date+time picker while keeping mobile-native date-time inputs.
+- [004 Date-Time UX Adoption Across The App](done/004-datetime-ux-adoption-across-the-app.md) - Adopt the shared date-time display and desktop input primitives across current app surfaces and list any remaining non-migrated ones.
 
 ### Ready
-- [004 Date-Time UX Adoption Across The App](ready/004-datetime-ux-adoption-across-the-app.md) - Adopt the shared date-time display and desktop input primitives across current app surfaces and list any remaining non-migrated ones.
 - [005 Day Arrow Navigation In Calendar Day View](ready/005-day-arrow-navigation-in-calendar-day-view.md) - Add previous/next day arrows in Calendar Day view, synchronized with the existing canonical day state.
 - [006 Browser History Day Restoration In Calendar](ready/006-browser-history-day-restoration-in-calendar.md) - Synchronize consulted Day view with `?day=YYYY-MM-DD` and restore it through browser back/forward.
 

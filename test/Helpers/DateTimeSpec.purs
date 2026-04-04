@@ -18,6 +18,10 @@ spec =
       DateTime.formatDisplayDate (unsafeDate "2026-04-02")
         `shouldEqual` "02/04/2026"
 
+    it "formats raw dates using the shared French display policy" do
+      DateTime.formatDisplayDateRaw "2026-04-02"
+        `shouldEqual` "02/04/2026"
+
     it "formats times using the shared French display policy" do
       DateTime.formatDisplayTimeRaw "08:05"
         `shouldEqual` "08:05"

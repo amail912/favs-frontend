@@ -34,6 +34,14 @@ function toFrenchDayLabel(date) {
   }).format(date);
 }
 
+function toFrenchDateDisplay(date) {
+  return new Intl.DateTimeFormat("fr-FR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric"
+  }).format(date);
+}
+
 function isolatedFutureDate(baseOffsetDays) {
   const dayOffset = baseOffsetDays + (Date.now() % 300);
   return new Date(Date.now() + dayOffset * 24 * 60 * 60 * 1000);
@@ -967,6 +975,26 @@ test("calendar integration: create item on a later day", async ({ authenticatedP
   await expect(page.locator("[data-day-focus-item='true']", {
     has: page.locator(".calendar-calendar-item-title", { hasText: title })
   })).toBeVisible();
+});
+
+test("calendar week and month views use shared French date display for section titles", async ({ authenticatedPage: page }) => {
+  const targetDate = isolatedFutureDate(930);
+  const focusDate = toLocalDateInput(targetDate);
+  const expectedDateLabel = toFrenchDateDisplay(targetDate);
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  await page.getByRole("button", { name: "Semaine" }).click();
+  const weekSectionTitle = page.locator(".calendar-date-title", { hasText: expectedDateLabel }).first();
+  await expect(weekSectionTitle).toBeVisible();
+  await expect(weekSectionTitle).not.toHaveText(focusDate);
+
+  await page.getByRole("button", { name: "Mois" }).click();
+  const monthSectionTitle = page.locator(".calendar-date-title", { hasText: expectedDateLabel }).first();
+  await expect(monthSectionTitle).toBeVisible();
+  await expect(monthSectionTitle).not.toHaveText(focusDate);
 });
 
 test("calendar desktop: drag and drop keeps the focused date and dropped time", async ({ authenticatedPage: page }) => {

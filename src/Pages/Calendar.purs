@@ -1489,7 +1489,7 @@ renderDayCalendar focusDate todayDate items sharedPresence presenceCuePreference
 
 renderHourLabel :: forall w action. Int -> HTML w action
 renderHourLabel h =
-  div [ class_ "calendar-calendar-hour" ] [ text $ DateTime.formatLocalTimeParts h 0 ]
+  div [ class_ "calendar-calendar-hour" ] [ text $ DateTime.formatDisplayTimeRaw (DateTime.formatLocalTimeParts h 0) ]
 
 renderHourLabelEnd :: forall w action. HTML w action
 renderHourLabelEnd =
@@ -2054,7 +2054,7 @@ renderDateSection _ items isMobile dateStr =
     sorted = sortItems SortByTime itemsForDate
   in
     section [ class_ "calendar-date-section" ]
-      [ div [ class_ "calendar-date-title" ] [ text dateStr ]
+      [ div [ class_ "calendar-date-title" ] [ text (DateTime.formatDisplayDateRaw dateStr) ]
       , if null sorted then div [ class_ "calendar-date-empty" ] [ text "Aucun item" ]
         else agendaList sorted isMobile
       ]
@@ -4134,7 +4134,7 @@ computeDayFocusTarget selectedDate now itemsForDate
 
 timeLabel :: DateTime -> String
 timeLabel raw =
-  DateTime.formatLocalTime (time raw)
+  DateTime.formatDisplayTime (time raw)
 
 toOptionalString :: String -> Maybe String
 toOptionalString raw =
@@ -4686,7 +4686,7 @@ minuteToTimeLabel totalMinutes =
   if totalMinutes >= 1440 then
     "24:00"
   else
-    DateTime.formatLocalTimeParts (Int.quot totalMinutes 60) (Int.rem totalMinutes 60)
+    DateTime.formatDisplayTimeRaw (DateTime.formatLocalTimeParts (Int.quot totalMinutes 60) (Int.rem totalMinutes 60))
 
 presenceInspectionTimeText :: SharedPresenceInspection -> String
 presenceInspectionTimeText inspection =
