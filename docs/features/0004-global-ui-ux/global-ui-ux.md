@@ -30,13 +30,13 @@ Provide coherent, reusable global UI/UX behavior across shell identity surfaces,
 - [001 Connected User At-A-Glance Identity](done/001-connected-user-at-a-glance-identity.md) - Show `Connecté: <username>` across app pages when authenticated, hidden when unauthenticated.
 
 ### Ready
+- [002 Shared French Date-Time Display Policy](ready/002-shared-french-datetime-display-policy.md) - Standardize visible date/time rendering with shared French display helpers while keeping ISO-local formats for inputs and payloads.
+- [003 Desktop Custom Date-Time Picker](ready/003-desktop-custom-datetime-picker.md) - Add a reusable desktop split date+time picker while keeping mobile-native date-time inputs.
+- [004 Date-Time UX Adoption Across The App](ready/004-datetime-ux-adoption-across-the-app.md) - Adopt the shared date-time display and desktop input primitives across current app surfaces and list any remaining non-migrated ones.
+- [005 Day Arrow Navigation In Calendar Day View](ready/005-day-arrow-navigation-in-calendar-day-view.md) - Add previous/next day arrows in Calendar Day view, synchronized with the existing canonical day state.
+- [006 Browser History Day Restoration In Calendar](ready/006-browser-history-day-restoration-in-calendar.md) - Synchronize consulted Day view with `?day=YYYY-MM-DD` and restore it through browser back/forward.
 
 ### To Refine
-- [002 Shared French Date-Time Display Policy](to-refine/002-shared-french-datetime-display-policy.md) - Standardize date-time rendering to `dd/MM/yyyy HH:mm` with reusable helpers/components.
-- [003 Desktop Custom Date-Time Picker](to-refine/003-desktop-custom-datetime-picker.md) - Add a reusable desktop-first date-time picker while keeping mobile-native inputs.
-- [004 Date-Time UX Adoption Across The App](to-refine/004-datetime-ux-adoption-across-the-app.md) - Migrate existing surfaces to shared display and input components.
-- [005 Day Arrow Navigation In Calendar Day View](to-refine/005-day-arrow-navigation-in-calendar-day-view.md) - Add previous/next day arrows for quick day browsing in Day view.
-- [006 Browser History Day Restoration In Calendar](to-refine/006-browser-history-day-restoration-in-calendar.md) - Keep consulted day aligned with browser back/forward using `?day=YYYY-MM-DD`.
 
 ### Canceled
 
