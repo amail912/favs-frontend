@@ -292,6 +292,107 @@ test("calendar integration: create task in day view", async ({ authenticatedPage
   await appTitle(page).click();
 });
 
+test("calendar integration: delete item from day timeline", async ({ authenticatedPage: page }) => {
+  const targetDate = isolatedFutureDate(1520);
+  const focusDate = toLocalDateInput(targetDate);
+  const start = new Date(`${focusDate}T10:00`);
+  const end = new Date(`${focusDate}T11:00`);
+  const title = `Delete day ${Date.now()}`;
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const createModal = await openCreateModal(page);
+  await createModal.getByPlaceholder("Titre").fill(title);
+  await fillCalendarDateTimeField(createModal, "Début", toLocalDatetimeInput(start));
+  await fillCalendarDateTimeField(createModal, "Fin", toLocalDatetimeInput(end));
+
+  const createResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items") &&
+      response.request().method() === "POST"
+  );
+
+  await createModal.getByRole("button", { name: "Valider" }).click();
+  expect((await createResponsePromise).ok()).toBeTruthy();
+
+  const row = page.locator(".calendar-calendar-item", {
+    has: page.locator(".calendar-calendar-item-title", { hasText: title })
+  }).first();
+  await expect(row).toBeVisible();
+
+  const deleteResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items/") &&
+      response.request().method() === "DELETE"
+  );
+  const listResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items") &&
+      response.request().method() === "GET"
+  );
+
+  await row.locator(".calendar-delete--timeline").click();
+  await expect(page.locator(".calendar-delete-confirm .app-modal__dialog")).toBeVisible();
+  await page.locator(".calendar-delete-confirm").getByRole("button", { name: "Supprimer" }).click();
+
+  expect((await deleteResponsePromise).ok()).toBeTruthy();
+  expect((await listResponsePromise).ok()).toBeTruthy();
+  await expect(row).toHaveCount(0);
+});
+
+test("calendar integration: delete item from week list", async ({ authenticatedPage: page }) => {
+  const targetDate = isolatedFutureDate(1525);
+  const focusDate = toLocalDateInput(targetDate);
+  const start = new Date(`${focusDate}T10:00`);
+  const end = new Date(`${focusDate}T11:00`);
+  const title = `Delete week ${Date.now()}`;
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const createModal = await openCreateModal(page);
+  await createModal.getByPlaceholder("Titre").fill(title);
+  await fillCalendarDateTimeField(createModal, "Début", toLocalDatetimeInput(start));
+  await fillCalendarDateTimeField(createModal, "Fin", toLocalDatetimeInput(end));
+
+  const createResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items") &&
+      response.request().method() === "POST"
+  );
+
+  await createModal.getByRole("button", { name: "Valider" }).click();
+  expect((await createResponsePromise).ok()).toBeTruthy();
+
+  await page.getByRole("button", { name: "Semaine" }).click();
+  const row = page.locator(".calendar-card", {
+    has: page.locator(".calendar-card-title", { hasText: title })
+  }).first();
+  await expect(row).toBeVisible();
+
+  const deleteResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items/") &&
+      response.request().method() === "DELETE"
+  );
+  const listResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items") &&
+      response.request().method() === "GET"
+  );
+
+  await row.locator(".calendar-delete--list").click();
+  await expect(page.locator(".calendar-delete-confirm .app-modal__dialog")).toBeVisible();
+  await page.locator(".calendar-delete-confirm").getByRole("button", { name: "Supprimer" }).click();
+
+  expect((await deleteResponsePromise).ok()).toBeTruthy();
+  expect((await listResponsePromise).ok()).toBeTruthy();
+  await expect(row).toHaveCount(0);
+});
+
 test("calendar share panel: add and remove a shared user", async ({ authenticatedPage: page }, testInfo) => {
   const { username: sharedUsername } = await withExistingUser({
     apiBase: API_BASE,
@@ -1718,6 +1819,72 @@ test("calendar mobile: double tap does not open edit modal", async ({ authentica
 
   await expect(page.getByText("Modifier l'item")).toHaveCount(0);
 });
+
+test("calendar mobile: item actions sheet allows deleting a server item", async ({ authenticatedPage: page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForFunction(() => window.innerWidth <= 768);
+  await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+  await page.reload();
+
+  const targetDate = isolatedFutureDate(1532);
+  const focusDate = toLocalDateInput(targetDate);
+  const start = new Date(`${focusDate}T10:00`);
+  const end = new Date(`${focusDate}T11:00`);
+  const title = `Mobile delete ${Date.now()}`;
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const createModal = await openCreateModal(page);
+  await createModal.getByPlaceholder("Titre").fill(title);
+  await fillCalendarDateTimeField(createModal, "Début", toLocalDatetimeInput(start));
+  await fillCalendarDateTimeField(createModal, "Fin", toLocalDatetimeInput(end));
+
+  const createResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items") &&
+      response.request().method() === "POST"
+  );
+
+  await createModal.getByRole("button", { name: "Valider" }).click();
+  expect((await createResponsePromise).ok()).toBeTruthy();
+
+  const row = page.locator(".calendar-calendar-card", {
+    has: page.locator(".calendar-calendar-item-title", { hasText: title })
+  }).first();
+
+  await expect(row).toBeVisible();
+  await row.scrollIntoViewIfNeeded();
+
+  const box = await row.boundingBox();
+  if (!box) {
+    throw new Error("Missing bounding box for calendar item");
+  }
+
+  await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(page.locator(".calendar-item-actions-sheet")).toBeVisible();
+  await expect(page.locator(".calendar-item-actions-sheet")).toContainText("Editer");
+  await expect(page.locator(".calendar-item-actions-sheet")).toContainText("Supprimer");
+
+  const deleteResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items/") &&
+      response.request().method() === "DELETE"
+  );
+  const listResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items") &&
+      response.request().method() === "GET"
+  );
+
+  await page.locator(".calendar-item-actions-sheet .calendar-delete").click();
+  await expect(page.locator(".calendar-delete-confirm .app-modal__dialog")).toBeVisible();
+  await page.locator(".calendar-delete-confirm").getByRole("button", { name: "Supprimer" }).click();
+
+  expect((await deleteResponsePromise).ok()).toBeTruthy();
+  expect((await listResponsePromise).ok()).toBeTruthy();
+  await expect(row).toHaveCount(0);
 });
 
 test("calendar day view arrows navigate previous and next day and stay hidden outside day view", async ({ authenticatedPage: page }) => {
@@ -1923,4 +2090,6 @@ test("calendar mobile: edit button is not rendered", async ({ authenticatedPage:
 
   await expect(row).toBeVisible();
   await expect(page.getByRole("button", { name: "Editer" })).toHaveCount(0);
+});
+
 });

@@ -72,6 +72,7 @@ module Pages.Calendar
   , calendarItemSecondaryText
   , calendarItemCardClass
   , calendarItemTimelineCardClass
+  , calendarItemDeletionTarget
   , calendarItemSupportsEdit
   , computeDropMinuteIndex
   , computeMinuteIndexFromClientY
@@ -84,7 +85,7 @@ module Pages.Calendar
 
 import Prelude hiding (div)
 import Affjax.Web (Response)
-import Api.Calendar (PeriodTrip(..), PeriodTripGroup(..), TripPlace(..), TripSharingUser(..), addSharedUserResponse, addSubscribedUserResponse, createItemResponse, deleteSharedUserResponse, deleteSubscribedUserResponse, getItemsResponse, getPeriodTripsResponse, getSharedUsersResponse, getSubscribedUsersResponse, getTripPlacesResponse, updateItemResponse)
+import Api.Calendar (PeriodTrip(..), PeriodTripGroup(..), TripPlace(..), TripSharingUser(..), addSharedUserResponse, addSubscribedUserResponse, createItemResponse, deleteItemResponse, deleteSharedUserResponse, deleteSubscribedUserResponse, getItemsResponse, getPeriodTripsResponse, getSharedUsersResponse, getSubscribedUsersResponse, getTripPlacesResponse, updateItemResponse)
 import Calendar.Recurrence (RecurrenceDraft, RecurrenceRule, defaultRecurrenceDraft, draftFromRecurrence, draftToRecurrence)
 import Calendar.Recurrence as Recurrence
 import Calendar.ExImport.Export as Export
@@ -123,7 +124,7 @@ import Ui.Focus (focusElement, openDateInputPicker)
 import Ui.AuthSession as AuthSession
 import Ui.DateTimePicker as DateTimePicker
 import Ui.LocalStorage as LocalStorage
-import Ui.Modal (renderBottomSheet, renderModal, renderModalWithValidateState) as Modal
+import Ui.Modal (renderBottomSheet, renderModal, renderModalWithActionState, renderModalWithValidateState) as Modal
 import Ui.Utils (class_)
 import Web.Event.Event (EventType(..), preventDefault)
 import Web.HTML (window)
@@ -1362,6 +1363,10 @@ type AgendaModalsInput =
   , subscriptionList :: ShareListState
   , validationError :: Maybe String
   , editPanel :: Maybe EditPanel
+  , itemActionsItem :: Maybe CalendarItem
+  , deleteConfirmTarget :: Maybe CalendarItemDeletionTarget
+  , deleteInFlight :: Maybe String
+  , deleteFeedback :: Maybe String
   , presenceCuePreferences :: PresenceCuePreferencesState
   , presenceInspection :: Maybe SharedPresenceInspection
   , presenceInspectionPinned :: Boolean
@@ -1369,7 +1374,7 @@ type AgendaModalsInput =
   }
 
 renderAgendaModals :: AgendaModalsInput -> H.ComponentHTML Action Slots Aff
-renderAgendaModals { activeModal, overlapSheet, sharedPresenceOverflowSheet, exportItems, draft, tripPlaces, shareList, subscriptionList, validationError, editPanel, presenceCuePreferences, presenceInspection, presenceInspectionPinned, isMobile } =
+renderAgendaModals { activeModal, overlapSheet, sharedPresenceOverflowSheet, exportItems, draft, tripPlaces, shareList, subscriptionList, validationError, editPanel, itemActionsItem, deleteConfirmTarget, deleteInFlight, deleteFeedback, presenceCuePreferences, presenceInspection, presenceInspectionPinned, isMobile } =
   let
     renderModal title content = Modal.renderModal title content (ViewAction ViewCloseModal) (ViewAction ViewCloseModal)
     renderExportModal items =
@@ -1382,12 +1387,36 @@ renderAgendaModals { activeModal, overlapSheet, sharedPresenceOverflowSheet, exp
       { action: ViewAction ViewEditSave
       , disabled: isEditSubmitDisabled panel tripPlaces
       }
+    deleteActionState target =
+      { action: ViewAction ViewConfirmDelete
+      , disabled: deleteInFlight == Just target.id
+      , label: if deleteInFlight == Just target.id then "Suppression..." else "Supprimer"
+      }
   in
     maybe (div [] [])
       case _ of
         ModalTools -> renderModal "Actions" [ map toAction renderToolsContent ]
         ModalTripShares -> renderModal "Partage des trajets" [ map toAction (renderShareManager sharePanelConfig shareList) ]
         ModalTripSubscriptions -> renderModal "Abonnements trajets" [ map toAction (renderSubscriptionManager subscriptionPanelConfig subscriptionList) ]
+        ModalItemActions -> case itemActionsItem of
+          Nothing -> text ""
+          Just item ->
+            Modal.renderBottomSheet "Actions de l'item"
+              [ renderItemActionsSheetContent item ]
+              (ViewAction ViewCloseModal)
+        ModalDeleteItemConfirm -> case deleteConfirmTarget of
+          Nothing -> text ""
+          Just target ->
+            div [ class_ "calendar-delete-confirm" ]
+              [ Modal.renderModalWithActionState
+                  "Supprimer l'item"
+                  [ div [ class_ "text-muted" ]
+                      [ text ("Voulez-vous vraiment supprimer \"" <> target.title <> "\" ?") ]
+                  , maybe (text "") renderDeleteFeedback deleteFeedback
+                  ]
+                  (ViewAction ViewCloseModal)
+                  (deleteActionState target)
+              ]
         ModalCreateItem -> Modal.renderModalWithValidateState "Créer un item" [ renderCreateContent draft tripPlaces validationError isMobile ]
           (ViewAction ViewCloseCreate)
           createValidateState
@@ -1433,7 +1462,7 @@ buildAgendaModalsInput :: State -> AgendaModalsInput
 buildAgendaModalsInput { calendar, view } =
   let
     { items, draft, tripPlaces, shareList, subscriptionList, validationError, presenceCuePreferences } = calendar
-    { activeModal, overlapSheet, sharedPresenceOverflowSheet, editPanel, presenceInspection, presenceInspectionPinned } = view
+    { activeModal, overlapSheet, sharedPresenceOverflowSheet, editPanel, itemActionsItem, deleteConfirmTarget, deleteInFlight, deleteFeedback, presenceInspection, presenceInspectionPinned } = view
   in
     { activeModal
     , overlapSheet
@@ -1445,6 +1474,10 @@ buildAgendaModalsInput { calendar, view } =
     , subscriptionList
     , validationError
     , editPanel
+    , itemActionsItem
+    , deleteConfirmTarget
+    , deleteInFlight
+    , deleteFeedback
     , presenceCuePreferences
     , presenceInspection
     , presenceInspectionPinned
@@ -1792,7 +1825,7 @@ renderTimelineItem isMobile draggingId focusTargetIdentity layout =
         , ";"
         ]
     dragProps = dragCalendarHandlers isMobile layout.item
-    touchProps = touchCalendarHandlers isMobile layout.item
+    touchProps = touchCalendarHandlers isMobile layout.item <> mobileItemActionHandlers isMobile layout.item
     editProps = editHandlers isMobile draggingId layout.item
   in
     div
@@ -1800,7 +1833,7 @@ renderTimelineItem isMobile draggingId focusTargetIdentity layout =
         , style inlineStyle
         ] <> focusTargetProps <> editProps
       )
-      [ renderTimelineEditButton isMobile layout.item
+      [ renderTimelineActionButtons isMobile layout.item
       , div
           ([ class_ $ calendarItemTimelineCardClass layout.item <> draggingClass ] <> dragProps)
           [ div touchProps [ renderTimelineCardContent layout.item ] ]
@@ -1845,7 +1878,7 @@ renderMobileOverlapStack draggingId focusTargetIdentity stack =
         , ";"
         ]
     dragProps = dragCalendarHandlers true stack.topItem
-    touchProps = touchCalendarHandlers true stack.topItem
+    touchProps = touchCalendarHandlers true stack.topItem <> mobileItemActionHandlers true stack.topItem
     overlapSheet =
       { groupKey: stack.groupKey
       , items: stack.items
@@ -2001,17 +2034,20 @@ renderSharedPresenceOverflowSegment username segment =
       , div [ class_ "calendar-presence-overflow-sheet__time" ] [ text (presenceInspectionTimeText inspection) ]
       ]
 
-renderTimelineEditButton :: forall w. Boolean -> CalendarItem -> HTML w Action
-renderTimelineEditButton isMobile item =
+renderTimelineActionButtons :: forall w. Boolean -> CalendarItem -> HTML w Action
+renderTimelineActionButtons isMobile item =
   if isMobile || not (calendarItemSupportsEdit item) then text ""
   else
-    button
-      [ class_ "btn btn-sm btn-outline-secondary calendar-edit calendar-edit--timeline"
-      , attr (AttrName "aria-label") "Editer"
-      , onMouseDown (const (ViewAction (ViewOpenEdit item)))
-      , onClick (const (ViewAction (ViewOpenEdit item)))
+    div [ class_ "calendar-item-actions" ]
+      [ button
+          [ class_ "btn btn-sm btn-outline-secondary calendar-edit calendar-edit--timeline"
+          , attr (AttrName "aria-label") "Editer"
+          , onMouseDown (const (ViewAction (ViewOpenEdit item)))
+          , onClick (const (ViewAction (ViewOpenEdit item)))
+          ]
+          [ i [ class_ "bi bi-pencil" ] [] ]
+      , maybe (text "") (const (renderDeleteButton "calendar-delete calendar-delete--timeline btn btn-sm btn-outline-danger" item)) (calendarItemDeletionTarget item)
       ]
-      [ i [ class_ "bi bi-pencil" ] [] ]
 
 -- END src/Calendar/Calendar/Agenda/Day.purs
 
@@ -2034,13 +2070,53 @@ renderItem isMobile _ item =
     editProps = editHandlers isMobile Nothing item
   in
     li ([ class_ (calendarItemCardClass item) ] <> editProps)
-      [ div [ class_ "col entity-card-body" ]
+      [ div ([ class_ "col entity-card-body" ] <> mobileItemActionHandlers isMobile item)
           [ div [ class_ "calendar-card-time" ] [ text (calendarItemListTimeText item) ]
           , div [ class_ "calendar-card-title" ] [ text (calendarItemPrimaryText item) ]
           , div [ class_ "calendar-card-window" ] [ text (calendarItemSecondaryText item) ]
           , renderCategory (calendarItemCategory item)
+          , if isMobile then
+              text ""
+            else
+              maybe (text "") (const (renderDeleteButton "calendar-delete calendar-delete--list btn btn-sm btn-outline-danger" item)) (calendarItemDeletionTarget item)
           ]
       ]
+
+mobileItemActionHandlers
+  :: forall r
+   . Boolean
+  -> CalendarItem
+  -> Array (IProp (onClick :: MouseEvent.MouseEvent | r) Action)
+mobileItemActionHandlers isMobile item =
+  if isMobile && calendarItemDeletionTarget item /= Nothing then
+    [ onClick (const (ViewAction (ViewOpenItemActions item))) ]
+  else
+    []
+
+renderDeleteButton :: forall w. String -> CalendarItem -> HTML w Action
+renderDeleteButton classes item =
+  button
+    [ class_ classes
+    , attr (AttrName "type") "button"
+    , attr (AttrName "aria-label") "Supprimer"
+    , onClick (const (ViewAction (ViewRequestDelete item)))
+    ]
+    [ text "Supprimer" ]
+
+renderItemActionsSheetContent :: forall w. CalendarItem -> HTML w Action
+renderItemActionsSheetContent item =
+  div [ class_ "calendar-item-actions-sheet" ]
+    [ if calendarItemSupportsEdit item then
+        button
+          [ class_ "btn btn-outline-secondary"
+          , attr (AttrName "type") "button"
+          , onClick (const (ViewAction (ViewOpenEdit item)))
+          ]
+          [ text "Editer" ]
+      else
+        text ""
+    , maybe (text "") (\_ -> renderDeleteButton "calendar-delete btn btn-outline-danger" item) (calendarItemDeletionTarget item)
+    ]
 
 editHandlers
   :: forall r
@@ -2716,6 +2792,8 @@ data AgendaModal
   | ModalTools
   | ModalTripShares
   | ModalTripSubscriptions
+  | ModalItemActions
+  | ModalDeleteItemConfirm
   | ModalCreateItem
   | ModalEditItem
   | ModalOverlapGroup
@@ -2733,6 +2811,11 @@ type OverlapSheet =
 
 type SharedPresenceOverflowSheet =
   { hiddenGroups :: SharedPresence
+  }
+
+type CalendarItemDeletionTarget =
+  { id :: String
+  , title :: String
   }
 
 type SharedPresenceInspection =
@@ -2779,6 +2862,10 @@ type ViewState =
   , presenceInspectionCloseToken :: Int
   , promotedOverlaps :: Array MobileOverlapPromotion
   , editPanel :: Maybe EditPanel
+  , itemActionsItem :: Maybe CalendarItem
+  , deleteConfirmTarget :: Maybe CalendarItemDeletionTarget
+  , deleteInFlight :: Maybe String
+  , deleteFeedback :: Maybe String
   , isMobile :: Boolean
   , dayFocusContext :: Maybe String
   , dayFocusApplied :: Boolean
@@ -2802,6 +2889,10 @@ viewInitialState initialDay =
   , presenceInspectionCloseToken: 0
   , promotedOverlaps: []
   , editPanel: Nothing
+  , itemActionsItem: Nothing
+  , deleteConfirmTarget: Nothing
+  , deleteInFlight: Nothing
+  , deleteFeedback: Nothing
   , isMobile: false
   , dayFocusContext: Nothing
   , dayFocusApplied: false
@@ -2892,6 +2983,30 @@ _viewEditPanel =
     _.editPanel
     (_ { editPanel = _ })
 
+_viewItemActionsItem :: Lens' ViewState (Maybe CalendarItem)
+_viewItemActionsItem =
+  lens
+    _.itemActionsItem
+    (_ { itemActionsItem = _ })
+
+_viewDeleteConfirmTarget :: Lens' ViewState (Maybe CalendarItemDeletionTarget)
+_viewDeleteConfirmTarget =
+  lens
+    _.deleteConfirmTarget
+    (_ { deleteConfirmTarget = _ })
+
+_viewDeleteInFlight :: Lens' ViewState (Maybe String)
+_viewDeleteInFlight =
+  lens
+    _.deleteInFlight
+    (_ { deleteInFlight = _ })
+
+_viewDeleteFeedback :: Lens' ViewState (Maybe String)
+_viewDeleteFeedback =
+  lens
+    _.deleteFeedback
+    (_ { deleteFeedback = _ })
+
 _viewIsMobile :: Lens' ViewState Boolean
 _viewIsMobile =
   lens
@@ -2936,6 +3051,10 @@ data ViewAction
   | ViewNextDay
   | ViewTimelineScrolled
   | ViewOpenModal AgendaModal
+  | ViewOpenItemActions CalendarItem
+  | ViewRequestDelete CalendarItem
+  | ViewConfirmDelete
+  | ViewDismissDeleteFeedback
   | ViewOpenOverlapSheet OverlapSheet
   | ViewPromoteOverlapItem OverlapSheet CalendarItem
   | ViewOpenSharedPresenceOverflow SharedPresenceOverflowSheet
@@ -2991,6 +3110,13 @@ setFocusDateState :: String -> ViewState -> ViewState
 setFocusDateState raw =
   updateFocusDateState <<< (_viewFocusDateState .~ raw)
 
+clearDeleteState :: ViewState -> ViewState
+clearDeleteState =
+  (_viewItemActionsItem .~ Nothing)
+    <<< (_viewDeleteConfirmTarget .~ Nothing)
+    <<< (_viewDeleteInFlight .~ Nothing)
+    <<< (_viewDeleteFeedback .~ Nothing)
+
 handleViewAction :: ViewAction -> ErrorAgendaAppM Unit
 handleViewAction = case _ of
   ViewOpenDayDatePicker -> do
@@ -3040,10 +3166,75 @@ handleViewAction = case _ of
     modify_
       ( _view %~
           ( (_viewActiveModal .~ Just modal)
+              <<< clearDeleteState
               <<< clearPresenceInspectionHoverState
               <<< (_viewSharedPresenceOverflowSheet .~ Nothing)
           )
       )
+  ViewOpenItemActions item ->
+    case calendarItemDeletionTarget item of
+      Nothing -> pure unit
+      Just _ ->
+        modify_
+          ( _view %~
+              ( (_viewItemActionsItem .~ Just item)
+                  <<< (_viewDeleteConfirmTarget .~ Nothing)
+                  <<< (_viewDeleteFeedback .~ Nothing)
+                  <<< (_viewActiveModal .~ Just ModalItemActions)
+                  <<< clearPresenceInspectionHoverState
+                  <<< (_viewSharedPresenceOverflowSheet .~ Nothing)
+              )
+          )
+  ViewRequestDelete item ->
+    case calendarItemDeletionTarget item of
+      Nothing -> pure unit
+      Just target ->
+        modify_
+          ( _view %~
+              ( (_viewItemActionsItem .~ Nothing)
+                  <<< (_viewDeleteConfirmTarget .~ Just target)
+                  <<< (_viewDeleteFeedback .~ Nothing)
+                  <<< (_viewActiveModal .~ Just ModalDeleteItemConfirm)
+              )
+          )
+  ViewConfirmDelete -> do
+    st <- get
+    case st ^. (_view <<< _viewDeleteConfirmTarget) of
+      Nothing -> pure unit
+      Just target -> do
+        modify_
+          ( _view %~
+              ( (_viewDeleteInFlight .~ Just target.id)
+                  <<< (_viewDeleteFeedback .~ Nothing)
+              )
+          )
+        result <- liftAff $ deleteItemResponse target.id
+        case result of
+          Left _ ->
+            modify_
+              ( _view %~
+                  ( (_viewDeleteInFlight .~ Nothing)
+                      <<< (_viewDeleteFeedback .~ Just genericDeleteWriteErrorMessage)
+                  )
+              )
+          Right response ->
+            if statusOk response then do
+              refreshItems
+              modify_
+                ( _view %~
+                    ( (_viewActiveModal .~ Nothing)
+                        <<< clearDeleteState
+                    )
+                )
+            else
+              modify_
+                ( _view %~
+                    ( (_viewDeleteInFlight .~ Nothing)
+                        <<< (_viewDeleteFeedback .~ Just (deleteWriteErrorMessage response))
+                    )
+                )
+  ViewDismissDeleteFeedback ->
+    modify_ (_view <<< _viewDeleteFeedback .~ Nothing)
   ViewOpenOverlapSheet overlapSheet ->
     modify_
       ( _view
@@ -3052,6 +3243,7 @@ handleViewAction = case _ of
                 <<< (_viewSharedPresenceOverflowSheet .~ Nothing)
                 <<< (_viewPresenceInspection .~ Nothing)
                 <<< (_viewPresenceInspectionPinned .~ false)
+                <<< clearDeleteState
                 <<< clearPresenceInspectionHoverState
                 <<< (_viewActiveModal .~ Just ModalOverlapGroup)
             )
@@ -3073,6 +3265,7 @@ handleViewAction = case _ of
                 <<< (_viewOverlapSheet .~ Nothing)
                 <<< (_viewPresenceInspection .~ Nothing)
                 <<< (_viewPresenceInspectionPinned .~ false)
+                <<< clearDeleteState
                 <<< clearPresenceInspectionHoverState
                 <<< (_viewActiveModal .~ Just ModalSharedPresenceOverflow)
             )
@@ -3197,6 +3390,7 @@ handleViewAction = case _ of
     modify_
       ( _view %~
           ( (_viewActiveModal .~ Nothing)
+              <<< clearDeleteState
               <<< (_viewOverlapSheet .~ Nothing)
               <<< (_viewSharedPresenceOverflowSheet .~ Nothing)
               <<< (_viewPresenceInspection .~ Nothing)
@@ -3206,7 +3400,12 @@ handleViewAction = case _ of
           )
       )
   ViewOpenCreate ->
-    modify_ (_view <<< _viewActiveModal .~ Just ModalCreateItem)
+    modify_
+      ( _view %~
+          ( (_viewActiveModal .~ Just ModalCreateItem)
+              <<< clearDeleteState
+          )
+      )
   ViewCloseCreate ->
     modify_ (_view <<< _viewActiveModal .~ Nothing)
   ViewOpenEdit item ->
@@ -3217,6 +3416,7 @@ handleViewAction = case _ of
           ( _view
               %~
                 ( (_viewEditPanel .~ Just { item, draft, validationError: Nothing })
+                    <<< clearDeleteState
                     <<< (_viewActiveModal .~ Just ModalEditItem)
                 )
           )
@@ -3267,7 +3467,14 @@ handleViewAction = case _ of
                 EditTaskDraft _ ->
                   modify_ (_syncUpdateErrorState .~ Just (updateErrorMessage (unwrap resp.status)))
   ViewEditCancel ->
-    modify_ ((_view <<< _viewEditPanel .~ Nothing) <<< (_view <<< _viewActiveModal .~ Nothing))
+    modify_
+      ( (_view <<< _viewEditPanel .~ Nothing)
+          <<< (_view <<< _viewActiveModal .~ Nothing)
+          <<< (_view <<< _viewItemActionsItem .~ Nothing)
+          <<< (_view <<< _viewDeleteConfirmTarget .~ Nothing)
+          <<< (_view <<< _viewDeleteInFlight .~ Nothing)
+          <<< (_view <<< _viewDeleteFeedback .~ Nothing)
+      )
   ViewSetIsMobile isMobile ->
     modify_ (_view <<< _viewIsMobile .~ isMobile)
   where
@@ -4859,6 +5066,14 @@ subscriptionWriteErrorMessage response =
     Just "Unable to decode the body as a TripSharingUser" -> "Le format de l'abonnement est invalide."
     _ -> "Echec de mise a jour de l'abonnement de trajets (HTTP " <> show (unwrap response.status) <> ")."
 
+deleteWriteErrorMessage :: Response String -> String
+deleteWriteErrorMessage response =
+  case textResponseMessage response of
+    Just "Not authenticated" -> "Vous devez etre connecte pour supprimer cet item."
+    Just "Forbidden" -> "Vous ne pouvez pas supprimer cet item."
+    Just "Not found" -> "Cet item est introuvable."
+    _ -> "Echec de suppression de l'item (HTTP " <> show (unwrap response.status) <> ")."
+
 createErrorMessage :: Int -> String
 createErrorMessage status =
   "Echec de creation de l'item (HTTP " <> show status <> ")."
@@ -4868,6 +5083,9 @@ genericShareWriteErrorMessage = "Echec de mise a jour du partage de trajets."
 
 genericSubscriptionWriteErrorMessage :: String
 genericSubscriptionWriteErrorMessage = "Echec de mise a jour de l'abonnement de trajets."
+
+genericDeleteWriteErrorMessage :: String
+genericDeleteWriteErrorMessage = "Echec de suppression de l'item."
 
 isShareSubmitDisabled :: ShareListState -> Boolean
 isShareSubmitDisabled shareList =
@@ -5134,6 +5352,13 @@ calendarItemTimelineCardClass item =
   "calendar-calendar-card"
     <> guard (not (isTripCalendarItem item)) " calendar-calendar-item--task"
     <> guard (isTripCalendarItem item) " calendar-calendar-item--trip"
+
+calendarItemDeletionTarget :: CalendarItem -> Maybe CalendarItemDeletionTarget
+calendarItemDeletionTarget item = case item of
+  ServerCalendarItem { id } ->
+    Just { id, title: calendarItemPrimaryText item }
+  NewCalendarItem _ ->
+    Nothing
 
 calendarItemSupportsEdit :: CalendarItem -> Boolean
 calendarItemSupportsEdit = case _ of
@@ -5641,6 +5866,17 @@ renderUpdateError message =
     , button
         [ class_ "btn btn-sm btn-outline-secondary calendar-error-dismiss"
         , onClick (const SyncDismissUpdateError)
+        ]
+        [ text "OK" ]
+    ]
+
+renderDeleteFeedback :: forall w. String -> HTML w Action
+renderDeleteFeedback message =
+  div [ class_ "calendar-error calendar-error--delete" ]
+    [ text message
+    , button
+        [ class_ "btn btn-sm btn-outline-secondary calendar-error-dismiss"
+        , onClick (const (ViewAction ViewDismissDeleteFeedback))
         ]
         [ text "OK" ]
     ]

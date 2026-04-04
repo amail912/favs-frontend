@@ -22,9 +22,11 @@ Allow users to manage calendar items directly where they are displayed, starting
 ## Stories
 
 ### Done
+- [001 Direct Item Deletion Across Calendar Surfaces](done/001-direct-item-deletion-across-calendar-surfaces.md) - Delete server-backed tasks and trips directly from Calendar surfaces with desktop/mobile-adapted entrypoints and explicit confirmation.
+
+### Ready
 
 ### To Refine
-- [001 Direct Item Deletion Across Calendar Surfaces](to-refine/001-direct-item-deletion-across-calendar-surfaces.md) - Delete tasks and trips directly from UI with desktop/mobile-adapted UX and explicit confirmation.
 
 ### Canceled
 

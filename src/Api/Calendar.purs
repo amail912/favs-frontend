@@ -2,6 +2,7 @@ module Api.Calendar
   ( Method(..)
   , updateMethod
   , updatePath
+  , deletePath
   , getItemsResponse
   , getTripPlacesResponse
   , getSharedUsersResponse
@@ -13,6 +14,7 @@ module Api.Calendar
   , deleteSubscribedUserResponse
   , createItemResponse
   , updateItemResponse
+  , deleteItemResponse
   , validateItemResponse
   , ValidateItemPayload(..)
   , TripPlace(..)
@@ -68,6 +70,9 @@ createPath = "/api/v1/calendar-items"
 updatePath :: String -> String
 updatePath _ = "/api/v1/calendar-items"
 
+deletePath :: String -> String
+deletePath itemId = "/api/v1/calendar-items/" <> itemId
+
 updateMethod :: Method
 updateMethod = POST
 
@@ -109,6 +114,9 @@ updateItemResponse :: forall payload. EncodeJson payload => String -> payload ->
 updateItemResponse itemId item =
   Affjax.post json (updatePath itemId)
     (jsonBody item)
+
+deleteItemResponse :: String -> Aff TextResponse
+deleteItemResponse itemId = Affjax.delete string (deletePath itemId)
 
 validateItemResponse :: String -> ValidateItemPayload -> Aff JsonResponse
 validateItemResponse itemId payload =

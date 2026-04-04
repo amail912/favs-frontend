@@ -15,10 +15,10 @@ import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
 import Helpers.DateTime as DateTime
 import Helpers.DateTime (formatCalendarDayDateLabelWithReference)
-import Pages.Calendar (PresenceCueColorToken(..), SharedPresenceCuePreference(..), SharedPresenceLoadState(..), SharedPresenceState(..), buildSharedPresenceRailView, buildSharedPresenceSegmentLayouts, decodeCalendarItemsResponse, decodePeriodTripsResponse, decodePresenceCuePreferencesJson, decodeSharedUsersResponse, decodeTripPlacesResponse, deriveSharedPresence, encodePresenceCuePreferencesJson, maxVisibleSharedPresenceUsers, normalizePeriodTripGroups, presenceInspectionAriaLabel, presenceInspectionStateText, presenceInspectionTimeText, resolveInitialFocusDate, resolveSharedPresenceToneClass, shareWriteErrorMessage, sharedPresenceLaneToneClass, sharedPresenceSegmentRailClass, shouldRenderDayCalendarShell, shouldRenderSharedPresenceRail, subscriptionWriteErrorMessage, tripWriteErrorMessage, validateShareUsername)
+import Pages.Calendar (ItemType(..), PresenceCueColorToken(..), SharedPresenceCuePreference(..), SharedPresenceLoadState(..), SharedPresenceState(..), buildSharedPresenceRailView, buildSharedPresenceSegmentLayouts, calendarItemDeletionTarget, decodeCalendarItemsResponse, decodePeriodTripsResponse, decodePresenceCuePreferencesJson, decodeSharedUsersResponse, decodeTripPlacesResponse, deriveSharedPresence, encodePresenceCuePreferencesJson, maxVisibleSharedPresenceUsers, normalizePeriodTripGroups, presenceInspectionAriaLabel, presenceInspectionStateText, presenceInspectionTimeText, resolveInitialFocusDate, resolveSharedPresenceToneClass, shareWriteErrorMessage, sharedPresenceLaneToneClass, sharedPresenceSegmentRailClass, shouldRenderDayCalendarShell, shouldRenderSharedPresenceRail, subscriptionWriteErrorMessage, tripWriteErrorMessage, validateShareUsername, CalendarItem(..))
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (fail, shouldEqual)
-import Test.Support.Builders (unsafeDateTime)
+import Test.Support.Builders (calendarContent, serverCalendarItem, unsafeDateTime)
 
 spec :: Spec Unit
 spec =
@@ -60,6 +60,19 @@ spec =
         `shouldEqual` "2026-04-04"
       resolveInitialFocusDate "2026-04-04" Nothing
         `shouldEqual` "2026-04-04"
+
+    it "builds a deletion target only for persisted items" do
+      let
+        serverItem =
+          serverCalendarItem "task-1"
+            (calendarContent Task "Delete me" "2026-04-02T08:00" "2026-04-02T09:00")
+        newItem =
+          NewCalendarItem
+            { content: calendarContent Task "Draft" "2026-04-02T10:00" "2026-04-02T11:00" }
+      calendarItemDeletionTarget serverItem
+        `shouldEqual` Just { id: "task-1", title: "Delete me" }
+      calendarItemDeletionTarget newItem
+        `shouldEqual` Nothing
 
     it "normalizes grouped period trips while preserving order" do
       let
