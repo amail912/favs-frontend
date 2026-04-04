@@ -1239,6 +1239,23 @@ a.nav-link:hover {
   display: inline-flex;
 }
 
+.calendar-view-day-nav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+}
+
+.calendar-view-day-nav__previous,
+.calendar-view-day-nav__next {
+  min-width: 34px;
+  min-height: 34px;
+  border-radius: 999px;
+  padding-inline: 0.55rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .calendar-view-date-trigger {
   position: relative;
   display: inline-flex;
@@ -1904,6 +1921,17 @@ a.nav-link:hover {
     min-height: 34px;
     padding: 0.35rem 0.75rem;
     font-size: 0.95rem;
+  }
+
+  .calendar-view-day-nav {
+    gap: 0.3rem;
+  }
+
+  .calendar-view-day-nav__previous,
+  .calendar-view-day-nav__next {
+    min-width: 32px;
+    min-height: 32px;
+    padding-inline: 0.45rem;
   }
 
   .calendar-layout,

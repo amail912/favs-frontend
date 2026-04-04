@@ -60,6 +60,7 @@ module Pages.Calendar
   , presenceInspectionAriaLabel
   , tripWriteErrorMessage
   , validateShareUsername
+  , shiftFocusDate
   , shareWriteErrorMessage
   , subscriptionWriteErrorMessage
   , calendarItemPrimaryText
@@ -2871,6 +2872,8 @@ data ViewAction
   = ViewOpenDayDatePicker
   | ViewChangedAction String
   | ViewFocusDateChanged String
+  | ViewPreviousDay
+  | ViewNextDay
   | ViewTimelineScrolled
   | ViewOpenModal AgendaModal
   | ViewOpenOverlapSheet OverlapSheet
@@ -2906,6 +2909,28 @@ data SharedPresenceInspectionTrigger
   | PresenceInspectFocus
   | PresenceInspectTap
 
+clearPresenceInspectionHoverState :: ViewState -> ViewState
+clearPresenceInspectionHoverState =
+  (_viewPresenceInspectionHoverSegment .~ Nothing)
+    <<< (_viewPresenceInspectionHoverPanel .~ false)
+    <<< (_viewPresenceInspectionInitialTopPx .~ Nothing)
+    <<< (_viewPresenceInspectionCloseToken %~ (_ + 1))
+
+updateFocusDateState :: ViewState -> ViewState
+updateFocusDateState =
+  (_viewPresenceInspection .~ Nothing)
+    <<< (_viewPresenceInspectionPinned .~ false)
+    <<< clearPresenceInspectionHoverState
+    <<< (_viewSharedPresenceOverflowSheet .~ Nothing)
+    <<< (_viewDayFocusContext .~ Nothing)
+    <<< (_viewDayFocusApplied .~ false)
+    <<< (_viewDayFocusUserScrolled .~ false)
+    <<< (_viewDayFocusIgnoreScroll .~ false)
+
+setFocusDateState :: String -> ViewState -> ViewState
+setFocusDateState raw =
+  updateFocusDateState <<< (_viewFocusDateState .~ raw)
+
 handleViewAction :: ViewAction -> ErrorAgendaAppM Unit
 handleViewAction = case _ of
   ViewOpenDayDatePicker -> do
@@ -2938,20 +2963,13 @@ handleViewAction = case _ of
               )
         )
   ViewFocusDateChanged raw ->
-    modify_
-      ( _view
-          %~
-            ( (_viewFocusDateState .~ raw)
-                <<< (_viewPresenceInspection .~ Nothing)
-                <<< (_viewPresenceInspectionPinned .~ false)
-                <<< clearPresenceInspectionHoverState
-                <<< (_viewSharedPresenceOverflowSheet .~ Nothing)
-                <<< (_viewDayFocusContext .~ Nothing)
-                <<< (_viewDayFocusApplied .~ false)
-                <<< (_viewDayFocusUserScrolled .~ false)
-                <<< (_viewDayFocusIgnoreScroll .~ false)
-            )
-      )
+    modify_ (_view %~ setFocusDateState raw)
+  ViewPreviousDay -> do
+    st <- get
+    modify_ (_view %~ setFocusDateState (shiftFocusDate (-1) (st ^. _viewFocusDatePage)))
+  ViewNextDay -> do
+    st <- get
+    modify_ (_view %~ setFocusDateState (shiftFocusDate 1 (st ^. _viewFocusDatePage)))
   ViewTimelineScrolled -> do
     st <- get
     if st ^. (_view <<< _viewDayFocusIgnoreScroll) then
@@ -3193,12 +3211,6 @@ handleViewAction = case _ of
   ViewSetIsMobile isMobile ->
     modify_ (_view <<< _viewIsMobile .~ isMobile)
   where
-  clearPresenceInspectionHoverState =
-    (_viewPresenceInspectionHoverSegment .~ Nothing)
-      <<< (_viewPresenceInspectionHoverPanel .~ false)
-      <<< (_viewPresenceInspectionInitialTopPx .~ Nothing)
-      <<< (_viewPresenceInspectionCloseToken %~ (_ + 1))
-
   computePresenceInspectionInitialTopPx inspection = do
     timelineRef <- lift $ H.getRef (wrap "day-timeline-scroll")
     gridRef <- lift $ H.getRef (wrap "day-calendar-grid")
@@ -3305,23 +3317,39 @@ renderViewSelector viewMode focusDate todayDate =
           [ div [ class_ "calendar-notifications-label" ] [ text "Date" ]
           , case viewMode of
               ViewDay ->
-                div [ class_ "calendar-view-date-trigger-wrap" ]
+                div [ class_ "calendar-view-day-nav" ]
                   [ button
-                      [ class_ "calendar-view-date-trigger"
+                      [ class_ "calendar-view-day-nav__previous btn btn-outline-secondary btn-sm"
                       , attr (AttrName "type") "button"
-                      , attr (AttrName "aria-label") "Choisir la date du jour"
-                      , onClick (const ViewOpenDayDatePicker)
+                      , attr (AttrName "aria-label") "Jour precedent"
+                      , onClick (const ViewPreviousDay)
                       ]
-                      [ text dayLabel ]
-                  , input
-                      [ class_ "calendar-view-date calendar-view-date--overlay"
-                      , type_ InputDate
-                      , attr (AttrName "lang") "fr"
-                      , attr (AttrName "aria-label") "Date du jour"
-                      , ref (wrap "day-view-date-input")
-                      , value focusDate
-                      , onValueChange ViewFocusDateChanged
+                      [ text "‹" ]
+                  , div [ class_ "calendar-view-date-trigger-wrap" ]
+                      [ button
+                          [ class_ "calendar-view-date-trigger"
+                          , attr (AttrName "type") "button"
+                          , attr (AttrName "aria-label") "Choisir la date du jour"
+                          , onClick (const ViewOpenDayDatePicker)
+                          ]
+                          [ text dayLabel ]
+                      , input
+                          [ class_ "calendar-view-date calendar-view-date--overlay"
+                          , type_ InputDate
+                          , attr (AttrName "lang") "fr"
+                          , attr (AttrName "aria-label") "Date du jour"
+                          , ref (wrap "day-view-date-input")
+                          , value focusDate
+                          , onValueChange ViewFocusDateChanged
+                          ]
                       ]
+                  , button
+                      [ class_ "calendar-view-day-nav__next btn btn-outline-secondary btn-sm"
+                      , attr (AttrName "type") "button"
+                      , attr (AttrName "aria-label") "Jour suivant"
+                      , onClick (const ViewNextDay)
+                      ]
+                      [ text "›" ]
                   ]
               _ ->
                 dateInput
@@ -4119,6 +4147,12 @@ formatDate dt =
 
 formatDateOnly :: Date -> String
 formatDateOnly = DateTime.formatLocalDate
+
+shiftFocusDate :: Int -> String -> String
+shiftFocusDate offset raw =
+  case parseDateLocal raw >>= addDaysToDate offset of
+    Just nextDate -> formatDateOnly nextDate
+    Nothing -> raw
 
 formatDateTimeLocal :: DateTime -> String
 formatDateTimeLocal = DateTime.formatLocalDateTime

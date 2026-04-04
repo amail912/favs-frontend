@@ -62,6 +62,12 @@ async function setCalendarViewDate(page, value) {
   }, value);
 }
 
+function shiftDateByDays(date, days) {
+  const nextDate = new Date(date);
+  nextDate.setDate(nextDate.getDate() + days);
+  return nextDate;
+}
+
 async function setTextInputValue(locator, value) {
   await locator.evaluate((input, nextValue) => {
     input.value = nextValue;
@@ -1712,6 +1718,65 @@ test("calendar mobile: double tap does not open edit modal", async ({ authentica
 
   await expect(page.getByText("Modifier l'item")).toHaveCount(0);
 });
+});
+
+test("calendar day view arrows navigate previous and next day and stay hidden outside day view", async ({ authenticatedPage: page }) => {
+  const baseDate = isolatedFutureDate(2360);
+  const previousDate = shiftDateByDays(baseDate, -1);
+  const nextDate = shiftDateByDays(baseDate, 1);
+  const focusDate = toLocalDateInput(baseDate);
+  const title = `Day arrows ${Date.now()}`;
+  const start = new Date(`${focusDate}T10:00`);
+  const end = new Date(`${focusDate}T11:00`);
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const createModal = await openCreateModal(page);
+  await createModal.getByPlaceholder("Titre").fill(title);
+  await fillCalendarDateTimeField(createModal, "Début", toLocalDatetimeInput(start));
+  await fillCalendarDateTimeField(createModal, "Fin", toLocalDatetimeInput(end));
+
+  const createResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items") &&
+      response.request().method() === "POST"
+  );
+
+  await createModal.getByRole("button", { name: "Valider" }).click();
+  expect((await createResponsePromise).ok()).toBeTruthy();
+
+  const itemRow = page.locator(".calendar-calendar-card", {
+    has: page.locator(".calendar-calendar-item-title", { hasText: title })
+  }).first();
+  const previousButton = page.locator(".calendar-view-day-nav__previous");
+  const nextButton = page.locator(".calendar-view-day-nav__next");
+
+  await expect(previousButton).toBeVisible();
+  await expect(nextButton).toBeVisible();
+  await expect(page.locator(".calendar-view-date-trigger")).toHaveText(toFrenchDayLabel(baseDate));
+  await expect(itemRow).toBeVisible();
+
+  await nextButton.click();
+  await expect(page.locator(".calendar-view-date-trigger")).toHaveText(toFrenchDayLabel(nextDate));
+  await expect(itemRow).toHaveCount(0);
+
+  await previousButton.click();
+  await expect(page.locator(".calendar-view-date-trigger")).toHaveText(toFrenchDayLabel(baseDate));
+  await expect(itemRow).toBeVisible();
+
+  await previousButton.click();
+  await expect(page.locator(".calendar-view-date-trigger")).toHaveText(toFrenchDayLabel(previousDate));
+  await expect(itemRow).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Semaine" }).click();
+  await expect(previousButton).toHaveCount(0);
+  await expect(nextButton).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Mois" }).click();
+  await expect(previousButton).toHaveCount(0);
+  await expect(nextButton).toHaveCount(0);
 });
 
 test("calendar mobile actions: secondary actions stay reachable across views", async ({ authenticatedPage: page }) => {

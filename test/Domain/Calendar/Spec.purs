@@ -35,6 +35,7 @@ import Pages.Calendar
   , calendarItemSupportsEdit
   , DayFocusTarget(..)
   , computeDayFocusTarget
+  , shiftFocusDate
   )
 import Calendar.Recurrence (RecurrenceRule(..), defaultRecurrenceDraft, generateOccurrencesForMonth)
 import Data.Argonaut.Decode (decodeJson)
@@ -171,6 +172,16 @@ spec = do
           , recurrence: defaultRecurrenceDraft
           }
       validateTask draft `shouldEqual` Right draft
+
+  describe "Day navigation" do
+    it "shifts focus date across month boundaries" do
+      shiftFocusDate 1 "2026-01-31" `shouldEqual` "2026-02-01"
+
+    it "shifts focus date across year boundaries" do
+      shiftFocusDate (-1) "2026-01-01" `shouldEqual` "2025-12-31"
+
+    it "keeps invalid focus date unchanged" do
+      shiftFocusDate 1 "invalid-date" `shouldEqual` "invalid-date"
 
     it "fails trip validation when departure is missing" do
       let
