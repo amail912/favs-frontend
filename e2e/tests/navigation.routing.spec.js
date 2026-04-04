@@ -8,13 +8,13 @@ const {
   signupUsernameInput,
   signoutMenuButton
 } = require("../support/ui");
-const { ensureAdminUser, signinAdmin } = require("../support/auth-session");
+const { signinUser, withExistingUser } = require("../support/auth-session");
 
 const { test, expect } = base;
 
 async function signInAsAdmin(context, page, baseURL) {
-  await ensureAdminUser();
-  const session = await signinAdmin();
+  const adminIdentity = await withExistingUser({ kind: "admin" });
+  const session = await signinUser(adminIdentity);
   const hostname = new URL(baseURL).hostname;
 
   await context.addCookies([

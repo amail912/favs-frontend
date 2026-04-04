@@ -23,10 +23,11 @@ Allow authorized admins to manage user lifecycle safely from the frontend: appro
 
 ### Done
 - [001 Admin Role Gating And Route Access](done/001-admin-role-gating-and-route-access.md) - Expose admin page entry only to admins, gate `/admin` from the authenticated profile, and keep unauthorized access aligned with not-found behavior.
+- [002 Pending Approvals Management](done/002-pending-approvals-management.md) - Let admins load pending accounts, approve or delete them per row, and recover cleanly from load or action errors.
 
 ### Ready
+
 ### To Refine
-- [002 Pending Approvals Management](to-refine/002-pending-approvals-management.md) - Let admins list pending accounts and approve or delete them.
 - [003 User Deletion Management With Explicit Confirmation](to-refine/003-user-deletion-management-with-explicit-confirmation.md) - Let admins delete existing users with explicit destructive-action confirmation.
 
 ### Canceled

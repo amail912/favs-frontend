@@ -1,17 +1,26 @@
 const base = require("@playwright/test");
-const { ensureApprovedUser, signinUser } = require("../support/auth-session");
+const { signinUser, withExistingUser } = require("../support/auth-session");
 
 const API_BASE = process.env.E2E_API_URL || "http://localhost:1234/api";
 const E2E_PASSWORD = process.env.E2E_PASSWORD || "StrongPass123!";
 
 const test = base.test.extend({
   authIdentity: [async ({}, use, testInfo) => {
-    const username =
-      process.env.E2E_USERNAME ||
-      `e2e_worker_${testInfo.workerIndex}_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
-    const password = E2E_PASSWORD;
-    await ensureApprovedUser({ apiBase: API_BASE, username, password });
-    await use({ username, password });
+    const identity = process.env.E2E_USERNAME
+      ? await withExistingUser({
+          apiBase: API_BASE,
+          kind: "approved-member",
+          reuseKey: process.env.E2E_USERNAME,
+          username: process.env.E2E_USERNAME,
+          password: E2E_PASSWORD
+        })
+      : await withExistingUser({
+          apiBase: API_BASE,
+          kind: "approved-member",
+          reuseKey: `worker-${testInfo.workerIndex}`,
+          password: E2E_PASSWORD
+        });
+    await use(identity);
   }, { scope: "worker" }],
   session: async ({ authIdentity }, use) => {
     const session = await signinUser({ apiBase: API_BASE, ...authIdentity });

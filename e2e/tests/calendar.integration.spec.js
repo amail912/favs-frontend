@@ -1,5 +1,5 @@
 const { test, expect } = require("../fixtures/authenticated");
-const { ensureUser } = require("../support/auth-session");
+const { withExistingUser } = require("../support/auth-session");
 const { calendarTab, appTitle } = require("../support/ui");
 
 const API_BASE = process.env.E2E_API_URL || "http://localhost:1234/api";
@@ -254,9 +254,12 @@ test("calendar integration: create task in day view", async ({ authenticatedPage
 });
 
 test("calendar share panel: add and remove a shared user", async ({ authenticatedPage: page }, testInfo) => {
-  const sharedUsername = `e2e_shared_${testInfo.workerIndex}_${Date.now()}`;
-
-  await ensureUser({ apiBase: API_BASE, username: sharedUsername, password: E2E_PASSWORD });
+  const { username: sharedUsername } = await withExistingUser({
+    apiBase: API_BASE,
+    kind: "pending-member",
+    reuseKey: `share-target-worker-${testInfo.workerIndex}`,
+    password: E2E_PASSWORD
+  });
 
   await calendarTab(page).click();
   await expect(page).toHaveURL(/\/calendar$/);
@@ -306,9 +309,12 @@ test("calendar share panel: add and remove a shared user", async ({ authenticate
 });
 
 test("calendar subscription panel: add and remove a subscribed user", async ({ authenticatedPage: page }, testInfo) => {
-  const subscribedUsername = `e2e_subscription_${testInfo.workerIndex}_${Date.now()}`;
-
-  await ensureUser({ apiBase: API_BASE, username: subscribedUsername, password: E2E_PASSWORD });
+  const { username: subscribedUsername } = await withExistingUser({
+    apiBase: API_BASE,
+    kind: "pending-member",
+    reuseKey: `subscription-target-worker-${testInfo.workerIndex}`,
+    password: E2E_PASSWORD
+  });
 
   await calendarTab(page).click();
   await expect(page).toHaveURL(/\/calendar$/);
