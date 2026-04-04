@@ -1,5 +1,10 @@
 module Pages.Calendar
   ( component
+  , Input
+  , CalendarRouteOutput(..)
+  , normalizeCalendarRouteState
+  , resolveInitialFocusDate
+  , CalendarView(..)
   , decodeCalendarItemsResponse
   , CalendarItem(..)
   , CalendarItemContent(..)
@@ -106,7 +111,7 @@ import Effect.Class (liftEffect)
 import Effect.Console as Console
 import Effect.Now (nowDateTime)
 import Halogen (Component, ComponentHTML, HalogenM, Slot, defaultEval, fork, getRef, mkComponent, mkEval) as H
-import Halogen (subscribe)
+import Halogen (raise, subscribe)
 import Halogen.HTML (HTML, button, div, h2, i, input, li, option, section, select, slot, span, text, ul)
 import Halogen.HTML.Core (AttrName(..))
 import Halogen.HTML.Events (handler', onClick, onDragEnter, onDragOver, onDrop, onMouseDown, onValueChange, onValueInput, onKeyDown, onDragEnd, onDragStart, onScroll, onTouchStart, onTouchMove, onTouchEnd, onTouchCancel)
@@ -158,8 +163,13 @@ foreign import scrollElementIntoView :: Element -> Effect Unit
 foreign import viewportVisibleHeight :: Effect Number
 
 -- BEGIN src/Pages/Calendar.purs
-type NoOutput = Void
-type AgendaAppM = H.HalogenM State Action Slots NoOutput Aff
+type Input =
+  { initialDay :: Maybe String
+  }
+
+data CalendarRouteOutput = RouteSyncRequested { viewMode :: CalendarView, focusDate :: String }
+
+type AgendaAppM = H.HalogenM State Action Slots CalendarRouteOutput Aff
 type ErrorAgendaAppM = ExceptT FatalError AgendaAppM
 
 data CreateItemMode
@@ -192,6 +202,7 @@ type State =
 
 data Action
   = Init
+  | ReceiveInput Input
   | CreateFormAction CreateFormAction
   | DragAction DragAction
   | ShareAction ShareAction
@@ -403,7 +414,7 @@ toExportItem item =
     TripCalendarItemContent _ ->
       Nothing
 
-component :: forall q i. H.Component q i NoOutput Aff
+component :: forall q. H.Component q Input CalendarRouteOutput Aff
 component =
   H.mkComponent
     { initialState
@@ -411,15 +422,16 @@ component =
     , eval: H.mkEval $ H.defaultEval
         { handleAction = handleAction
         , initialize = pure Init
+        , receive = Just <<< ReceiveInput
         }
     }
 
-initialState :: forall i. i -> State
-initialState = const
+initialState :: Input -> State
+initialState { initialDay } =
   { calendar: calendarInitialState
   , sync: syncInitialState
   , mouseDrag: dragInitialState
-  , view: viewInitialState
+  , view: viewInitialState initialDay
   }
 
 _calendar :: Lens' State CalendarState
@@ -471,6 +483,20 @@ handleAction :: Action -> AgendaAppM Unit
 handleAction action = handleError $
   case action of
     Init -> initAction
+    ReceiveInput { initialDay } -> do
+      st <- get
+      let
+        today = st ^. (_view <<< _viewTodayDateState)
+      case initialDay of
+        Just routedDay ->
+          modify_
+            ( _view
+                %~
+                  setFocusDateState (resolveInitialFocusDate today (Just routedDay))
+                    <<< (_viewMode .~ ViewDay)
+            )
+        Nothing ->
+          pure unit
     CreateFormAction formAction ->
       lift (applyCreateFormAction formAction)
     ShareAction shareAction ->
@@ -504,11 +530,17 @@ handleAction action = handleError $
           st' <- get
           when (st' ^. (_view <<< _viewMode) == ViewDay) $
             lift loadSharedPresenceForFocusDate
+          lift emitRouteSyncOutput
         ViewFocusDateChanged _ -> do
           scheduleDayTimelineFocus
           st' <- get
           when (st' ^. (_view <<< _viewMode) == ViewDay) $
             lift loadSharedPresenceForFocusDate
+          lift emitRouteSyncOutput
+        ViewPreviousDay ->
+          lift emitRouteSyncOutput
+        ViewNextDay ->
+          lift emitRouteSyncOutput
         ViewCloseCreate -> do
           st <- get
           let
@@ -768,7 +800,11 @@ handleDragAction { log, dragAction } = do
 initAction :: ErrorAgendaAppM Unit
 initAction = do
   now <- liftEffect nowDateTime
-  modify_ $ (_viewFocusDatePage .~ formatDate now) <<< (_view <<< _viewTodayDateState .~ formatDate now)
+  st <- get
+  let
+    today = formatDate now
+    initialFocus = resolveInitialFocusDate today (nonEmptyStringMaybe (st ^. _viewFocusDatePage))
+  modify_ $ (_viewFocusDatePage .~ initialFocus) <<< (_view <<< _viewTodayDateState .~ today)
   viewport <- liftEffect $ window >>= Window.innerWidth
   handleViewAction (ViewSetIsMobile (viewport <= 768))
   subscribeToGlobalKeyDown
@@ -780,6 +816,16 @@ initAction = do
   lift loadSharedPresenceForFocusDate
   refreshItems
   scheduleDayTimelineFocus
+
+emitRouteSyncOutput :: AgendaAppM Unit
+emitRouteSyncOutput = do
+  st <- get
+  raise
+    ( RouteSyncRequested
+        { viewMode: st ^. (_view <<< _viewMode)
+        , focusDate: st ^. _viewFocusDatePage
+        }
+    )
 
 refreshItems :: ErrorAgendaAppM Unit
 refreshItems = do
@@ -2704,6 +2750,20 @@ type SharedPresenceInspectionHoverSegment =
   , segmentIndex :: Int
   }
 
+normalizeCalendarRouteState :: Input -> Input
+normalizeCalendarRouteState { initialDay } =
+  { initialDay: initialDay >>= \day -> if DateTime.isLocalDate day then Just day else Nothing }
+
+resolveInitialFocusDate :: String -> Maybe String -> String
+resolveInitialFocusDate today maybeDay =
+  case maybeDay >>= \day -> if DateTime.isLocalDate day then Just day else Nothing of
+    Just day -> day
+    Nothing -> today
+
+nonEmptyStringMaybe :: String -> Maybe String
+nonEmptyStringMaybe raw =
+  if raw == "" then Nothing else Just raw
+
 type ViewState =
   { viewMode :: CalendarView
   , focusDate :: String
@@ -2726,10 +2786,10 @@ type ViewState =
   , dayFocusIgnoreScroll :: Boolean
   }
 
-viewInitialState :: ViewState
-viewInitialState =
+viewInitialState :: Maybe String -> ViewState
+viewInitialState initialDay =
   { viewMode: ViewDay
-  , focusDate: ""
+  , focusDate: fromMaybe "" initialDay
   , todayDate: ""
   , activeModal: Nothing
   , overlapSheet: Nothing

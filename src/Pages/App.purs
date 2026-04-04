@@ -1,6 +1,7 @@
 module Pages.App
   ( component
   , AuthStatus(..)
+  , CalendarRouteState
   , DefinedRoute(..)
   , Route(..)
   , connectedIdentityLabel
@@ -16,10 +17,10 @@ import Affjax.RequestBody (RequestBody(..))
 import Affjax.ResponseFormat (string)
 import Api.Auth (AuthenticatedProfile(..), getAuthProfileResponse, isAdminProfile)
 import Pages.Admin (component) as Admin
-import Pages.Calendar (component) as Calendar
+import Pages.Calendar (CalendarRouteOutput(..), CalendarView(..), component) as Calendar
 import Pages.Checklists (component) as Checklists
 import Control.Monad.RWS (get, modify_)
-import Data.Array (head)
+import Data.Array (find, head)
 import DOM.HTML.Indexed.ButtonType (ButtonType(..))
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Data.Argonaut.Core (Json, jsonEmptyObject)
@@ -37,6 +38,7 @@ import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits as String
 import Data.String.Common as StringCommon
 import Data.String.Pattern (Pattern(..))
+import Helpers.DateTime as DateTime
 import Effect (Effect)
 import Effect.Aff (Aff)
 import Effect.Aff.Class (liftAff)
@@ -50,9 +52,6 @@ import Halogen.HTML.Events (onClick, onValueChange, onSubmit)
 import Halogen.HTML.Properties (for, type_, name, placeholder, id, value, disabled)
 import Halogen.Subscription as Sub
 import Pages.Notes (component) as Notes
-import Routing.Duplex (RouteDuplex', root, parse, print)
-import Routing.Duplex.Generic (noArgs, sum)
-import Routing.Duplex.Generic.Syntax ((/))
 import Routing.PushState (PushStateInterface, makeInterface, matchesWith)
 import Type.Prelude (Proxy(..))
 import Ui.AuthSession as AuthSession
@@ -60,16 +59,21 @@ import Ui.Utils (class_)
 import Web.Event.Event (Event, preventDefault)
 
 type OpaqueSlot slot = forall query. H.Slot query Void slot
+type CalendarSlot slot = forall query. H.Slot query Calendar.CalendarRouteOutput slot
 type ChildSlots =
   ( notes :: OpaqueSlot Unit
   , checklists :: OpaqueSlot Unit
-  , calendar :: OpaqueSlot Unit
+  , calendar :: CalendarSlot Unit
   , admin :: OpaqueSlot Unit
   , signup :: AuthSlot Unit
   , signin :: AuthSlot Unit
   )
 
-data DefinedRoute = Note | Checklist | Calendar | Admin | Signup | Signin
+type CalendarRouteState =
+  { day :: Maybe String
+  }
+
+data DefinedRoute = Note | Checklist | Calendar CalendarRouteState | Admin | Signup | Signin
 
 derive instance definedRouteGeneric :: Generic DefinedRoute _
 derive instance definedRouteEq :: Eq DefinedRoute
@@ -85,24 +89,89 @@ derive instance ordRoute :: Ord Route
 instance showRoute :: Show Route where
   show = genericShow
 
-routeCodec :: RouteDuplex' DefinedRoute
-routeCodec = root $ sum
-  { "Note": "notes" / noArgs
-  , "Checklist": "checklists" / noArgs
-  , "Calendar": "calendar" / noArgs
-  , "Admin": "admin" / noArgs
-  , "Signup": "signup" / noArgs
-  , "Signin": "signin" / noArgs
-  }
-
 parseRouteString :: String -> Either Unit Route
 parseRouteString rawPath =
   Right $
     if path == "/" || path == "" then Root
-    else either (const NotFound) Route $ parse routeCodec path
+    else case parseDefinedRoutePath path of
+      Just (Calendar _) ->
+        Route (Calendar { day: parseCalendarDay query })
+      Just route ->
+        Route route
+      Nothing ->
+        NotFound
   where
-  withoutQuery = fromMaybe rawPath $ head $ StringCommon.split (Pattern "?") rawPath
-  path = fromMaybe withoutQuery $ head $ StringCommon.split (Pattern "#") withoutQuery
+  withoutHash = fromMaybe rawPath $ head $ StringCommon.split (Pattern "#") rawPath
+  path = fromMaybe withoutHash $ head $ StringCommon.split (Pattern "?") withoutHash
+  query =
+    case StringCommon.split (Pattern "?") withoutHash of
+      [ _, rawQuery ] -> rawQuery
+      _ -> ""
+
+defaultCalendarRoute :: DefinedRoute
+defaultCalendarRoute = Calendar { day: Nothing }
+
+normalizeCalendarRouteState :: CalendarRouteState -> CalendarRouteState
+normalizeCalendarRouteState { day } =
+  { day: day >>= \raw -> if DateTime.isLocalDate raw then Just raw else Nothing }
+
+routeFromDefined :: DefinedRoute -> Route
+routeFromDefined = Route
+
+printDefinedRoutePath :: DefinedRoute -> String
+printDefinedRoutePath = case _ of
+  Note -> "/notes"
+  Checklist -> "/checklists"
+  Calendar _ -> "/calendar"
+  Admin -> "/admin"
+  Signup -> "/signup"
+  Signin -> "/signin"
+
+parseDefinedRoutePath :: String -> Maybe DefinedRoute
+parseDefinedRoutePath = case _ of
+  "/notes" -> Just Note
+  "notes" -> Just Note
+  "/checklists" -> Just Checklist
+  "checklists" -> Just Checklist
+  "/calendar" -> Just defaultCalendarRoute
+  "calendar" -> Just defaultCalendarRoute
+  "/admin" -> Just Admin
+  "admin" -> Just Admin
+  "/signup" -> Just Signup
+  "signup" -> Just Signup
+  "/signin" -> Just Signin
+  "signin" -> Just Signin
+  _ -> Nothing
+
+printRoute :: Route -> String
+printRoute = case _ of
+  Root -> "/"
+  Route (Calendar calendarRoute) ->
+    case calendarRoute.day of
+      Just day -> printDefinedRoutePath defaultCalendarRoute <> "?day=" <> day
+      Nothing -> printDefinedRoutePath defaultCalendarRoute
+  Route route ->
+    printDefinedRoutePath route
+  NotFound -> "/not-found"
+
+parseCalendarDay :: String -> Maybe String
+parseCalendarDay rawQuery =
+  findMapQueryValue "day" rawQuery >>= \value ->
+    if DateTime.isLocalDate value then Just value else Nothing
+
+findMapQueryValue :: String -> String -> Maybe String
+findMapQueryValue key rawQuery =
+  find isMatchingPair queryPairs >>= valueFromPair
+  where
+  queryPairs = StringCommon.split (Pattern "&") rawQuery
+  isMatchingPair pair =
+    case head (StringCommon.split (Pattern "=") pair) of
+      Just pairKey -> pairKey == key
+      Nothing -> false
+  valueFromPair pair =
+    case StringCommon.split (Pattern "=") pair of
+      [ _, pairValue ] -> Just pairValue
+      _ -> Nothing
 
 subscribeToRouting :: forall state slots output m. MonadEffect m => PushStateInterface -> H.HalogenM state Action slots output m Unit
 subscribeToRouting nav = do
@@ -120,6 +189,7 @@ subscribeToRouting nav = do
 data Action
   = RouteChanged Route
   | NavigateTo DefinedRoute
+  | HandleCalendarOutput Calendar.CalendarRouteOutput
   | SignOut
   | HandleAuthOutput AuthOutput
   | RefreshAuthStatus
@@ -160,9 +230,9 @@ historyState = unsafeToForeign unit
 navigateWith
   :: (PushStateInterface -> Foreign -> String -> Effect Unit)
   -> Maybe PushStateInterface
-  -> DefinedRoute
+  -> Route
   -> H.HalogenM State Action ChildSlots Void Aff Unit
-navigateWith navFn maybeNav route = maybe (pure unit) (\nav -> liftEffect $ navFn nav historyState (print routeCodec route)) maybeNav
+navigateWith navFn maybeNav route = maybe (pure unit) (\nav -> liftEffect $ navFn nav historyState (printRoute route)) maybeNav
 
 statusOk :: forall a. Response a -> Boolean
 statusOk r = unwrap r.status >= 200 && unwrap r.status < 300
@@ -178,7 +248,7 @@ resolveGuardedRoute authStatus route = case route of
 
 visibleTabs :: AuthStatus -> Array DefinedRoute
 visibleTabs authStatus =
-  [ Note, Checklist, Calendar ] <> guard (canViewAdminNav authStatus) [ Admin ]
+  [ Note, Checklist, defaultCalendarRoute ] <> guard (canViewAdminNav authStatus) [ Admin ]
   where
   canViewAdminNav (Authenticated profile) = isAdminProfile profile
   canViewAdminNav _ = false
@@ -205,30 +275,47 @@ type AuthSlot slot = forall query. H.Slot query AuthOutput slot
 handleAction :: Action -> H.HalogenM State Action ChildSlots Void Aff Unit
 handleAction (RouteChanged Root) = do
   st <- get
-  modify_ _ { currentRoute = Route Note }
-  navigateWith _.replaceState st.nav Note
+  let route = routeFromDefined Note
+  modify_ _ { currentRoute = route }
+  navigateWith _.replaceState st.nav route
 handleAction (RouteChanged route) =
   modify_ _ { currentRoute = route }
 handleAction (NavigateTo route) = do
   st <- get
-  modify_ _ { currentRoute = Route route }
-  navigateWith _.pushState st.nav route
+  let nextRoute = routeFromDefined route
+  modify_ _ { currentRoute = nextRoute }
+  navigateWith _.pushState st.nav nextRoute
+handleAction (HandleCalendarOutput (Calendar.RouteSyncRequested { viewMode, focusDate })) = do
+  st <- get
+  let
+    nextRoute =
+      case viewMode of
+        Calendar.ViewDay ->
+          Route (Calendar (normalizeCalendarRouteState { day: Just focusDate }))
+        _ ->
+          Route defaultCalendarRoute
+  when (st.currentRoute /= nextRoute) do
+    modify_ _ { currentRoute = nextRoute }
+    navigateWith _.pushState st.nav nextRoute
 handleAction (HandleAuthOutput (SignupSucceeded username)) = do
   st <- get
   liftEffect $ AuthSession.storeAuthenticatedUsername username
-  modify_ _ { currentRoute = Route Signin, authStatus = Unauthenticated }
-  navigateWith _.pushState st.nav Signin
+  let route = routeFromDefined Signin
+  modify_ _ { currentRoute = route, authStatus = Unauthenticated }
+  navigateWith _.pushState st.nav route
 handleAction (HandleAuthOutput (SigninSucceeded profile@(AuthenticatedProfile { username }))) = do
   st <- get
   liftEffect $ AuthSession.storeAuthenticatedUsername username
-  modify_ _ { currentRoute = Route Note, authStatus = Authenticated profile }
-  navigateWith _.pushState st.nav Note
+  let route = routeFromDefined Note
+  modify_ _ { currentRoute = route, authStatus = Authenticated profile }
+  navigateWith _.pushState st.nav route
 handleAction SignOut = do
   st <- get
   _ <- liftAff $ post string "/api/signout" Nothing
   liftEffect AuthSession.clearAuthenticatedUsername
-  modify_ _ { authStatus = Unauthenticated, currentRoute = Route Signin }
-  navigateWith _.pushState st.nav Signin
+  let route = routeFromDefined Signin
+  modify_ _ { authStatus = Unauthenticated, currentRoute = route }
+  navigateWith _.pushState st.nav route
 handleAction InitializeRouting = do
   nav <- liftEffect makeInterface
   modify_ _ { nav = Just nav }
@@ -315,7 +402,8 @@ authMenu authStatus =
 currentComponent :: AuthStatus -> DefinedRoute -> H.ComponentHTML Action ChildSlots Aff
 currentComponent _ Note = slot_ (Proxy :: _ "notes") unit Notes.component unit
 currentComponent _ Checklist = slot_ (Proxy :: _ "checklists") unit Checklists.component unit
-currentComponent _ Calendar = slot_ (Proxy :: _ "calendar") unit Calendar.component unit
+currentComponent _ (Calendar calendarRoute) =
+  slot (Proxy :: _ "calendar") unit Calendar.component { initialDay: calendarRoute.day } HandleCalendarOutput
 currentComponent (Authenticated (AuthenticatedProfile { username })) Admin =
   slot_ (Proxy :: _ "admin") unit Admin.component { currentUsername: username }
 currentComponent _ Admin = text ""
@@ -326,16 +414,22 @@ tab :: forall w. DefinedRoute -> DefinedRoute -> HTML w Action
 tab tabRoute activeRoute =
   div [ class_ "col text-center nav-item px-0" ]
     [ a
-        [ class_ $ "nav-link" <> guard (tabRoute == activeRoute) " active"
+        [ class_ $ "nav-link" <> guard (sameTab tabRoute activeRoute) " active"
         , onClick (const $ NavigateTo tabRoute)
         ]
         [ text (tabLabel tabRoute) ]
     ]
 
+sameTab :: DefinedRoute -> DefinedRoute -> Boolean
+sameTab left right =
+  case left, right of
+    Calendar _, Calendar _ -> true
+    _, _ -> left == right
+
 tabLabel :: DefinedRoute -> String
 tabLabel Note = "Notes"
 tabLabel Checklist = "Checklists"
-tabLabel Calendar = "Calendar"
+tabLabel (Calendar _) = "Calendar"
 tabLabel Admin = "Admin"
 tabLabel Signup = "Signup"
 tabLabel Signin = "Signin"

@@ -15,7 +15,7 @@ import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
 import Helpers.DateTime as DateTime
 import Helpers.DateTime (formatCalendarDayDateLabelWithReference)
-import Pages.Calendar (PresenceCueColorToken(..), SharedPresenceCuePreference(..), SharedPresenceLoadState(..), SharedPresenceState(..), buildSharedPresenceRailView, buildSharedPresenceSegmentLayouts, decodeCalendarItemsResponse, decodePeriodTripsResponse, decodePresenceCuePreferencesJson, decodeSharedUsersResponse, decodeTripPlacesResponse, deriveSharedPresence, encodePresenceCuePreferencesJson, maxVisibleSharedPresenceUsers, normalizePeriodTripGroups, presenceInspectionAriaLabel, presenceInspectionStateText, presenceInspectionTimeText, resolveSharedPresenceToneClass, shareWriteErrorMessage, sharedPresenceLaneToneClass, sharedPresenceSegmentRailClass, shouldRenderDayCalendarShell, shouldRenderSharedPresenceRail, subscriptionWriteErrorMessage, tripWriteErrorMessage, validateShareUsername)
+import Pages.Calendar (PresenceCueColorToken(..), SharedPresenceCuePreference(..), SharedPresenceLoadState(..), SharedPresenceState(..), buildSharedPresenceRailView, buildSharedPresenceSegmentLayouts, decodeCalendarItemsResponse, decodePeriodTripsResponse, decodePresenceCuePreferencesJson, decodeSharedUsersResponse, decodeTripPlacesResponse, deriveSharedPresence, encodePresenceCuePreferencesJson, maxVisibleSharedPresenceUsers, normalizePeriodTripGroups, presenceInspectionAriaLabel, presenceInspectionStateText, presenceInspectionTimeText, resolveInitialFocusDate, resolveSharedPresenceToneClass, shareWriteErrorMessage, sharedPresenceLaneToneClass, sharedPresenceSegmentRailClass, shouldRenderDayCalendarShell, shouldRenderSharedPresenceRail, subscriptionWriteErrorMessage, tripWriteErrorMessage, validateShareUsername)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (fail, shouldEqual)
 import Test.Support.Builders (unsafeDateTime)
@@ -50,6 +50,16 @@ spec =
       case decodePeriodTripsResponse response of
         Right groups -> summarizePeriodTripGroups groups `shouldEqual` summarizePeriodTripGroups decodedPeriodTrips
         Left err -> fail $ "Expected decoded period trips, got: " <> show err
+
+    it "resolves the initial focus date from a valid routed day" do
+      resolveInitialFocusDate "2026-04-04" (Just "2026-04-02")
+        `shouldEqual` "2026-04-02"
+
+    it "falls back to today when the routed day is invalid or missing" do
+      resolveInitialFocusDate "2026-04-04" (Just "invalid")
+        `shouldEqual` "2026-04-04"
+      resolveInitialFocusDate "2026-04-04" Nothing
+        `shouldEqual` "2026-04-04"
 
     it "normalizes grouped period trips while preserving order" do
       let

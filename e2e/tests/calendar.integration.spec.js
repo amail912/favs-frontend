@@ -1779,6 +1779,88 @@ test("calendar day view arrows navigate previous and next day and stay hidden ou
   await expect(nextButton).toHaveCount(0);
 });
 
+test("calendar restores consulted day from URL query and keeps it on reload", async ({ authenticatedPage: page }) => {
+  const targetDate = isolatedFutureDate(2460);
+  const focusDate = toLocalDateInput(targetDate);
+
+  await page.goto(`/calendar?day=${focusDate}`);
+  await expect(page).toHaveURL(new RegExp(`/calendar\\?day=${focusDate}$`));
+  await expect(page.locator(".calendar-view-date-trigger")).toHaveText(toFrenchDayLabel(targetDate));
+
+  await page.reload();
+  await expect(page).toHaveURL(new RegExp(`/calendar\\?day=${focusDate}$`));
+  await expect(page.locator(".calendar-view-date-trigger")).toHaveText(toFrenchDayLabel(targetDate));
+});
+
+test("calendar day query updates browser history and back forward restores consulted days", async ({ authenticatedPage: page }) => {
+  const baseDate = isolatedFutureDate(2490);
+  const nextDate = shiftDateByDays(baseDate, 1);
+  const baseDateValue = toLocalDateInput(baseDate);
+  const title = `History day ${Date.now()}`;
+  const start = new Date(`${baseDateValue}T09:00`);
+  const end = new Date(`${baseDateValue}T10:00`);
+
+  await page.goto(`/calendar?day=${baseDateValue}`);
+
+  const createModal = await openCreateModal(page);
+  await createModal.getByPlaceholder("Titre").fill(title);
+  await fillCalendarDateTimeField(createModal, "Début", toLocalDatetimeInput(start));
+  await fillCalendarDateTimeField(createModal, "Fin", toLocalDatetimeInput(end));
+
+  const createResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items") &&
+      response.request().method() === "POST"
+  );
+
+  await createModal.getByRole("button", { name: "Valider" }).click();
+  expect((await createResponsePromise).ok()).toBeTruthy();
+
+  const itemRow = page.locator(".calendar-calendar-card", {
+    has: page.locator(".calendar-calendar-item-title", { hasText: title })
+  }).first();
+
+  await expect(itemRow).toBeVisible();
+  await page.locator(".calendar-view-day-nav__next").click();
+  await expect(page).toHaveURL(new RegExp(`/calendar\\?day=${toLocalDateInput(nextDate)}$`));
+  await expect(itemRow).toHaveCount(0);
+
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`/calendar\\?day=${baseDateValue}$`));
+  await expect(page.locator(".calendar-view-date-trigger")).toHaveText(toFrenchDayLabel(baseDate));
+  await expect(itemRow).toBeVisible();
+
+  await page.goForward();
+  await expect(page).toHaveURL(new RegExp(`/calendar\\?day=${toLocalDateInput(nextDate)}$`));
+  await expect(page.locator(".calendar-view-date-trigger")).toHaveText(toFrenchDayLabel(nextDate));
+  await expect(itemRow).toHaveCount(0);
+});
+
+test("calendar removes the day query when leaving day view", async ({ authenticatedPage: page }) => {
+  const targetDate = isolatedFutureDate(2520);
+  const focusDate = toLocalDateInput(targetDate);
+
+  await page.goto(`/calendar?day=${focusDate}`);
+  await expect(page).toHaveURL(new RegExp(`/calendar\\?day=${focusDate}$`));
+
+  await page.getByRole("button", { name: "Semaine" }).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+
+  await page.getByRole("button", { name: "Jour" }).click();
+  await expect(page).toHaveURL(/\/calendar\?day=/);
+
+  await page.getByRole("button", { name: "Mois" }).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+});
+
+test("calendar falls back to today when the day query is invalid", async ({ authenticatedPage: page }) => {
+  const today = new Date();
+
+  await page.goto("/calendar?day=invalid");
+  await expect(page.locator(".calendar-view-date-trigger")).toHaveText(toFrenchDayLabel(today));
+  await expect(page.locator(".calendar-view-date-trigger")).not.toHaveText("invalid");
+});
+
 test("calendar mobile actions: secondary actions stay reachable across views", async ({ authenticatedPage: page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
 
