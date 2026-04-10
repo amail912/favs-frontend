@@ -1,6 +1,7 @@
 module Pages.Calendar
   ( component
   , Input
+  , CreateItemMode(..)
   , CalendarRouteOutput(..)
   , normalizeCalendarRouteState
   , resolveInitialFocusDate
@@ -12,6 +13,7 @@ module Pages.Calendar
   , TripCalendarItemFields
   , TaskDraft
   , TripDraft
+  , CreateDraft(..)
   , ItemStatus(..)
   , ItemType(..)
   , SortMode(..)
@@ -31,6 +33,8 @@ module Pages.Calendar
   , EditError(..)
   , applyEditDraft
   , buildEditDraft
+  , prefillCreateDraft
+  , applyCreateDraftStartChange
   , durationMinutesBetween
   , sortItems
   , validateTask
@@ -341,7 +345,14 @@ renderRecurrenceSlot slotId draft onOutput =
   slot (Proxy :: _ "recurrence") slotId Recurrence.component draft onOutput
 
 prefillCreateDraft :: CreateItemMode -> String -> CreateDraft -> CreateDraft
-prefillCreateDraft _ _ draft = draft
+prefillCreateDraft _ focusDate draft =
+  let
+    startValue = focusDate <> "T00:00"
+  in
+    if isDateTimeLocal startValue then
+      (applyCreateDraftStartChange { windowStart: startValue, endManuallyEdited: false, draft }).draft
+    else
+      draft
 
 itemTypeIso :: Iso' ItemType Export.ItemType
 itemTypeIso = iso toExport fromExport
@@ -524,7 +535,11 @@ handleAction action = handleError $
             lastMode = st ^. _calendarLastCreateMode
             baseDraft = emptyCreateDraft lastMode
             nextDraft = prefillCreateDraft lastMode (st ^. _viewFocusDatePage) baseDraft
-          modify_ ((_calendarDraft .~ nextDraft) <<< (_calendarValidationError .~ Nothing))
+          modify_
+            ( (_calendarDraft .~ nextDraft)
+                <<< (_calendar <<< _createEndManuallyEdited .~ false)
+                <<< (_calendarValidationError .~ Nothing)
+            )
         ViewOpenEdit _ -> focusModal
         ViewOpenEditFromDoubleClick _ -> focusModal
         ViewChangedAction _ -> do
@@ -547,7 +562,11 @@ handleAction action = handleError $
           st <- get
           let
             lastMode = st ^. _calendarLastCreateMode
-          modify_ ((_calendarDraft .~ emptyCreateDraft lastMode) <<< (_calendarValidationError .~ Nothing))
+          modify_
+            ( (_calendarDraft .~ emptyCreateDraft lastMode)
+                <<< (_calendar <<< _createEndManuallyEdited .~ false)
+                <<< (_calendarValidationError .~ Nothing)
+            )
         _ -> pure unit
     GlobalKeyDown key ->
       if key == "Escape" then do
@@ -559,7 +578,11 @@ handleAction action = handleError $
             st' <- get
             let
               lastMode = st' ^. _calendarLastCreateMode
-            modify_ ((_calendarDraft .~ emptyCreateDraft lastMode) <<< (_calendarValidationError .~ Nothing))
+            modify_
+              ( (_calendarDraft .~ emptyCreateDraft lastMode)
+                  <<< (_calendar <<< _createEndManuallyEdited .~ false)
+                  <<< (_calendarValidationError .~ Nothing)
+              )
           Just _ -> handleViewAction ViewCloseModal
           Nothing -> pure unit
       else pure unit
@@ -1248,7 +1271,10 @@ statusOk r = unwrap r.status >= 200 && unwrap r.status < 300
 submitTask :: ErrorAgendaAppM Unit
 submitTask = do
   st <- get
-  case st ^. _calendarDraft of
+  let
+    contextualDraft = applyCreateDraftContextualDefaults (st ^. _viewFocusDatePage) (st ^. _calendarDraft)
+  modify_ (_calendarDraft .~ contextualDraft)
+  case contextualDraft of
     CreateTaskDraft draft ->
       case validateTask draft of
         Left err -> modify_ (_calendarValidationError .~ Just (validationErrorMessage err))
@@ -1357,6 +1383,7 @@ type AgendaModalsInput =
   { activeModal :: Maybe AgendaModal
   , overlapSheet :: Maybe OverlapSheet
   , sharedPresenceOverflowSheet :: Maybe SharedPresenceOverflowSheet
+  , focusDate :: String
   , exportItems :: Array Export.Item
   , draft :: CreateDraft
   , tripPlaces :: TripPlacesState
@@ -1375,7 +1402,7 @@ type AgendaModalsInput =
   }
 
 renderAgendaModals :: AgendaModalsInput -> H.ComponentHTML Action Slots Aff
-renderAgendaModals { activeModal, overlapSheet, sharedPresenceOverflowSheet, exportItems, draft, tripPlaces, shareList, subscriptionList, validationError, editPanel, itemActionsItem, deleteConfirmTarget, deleteInFlight, deleteFeedback, presenceCuePreferences, presenceInspection, presenceInspectionPinned, isMobile } =
+renderAgendaModals { activeModal, overlapSheet, sharedPresenceOverflowSheet, focusDate, exportItems, draft, tripPlaces, shareList, subscriptionList, validationError, editPanel, itemActionsItem, deleteConfirmTarget, deleteInFlight, deleteFeedback, presenceCuePreferences, presenceInspection, presenceInspectionPinned, isMobile } =
   let
     renderModal title content = Modal.renderModal title content (ViewAction ViewCloseModal) (ViewAction ViewCloseModal)
     renderExportModal items =
@@ -1418,7 +1445,7 @@ renderAgendaModals { activeModal, overlapSheet, sharedPresenceOverflowSheet, exp
                   (ViewAction ViewCloseModal)
                   (deleteActionState target)
               ]
-        ModalCreateItem -> Modal.renderModalWithValidateState "Créer un item" [ renderCreateContent draft tripPlaces validationError isMobile ]
+        ModalCreateItem -> Modal.renderModalWithValidateState "Créer un item" [ renderCreateContent focusDate draft tripPlaces validationError isMobile ]
           (ViewAction ViewCloseCreate)
           createValidateState
         ModalImportCsv ->
@@ -1463,11 +1490,12 @@ buildAgendaModalsInput :: State -> AgendaModalsInput
 buildAgendaModalsInput { calendar, view } =
   let
     { items, draft, tripPlaces, shareList, subscriptionList, validationError, presenceCuePreferences } = calendar
-    { activeModal, overlapSheet, sharedPresenceOverflowSheet, editPanel, itemActionsItem, deleteConfirmTarget, deleteInFlight, deleteFeedback, presenceInspection, presenceInspectionPinned } = view
+    { activeModal, overlapSheet, sharedPresenceOverflowSheet, focusDate, editPanel, itemActionsItem, deleteConfirmTarget, deleteInFlight, deleteFeedback, presenceInspection, presenceInspectionPinned } = view
   in
     { activeModal
     , overlapSheet
     , sharedPresenceOverflowSheet
+    , focusDate
     , exportItems: mapMaybe toExportItem items
     , draft
     , tripPlaces
@@ -2240,7 +2268,15 @@ applyCreateFormAction action =
         )
     CreateFormDraftModeChanged rawMode -> do
       let mode = parseCreateItemMode rawMode
-      modify_ (_calendar %~ ((_draft .~ emptyCreateDraft mode) <<< (_lastCreateMode .~ mode) <<< (_validationError .~ Nothing)))
+      modify_
+        ( _calendar
+            %~
+              ( (_draft .~ emptyCreateDraft mode)
+                  <<< (_lastCreateMode .~ mode)
+                  <<< (_createEndManuallyEdited .~ false)
+                  <<< (_validationError .~ Nothing)
+              )
+        )
       st <- get
       let updatedDraft = prefillCreateDraft mode (st ^. _viewFocusDatePage) (st ^. _calendarDraft)
       modify_ (_calendarDraft .~ updatedDraft)
@@ -2249,8 +2285,17 @@ applyCreateFormAction action =
         ( _calendar
             %~
               ( \calendarState ->
+                  let
+                    nextDraftResult =
+                      applyCreateDraftStartChange
+                        { windowStart
+                        , endManuallyEdited: calendarState.createEndManuallyEdited
+                        , draft: calendarState.draft
+                        }
+                  in
                   calendarState
-                    { draft = mapCreateDraftWindowStart windowStart calendarState.draft
+                    { draft = nextDraftResult.draft
+                    , createEndManuallyEdited = nextDraftResult.endManuallyEdited
                     , validationError = Nothing
                     }
               )
@@ -2262,6 +2307,7 @@ applyCreateFormAction action =
               ( \calendarState ->
                   calendarState
                     { draft = mapCreateDraftWindowEnd windowEnd calendarState.draft
+                    , createEndManuallyEdited = true
                     , validationError = Nothing
                     }
               )
@@ -2328,13 +2374,17 @@ applyCreateFormAction action =
         )
 
 renderCreateContent
-  :: CreateDraft
+  :: String
+  -> CreateDraft
   -> TripPlacesState
   -> Maybe String
   -> Boolean
   -> H.ComponentHTML Action Slots Aff
-renderCreateContent draft tripPlaces validationError isMobile =
-  case draft of
+renderCreateContent focusDate draft tripPlaces validationError isMobile =
+  let
+    displayDraft = applyCreateDraftContextualDefaults focusDate draft
+  in
+    case displayDraft of
     CreateTaskDraft taskDraft ->
       div [ class_ "calendar-modal-stack" ]
         [ modeField CreateTask
@@ -2489,6 +2539,7 @@ toNewTrip draft = do
 type CalendarState =
   { items :: Array CalendarItem
   , draft :: CreateDraft
+  , createEndManuallyEdited :: Boolean
   , validationError :: Maybe String
   , lastCreateMode :: CreateItemMode
   , tripPlaces :: TripPlacesState
@@ -2502,6 +2553,7 @@ calendarInitialState :: CalendarState
 calendarInitialState =
   { items: []
   , draft: emptyCreateDraft CreateTask
+  , createEndManuallyEdited: false
   , validationError: Nothing
   , lastCreateMode: CreateTask
   , tripPlaces: TripPlacesLoading
@@ -2553,6 +2605,9 @@ _items = prop (Proxy :: _ "items")
 
 _draft :: Lens' CalendarState CreateDraft
 _draft = prop (Proxy :: _ "draft")
+
+_createEndManuallyEdited :: Lens' CalendarState Boolean
+_createEndManuallyEdited = prop (Proxy :: _ "createEndManuallyEdited")
 
 _validationError :: Lens' CalendarState (Maybe String)
 _validationError = prop (Proxy :: _ "validationError")
@@ -4505,6 +4560,59 @@ mapCreateDraftWindowEnd :: String -> CreateDraft -> CreateDraft
 mapCreateDraftWindowEnd raw = case _ of
   CreateTaskDraft draft -> CreateTaskDraft (draft { windowEnd = raw })
   CreateTripDraft draft -> CreateTripDraft (draft { windowEnd = raw })
+
+createDraftWindowEndValue :: CreateDraft -> String
+createDraftWindowEndValue = case _ of
+  CreateTaskDraft draft -> draft.windowEnd
+  CreateTripDraft draft -> draft.windowEnd
+
+createDraftWindowStartValue :: CreateDraft -> String
+createDraftWindowStartValue = case _ of
+  CreateTaskDraft draft -> draft.windowStart
+  CreateTripDraft draft -> draft.windowStart
+
+createDraftMode :: CreateDraft -> CreateItemMode
+createDraftMode = case _ of
+  CreateTaskDraft _ -> CreateTask
+  CreateTripDraft _ -> CreateTrip
+
+applyCreateDraftContextualDefaults :: String -> CreateDraft -> CreateDraft
+applyCreateDraftContextualDefaults focusDate draft =
+  let
+    startValue = createDraftWindowStartValue draft
+  in
+    if StringCommon.trim startValue == "" then
+      prefillCreateDraft (createDraftMode draft) focusDate draft
+    else
+      (applyCreateDraftStartChange { windowStart: startValue, endManuallyEdited: false, draft }).draft
+
+applyCreateDraftStartChange
+  :: { windowStart :: String
+     , endManuallyEdited :: Boolean
+     , draft :: CreateDraft
+     }
+  -> { draft :: CreateDraft
+     , endManuallyEdited :: Boolean
+     }
+applyCreateDraftStartChange { windowStart, endManuallyEdited, draft } =
+  let
+    draftWithStart = mapCreateDraftWindowStart windowStart draft
+    endIsEmpty = StringCommon.trim (createDraftWindowEndValue draftWithStart) == ""
+  in
+    if endManuallyEdited || not endIsEmpty then
+      { draft: draftWithStart
+      , endManuallyEdited
+      }
+    else
+      case parseDateTimeLocal windowStart >>= shiftMinutes 60 of
+        Just endDateTime ->
+          { draft: mapCreateDraftWindowEnd (formatDateTimeLocal endDateTime) draftWithStart
+          , endManuallyEdited: false
+          }
+        Nothing ->
+          { draft: draftWithStart
+          , endManuallyEdited
+          }
 
 validateTask :: TaskDraft -> Either ValidationError TaskDraft
 validateTask draft =

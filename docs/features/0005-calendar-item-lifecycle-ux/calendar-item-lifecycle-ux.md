@@ -25,11 +25,11 @@ Allow users to manage calendar items directly where they are displayed, starting
 
 ### Done
 - [001 Direct Item Deletion Across Calendar Surfaces](done/001-direct-item-deletion-across-calendar-surfaces.md) - Delete server-backed tasks and trips directly from Calendar surfaces with desktop/mobile-adapted entrypoints and explicit confirmation.
+- [002 Create Item Contextual Date-Time Defaults](done/002-create-item-contextual-datetime-defaults.md) - Prefill create start from consulted day and autofill end to start + 1h while keeping user-defined end values untouched.
 
 ### Ready
 
 ### To Refine
-- [002 Create Item Contextual Date-Time Defaults](to-refine/002-create-item-contextual-datetime-defaults.md) - Pre-fill start date from consulted day and auto-fill end date-time to start + 1h when end time is empty.
 
 ### Canceled
 

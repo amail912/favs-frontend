@@ -7,8 +7,10 @@ import Calendar.ExImport.Import (parseCsv, parseIcs)
 import Pages.Calendar
   ( CalendarItem(..)
   , CalendarItemContent(..)
+  , CreateItemMode(..)
   , TaskDraft
   , TripDraft
+  , CreateDraft(..)
   , ItemStatus(..)
   , ItemType(..)
   , SortMode(..)
@@ -24,6 +26,8 @@ import Pages.Calendar
   , EditError(..)
   , applyEditDraft
   , buildEditDraft
+  , prefillCreateDraft
+  , applyCreateDraftStartChange
   , durationMinutesBetween
   , sortItems
   , validateTask
@@ -477,6 +481,66 @@ spec = do
     it "keeps two-line timeline layout for long mobile cards" do
       shouldUseCompactTimelineCardLayout { isMobile: true, durationMinutes: 60 } `shouldEqual` false
 
+  describe "Calendar create contextual defaults" do
+    it "prefills task start/end from consulted day" do
+      let
+        draft = prefillCreateDraft CreateTask "2026-02-19" (CreateTaskDraft emptyTaskDraftValue)
+      case draft of
+        CreateTaskDraft taskDraft -> do
+          taskDraft.windowStart `shouldEqual` "2026-02-19T00:00"
+          taskDraft.windowEnd `shouldEqual` "2026-02-19T01:00"
+        _ -> fail "Expected task draft"
+
+    it "prefills trip start/end from consulted day" do
+      let
+        draft = prefillCreateDraft CreateTrip "2026-02-19" (CreateTripDraft emptyTripDraftValue)
+      case draft of
+        CreateTripDraft tripDraft -> do
+          tripDraft.windowStart `shouldEqual` "2026-02-19T00:00"
+          tripDraft.windowEnd `shouldEqual` "2026-02-19T01:00"
+        _ -> fail "Expected trip draft"
+
+    it "autofills end when start is changed and end is empty" do
+      let
+        result =
+          applyCreateDraftStartChange
+            { windowStart: "2026-02-19T14:30"
+            , endManuallyEdited: false
+            , draft: CreateTaskDraft (emptyTaskDraftValue { windowEnd = "" })
+            }
+      case result.draft of
+        CreateTaskDraft taskDraft -> do
+          taskDraft.windowEnd `shouldEqual` "2026-02-19T15:30"
+          result.endManuallyEdited `shouldEqual` false
+        _ -> fail "Expected task draft"
+
+    it "keeps user-defined end value when end was manually edited" do
+      let
+        result =
+          applyCreateDraftStartChange
+            { windowStart: "2026-02-19T14:30"
+            , endManuallyEdited: true
+            , draft: CreateTaskDraft (emptyTaskDraftValue { windowEnd = "2026-02-19T18:45" })
+            }
+      case result.draft of
+        CreateTaskDraft taskDraft -> do
+          taskDraft.windowEnd `shouldEqual` "2026-02-19T18:45"
+          result.endManuallyEdited `shouldEqual` true
+        _ -> fail "Expected task draft"
+
+    it "autofills end with day rollover when start is near midnight" do
+      let
+        result =
+          applyCreateDraftStartChange
+            { windowStart: "2026-02-19T23:30"
+            , endManuallyEdited: false
+            , draft: CreateTripDraft (emptyTripDraftValue { windowEnd = "" })
+            }
+      case result.draft of
+        CreateTripDraft tripDraft ->
+          tripDraft.windowEnd `shouldEqual` "2026-02-20T00:30"
+        _ -> fail "Expected trip draft"
+
   describe "Calendar day initial focus" do
     it "targets current time for today with tasks" do
       let
@@ -641,3 +705,23 @@ spec = do
       let
         occurrences = generateOccurrencesForMonth Weekly [ "2026-02-19" ] "2026-02-05T09:00"
       occurrences `shouldEqual` [ "2026-02-05", "2026-02-12", "2026-02-26" ]
+
+emptyTaskDraftValue :: TaskDraft
+emptyTaskDraftValue =
+  { itemType: Task
+  , title: ""
+  , windowStart: ""
+  , windowEnd: ""
+  , category: ""
+  , status: Todo
+  , actualDurationMinutes: ""
+  , recurrence: defaultRecurrenceDraft
+  }
+
+emptyTripDraftValue :: TripDraft
+emptyTripDraftValue =
+  { departurePlaceId: ""
+  , arrivalPlaceId: ""
+  , windowStart: ""
+  , windowEnd: ""
+  }

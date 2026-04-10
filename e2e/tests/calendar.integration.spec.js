@@ -98,6 +98,22 @@ async function fillCalendarDateTimeField(container, label, isoLocalValue) {
   await picker.locator(".ui-datetime-picker__native").fill(isoLocalValue);
 }
 
+async function readCalendarDateTimeField(container, label) {
+  const picker = container.locator(`.ui-datetime-picker[data-datetime-label="${label}"]`);
+  await expect(picker).toBeVisible();
+
+  const desktopDate = picker.locator(".ui-datetime-picker__date");
+  const desktopTime = picker.locator(".ui-datetime-picker__time");
+
+  if (await desktopDate.count()) {
+    const datePart = await desktopDate.inputValue();
+    const timePart = await desktopTime.inputValue();
+    return `${datePart}T${timePart}`;
+  }
+
+  return picker.locator(".ui-datetime-picker__native").inputValue();
+}
+
 function defaultSharedPresenceTrips(focusDate) {
   return [
     {
@@ -1295,6 +1311,45 @@ test("calendar: create modal resets on cancel", async ({ authenticatedPage: page
 
   modal = await openCreateModal(page);
   await expect(modal.getByPlaceholder("Titre")).toHaveValue("");
+});
+
+test("calendar create: defaults start/end from consulted day and keeps manual end override on desktop", async ({ authenticatedPage: page }) => {
+  const targetDate = isolatedFutureDate(2601);
+  const focusDate = toLocalDateInput(targetDate);
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const modal = await openCreateModal(page);
+  await expect.poll(() => readCalendarDateTimeField(modal, "Début")).toBe(`${focusDate}T00:00`);
+  await expect.poll(() => readCalendarDateTimeField(modal, "Fin")).toBe(`${focusDate}T01:00`);
+
+  await fillCalendarDateTimeField(modal, "Fin", `${focusDate}T10:45`);
+  await fillCalendarDateTimeField(modal, "Début", `${focusDate}T12:00`);
+  await expect(await readCalendarDateTimeField(modal, "Fin")).toBe(`${focusDate}T10:45`);
+});
+
+test("calendar create: defaults start/end from consulted day and keeps manual end override on mobile", async ({ authenticatedPage: page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForFunction(() => window.innerWidth <= 768);
+  await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+  await page.reload();
+
+  const targetDate = isolatedFutureDate(2602);
+  const focusDate = toLocalDateInput(targetDate);
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const modal = await openCreateModal(page);
+  await expect.poll(() => readCalendarDateTimeField(modal, "Début")).toBe(`${focusDate}T00:00`);
+  await expect.poll(() => readCalendarDateTimeField(modal, "Fin")).toBe(`${focusDate}T01:00`);
+
+  await fillCalendarDateTimeField(modal, "Fin", `${focusDate}T10:45`);
+  await fillCalendarDateTimeField(modal, "Début", `${focusDate}T12:00`);
+  await expect(await readCalendarDateTimeField(modal, "Fin")).toBe(`${focusDate}T10:45`);
 });
 
 test("calendar: create fab stays visible across views", async ({ authenticatedPage: page }) => {
