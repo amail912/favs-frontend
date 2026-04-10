@@ -1838,10 +1838,11 @@ renderTimelineItem isMobile draggingId focusTargetIdentity layout =
         , style inlineStyle
         ] <> focusTargetProps <> editProps
       )
-      [ renderTimelineActionButtons isMobile layout.item
-      , div
-          ([ class_ $ calendarItemTimelineCardClass layout.item <> draggingClass <> compactClass ] <> dragProps)
-          [ div touchProps [ renderTimelineCardContent { isMobile, durationMinutes: layout.duration, item: layout.item } ] ]
+      [ div
+          ([ class_ $ calendarItemTimelineCardClass layout.item <> " calendar-calendar-card-shell" <> draggingClass <> compactClass ] <> dragProps)
+          [ renderTimelineActionButtons isMobile layout.item
+          , div touchProps [ renderTimelineCardContent { isMobile, durationMinutes: layout.duration, item: layout.item } ]
+          ]
       ]
 
 renderMobileOverlapStack
@@ -2057,7 +2058,7 @@ renderTimelineActionButtons :: forall w. Boolean -> CalendarItem -> HTML w Actio
 renderTimelineActionButtons isMobile item =
   if isMobile || not (calendarItemSupportsEdit item) then text ""
   else
-    div [ class_ "calendar-item-actions" ]
+    div [ class_ "calendar-item-actions calendar-item-actions--timeline" ]
       [ button
           [ class_ "btn btn-sm btn-outline-secondary calendar-edit calendar-edit--timeline"
           , attr (AttrName "aria-label") "Editer"

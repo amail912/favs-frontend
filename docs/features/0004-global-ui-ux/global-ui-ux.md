@@ -41,11 +41,11 @@ Provide coherent, reusable global UI/UX behavior across shell identity surfaces,
 - [006 Browser History Day Restoration In Calendar](done/006-browser-history-day-restoration-in-calendar.md) - Synchronize consulted Day view with `?day=YYYY-MM-DD` and restore it through browser back/forward.
 - [007 Day View Today Shortcut](done/007-day-view-today-shortcut.md) - Add an `Aujourd'hui` Day-only control in Day view and keep state/URL synchronization coherent with existing day navigation.
 - [008 Day View Short Item Title Readability](done/008-day-view-short-item-title-readability.md) - Add compact fallback rules for short Day cards with same-line time/title, hidden category, and an `11px` minimum title size.
+- [009 Desktop Day View Timeline Time Alignment](done/009-desktop-day-view-timeline-time-alignment.md) - Fix desktop Day timeline geometry so item card top/bottom align exactly with item start/end times.
 
 ### Ready
 
 ### To Refine
-- [009 Desktop Day View Timeline Time Alignment](to-refine/009-desktop-day-view-timeline-time-alignment.md) - Fix desktop Day timeline vertical positioning so card top and bottom match item start/end times.
 
 ### Canceled
 

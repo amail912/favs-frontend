@@ -1162,6 +1162,83 @@ test("calendar desktop: drag and drop keeps the focused date and dropped time", 
   })).toHaveCount(0);
 });
 
+test("calendar desktop: timeline card top and bottom align with item start and end time", async ({ authenticatedPage: page }) => {
+  const targetDate = isolatedFutureDate(2142);
+  const focusDate = toLocalDateInput(targetDate);
+  const title = `Desktop alignment ${Date.now()}`;
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const createModal = await openCreateModal(page);
+  await createModal.getByPlaceholder("Titre").fill(title);
+  await fillCalendarDateTimeField(createModal, "Début", `${focusDate}T16:00`);
+  await fillCalendarDateTimeField(createModal, "Fin", `${focusDate}T19:00`);
+
+  const createResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items") &&
+      response.request().method() === "POST"
+  );
+
+  await createModal.getByRole("button", { name: "Valider" }).click();
+  expect((await createResponsePromise).ok()).toBeTruthy();
+
+  const grid = page.locator(".calendar-calendar-items");
+  const card = page.locator(".calendar-calendar-card", {
+    has: page.locator(".calendar-calendar-item-title", { hasText: title })
+  }).first();
+  const item = page.locator(".calendar-calendar-item", {
+    has: page.locator(".calendar-calendar-item-title", { hasText: title })
+  }).first();
+
+  await expect(grid).toBeVisible();
+  await expect(card).toBeVisible();
+  await expect(item).toBeVisible();
+
+  await expect(card.locator(".calendar-calendar-item-time")).toHaveText("16:00 → 19:00");
+
+  const geometry = await item.evaluate(element => {
+    const inlineStyle = element.getAttribute("style") || "";
+    const startMatch = inlineStyle.match(/--start:([0-9]+);/);
+    const durationMatch = inlineStyle.match(/--duration:([0-9]+);/);
+    const parentHeight = element.parentElement ? element.parentElement.clientHeight : 0;
+    const cardElement = element.querySelector(".calendar-calendar-card");
+    if (!cardElement || !startMatch || !durationMatch || parentHeight <= 0) {
+      return null;
+    }
+    const startMinutes = Number(startMatch[1]);
+    const durationMinutes = Number(durationMatch[1]);
+    const minuteHeight = parentHeight / 1440;
+    return {
+      startMinutes,
+      durationMinutes,
+      minuteHeight,
+      top: element.offsetTop,
+      height: element.offsetHeight,
+      cardClassName: cardElement.className,
+      cardOffsetTop: cardElement.offsetTop,
+      cardOffsetHeight: cardElement.offsetHeight
+    };
+  });
+  if (!geometry) {
+    throw new Error("Missing timeline alignment geometry");
+  }
+
+  expect(geometry.startMinutes).toBe(16 * 60);
+  expect(geometry.durationMinutes).toBe(3 * 60);
+
+  const expectedTop = geometry.startMinutes * geometry.minuteHeight;
+  const expectedHeight = geometry.durationMinutes * geometry.minuteHeight;
+
+  expect(Math.abs(geometry.top - expectedTop)).toBeLessThanOrEqual(2);
+  expect(Math.abs(geometry.height - expectedHeight)).toBeLessThanOrEqual(2);
+  expect(geometry.cardClassName).toContain("calendar-calendar-card-shell");
+  expect(geometry.cardOffsetTop).toBe(0);
+  expect(Math.abs(geometry.cardOffsetHeight - geometry.height)).toBeLessThanOrEqual(2);
+});
+
 test("calendar desktop: short day items use compact title fallback", async ({ authenticatedPage: page }) => {
   const targetDate = isolatedFutureDate(2140);
   const focusDate = toLocalDateInput(targetDate);
