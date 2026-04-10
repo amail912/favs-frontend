@@ -1841,6 +1841,12 @@ a.nav-link:hover {
     font-size: 0.7rem;
   }
 
+  .calendar-calendar-item-time,
+  .calendar-calendar-item-time--compact,
+  .calendar-card-time {
+    font-size: 0.72rem;
+  }
+
   .calendar-calendar-actions .calendar-primary-action,
   .calendar-calendar-actions .calendar-planify,
   .calendar-calendar-actions .calendar-validate {

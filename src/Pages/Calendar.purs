@@ -2293,11 +2293,11 @@ applyCreateFormAction action =
                         , draft: calendarState.draft
                         }
                   in
-                  calendarState
-                    { draft = nextDraftResult.draft
-                    , createEndManuallyEdited = nextDraftResult.endManuallyEdited
-                    , validationError = Nothing
-                    }
+                    calendarState
+                      { draft = nextDraftResult.draft
+                      , createEndManuallyEdited = nextDraftResult.endManuallyEdited
+                      , validationError = Nothing
+                      }
               )
         )
     CreateFormDraftEndChanged windowEnd ->
@@ -2385,28 +2385,28 @@ renderCreateContent focusDate draft tripPlaces validationError isMobile =
     displayDraft = applyCreateDraftContextualDefaults focusDate draft
   in
     case displayDraft of
-    CreateTaskDraft taskDraft ->
-      div [ class_ "calendar-modal-stack" ]
-        [ modeField CreateTask
-        , field "Titre" (taskTitleInput taskDraft)
-        , dateTimeField CreateStartPicker "Début" CreateFormDraftStartChanged taskDraft.windowStart
-        , dateTimeField CreateEndPicker "Fin" CreateFormDraftEndChanged taskDraft.windowEnd
-        , field "Catégorie" (taskCategoryInput taskDraft)
-        , field "Statut" (taskStatusInput taskDraft)
-        , field "Durée réelle (minutes)" (taskDurationInput taskDraft)
-        , renderRecurrenceSlot RecurrenceCreate taskDraft.recurrence CreateRecurrenceCmd
-        , errorInput validationError
-        ]
-    CreateTripDraft tripDraft ->
-      div [ class_ "calendar-modal-stack" ]
-        [ modeField CreateTrip
-        , renderTripPlacesField "Départ" CreateFormDraftDeparturePlaceChanged tripDraft.departurePlaceId tripPlaces
-        , renderTripPlacesField "Arrivée" CreateFormDraftArrivalPlaceChanged tripDraft.arrivalPlaceId tripPlaces
-        , dateTimeField CreateStartPicker "Départ" CreateFormDraftStartChanged tripDraft.windowStart
-        , dateTimeField CreateEndPicker "Arrivée" CreateFormDraftEndChanged tripDraft.windowEnd
-        , renderTripPlacesFeedback tripPlaces
-        , errorInput validationError
-        ]
+      CreateTaskDraft taskDraft ->
+        div [ class_ "calendar-modal-stack" ]
+          [ modeField CreateTask
+          , field "Titre" (taskTitleInput taskDraft)
+          , dateTimeField CreateStartPicker "Début" CreateFormDraftStartChanged taskDraft.windowStart
+          , dateTimeField CreateEndPicker "Fin" CreateFormDraftEndChanged taskDraft.windowEnd
+          , field "Catégorie" (taskCategoryInput taskDraft)
+          , field "Statut" (taskStatusInput taskDraft)
+          , field "Durée réelle (minutes)" (taskDurationInput taskDraft)
+          , renderRecurrenceSlot RecurrenceCreate taskDraft.recurrence CreateRecurrenceCmd
+          , errorInput validationError
+          ]
+      CreateTripDraft tripDraft ->
+        div [ class_ "calendar-modal-stack" ]
+          [ modeField CreateTrip
+          , renderTripPlacesField "Départ" CreateFormDraftDeparturePlaceChanged tripDraft.departurePlaceId tripPlaces
+          , renderTripPlacesField "Arrivée" CreateFormDraftArrivalPlaceChanged tripDraft.arrivalPlaceId tripPlaces
+          , dateTimeField CreateStartPicker "Départ" CreateFormDraftStartChanged tripDraft.windowStart
+          , dateTimeField CreateEndPicker "Arrivée" CreateFormDraftEndChanged tripDraft.windowEnd
+          , renderTripPlacesFeedback tripPlaces
+          , errorInput validationError
+          ]
   where
   field label content =
     div [ class_ "calendar-modal-field" ]
