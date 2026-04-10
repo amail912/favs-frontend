@@ -1843,8 +1843,14 @@ a.nav-link:hover {
 
   .calendar-calendar-item-time,
   .calendar-calendar-item-time--compact,
-  .calendar-card-time {
-    font-size: 0.72rem;
+  .calendar-card-time,
+  .calendar-card-window,
+  .calendar-overlap-sheet__time,
+  .calendar-card .calendar-card-time,
+  .calendar-card .calendar-card-window,
+  .calendar-calendar-card .calendar-calendar-item-time,
+  .calendar-overlap-sheet .calendar-overlap-sheet__time {
+    font-size: 0.62rem !important;
   }
 
   .calendar-calendar-actions .calendar-primary-action,
