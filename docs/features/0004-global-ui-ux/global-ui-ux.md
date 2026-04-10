@@ -11,6 +11,9 @@ Provide coherent, reusable global UI/UX behavior across shell identity surfaces,
 - Reusable desktop date-time input component with stronger ergonomics than native desktop pickers.
 - Calendar Day view arrow navigation for previous/next day.
 - Browser history restoration for previously consulted calendar day.
+- Day view quick return to current day.
+- Day view short-duration item readability fallback.
+- Desktop Day timeline visual alignment with item times.
 - Mobile behavior remains native input based.
 
 ## Backend Contract Input
@@ -23,6 +26,9 @@ Provide coherent, reusable global UI/UX behavior across shell identity surfaces,
 4. `004` Adoption across existing surfaces.
 5. `005` Day arrow navigation in calendar day view.
 6. `006` Browser history restoration for consulted day.
+7. `007` Day view today shortcut.
+8. `008` Day view short item title readability.
+9. `009` Desktop day view timeline time alignment.
 
 ## Stories
 
@@ -37,6 +43,9 @@ Provide coherent, reusable global UI/UX behavior across shell identity surfaces,
 ### Ready
 
 ### To Refine
+- [007 Day View Today Shortcut](to-refine/007-day-view-today-shortcut.md) - Add an `Aujourd'hui` shortcut in Day view that returns directly to the current day.
+- [008 Day View Short Item Title Readability](to-refine/008-day-view-short-item-title-readability.md) - Keep short-duration card titles readable with a second-line-first policy and fallback to first-line shrink-to-fit when needed.
+- [009 Desktop Day View Timeline Time Alignment](to-refine/009-desktop-day-view-timeline-time-alignment.md) - Fix desktop Day timeline vertical positioning so card top and bottom match item start/end times.
 
 ### Canceled
 
