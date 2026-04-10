@@ -3617,6 +3617,13 @@ renderViewSelector viewMode focusDate todayDate =
                       , onClick (const ViewNextDay)
                       ]
                       [ text "›" ]
+                  , button
+                      [ class_ "calendar-view-day-nav__today btn btn-outline-secondary btn-sm"
+                      , attr (AttrName "type") "button"
+                      , attr (AttrName "aria-label") "Aujourd'hui"
+                      , onClick (const (ViewFocusDateChanged todayDate))
+                      ]
+                      [ text "Aujourd'hui" ]
                   ]
               _ ->
                 dateInput

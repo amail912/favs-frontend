@@ -1891,6 +1891,7 @@ test("calendar day view arrows navigate previous and next day and stay hidden ou
   const baseDate = isolatedFutureDate(2360);
   const previousDate = shiftDateByDays(baseDate, -1);
   const nextDate = shiftDateByDays(baseDate, 1);
+  const today = new Date();
   const focusDate = toLocalDateInput(baseDate);
   const title = `Day arrows ${Date.now()}`;
   const start = new Date(`${focusDate}T10:00`);
@@ -1919,9 +1920,11 @@ test("calendar day view arrows navigate previous and next day and stay hidden ou
   }).first();
   const previousButton = page.locator(".calendar-view-day-nav__previous");
   const nextButton = page.locator(".calendar-view-day-nav__next");
+  const todayButton = page.locator(".calendar-view-day-nav__today");
 
   await expect(previousButton).toBeVisible();
   await expect(nextButton).toBeVisible();
+  await expect(todayButton).toBeVisible();
   await expect(page.locator(".calendar-view-date-trigger")).toHaveText(toFrenchDayLabel(baseDate));
   await expect(itemRow).toBeVisible();
 
@@ -1937,13 +1940,37 @@ test("calendar day view arrows navigate previous and next day and stay hidden ou
   await expect(page.locator(".calendar-view-date-trigger")).toHaveText(toFrenchDayLabel(previousDate));
   await expect(itemRow).toHaveCount(0);
 
+  await todayButton.click();
+  await expect(page.locator(".calendar-view-date-trigger")).toHaveText(toFrenchDayLabel(today));
+  await expect(page).toHaveURL(new RegExp(`/calendar\\?day=${toLocalDateInput(today)}$`));
+
   await page.getByRole("button", { name: "Semaine" }).click();
   await expect(previousButton).toHaveCount(0);
   await expect(nextButton).toHaveCount(0);
+  await expect(todayButton).toHaveCount(0);
 
   await page.getByRole("button", { name: "Mois" }).click();
   await expect(previousButton).toHaveCount(0);
   await expect(nextButton).toHaveCount(0);
+  await expect(todayButton).toHaveCount(0);
+});
+
+test("calendar day view today shortcut is a no-op when already focused on today", async ({ authenticatedPage: page }) => {
+  const today = new Date();
+  const todayValue = toLocalDateInput(today);
+
+  await page.goto(`/calendar?day=${todayValue}`);
+  await expect(page.locator(".calendar-view-date-trigger")).toHaveText(toFrenchDayLabel(today));
+
+  const todayButton = page.locator(".calendar-view-day-nav__today");
+  await expect(todayButton).toBeVisible();
+
+  const historyBefore = await page.evaluate(() => window.history.length);
+  await todayButton.click();
+  await expect(page).toHaveURL(new RegExp(`/calendar\\?day=${todayValue}$`));
+  await expect(page.locator(".calendar-view-date-trigger")).toHaveText(toFrenchDayLabel(today));
+  const historyAfter = await page.evaluate(() => window.history.length);
+  expect(historyAfter).toBe(historyBefore);
 });
 
 test("calendar restores consulted day from URL query and keeps it on reload", async ({ authenticatedPage: page }) => {

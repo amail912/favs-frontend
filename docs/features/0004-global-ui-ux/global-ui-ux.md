@@ -39,11 +39,11 @@ Provide coherent, reusable global UI/UX behavior across shell identity surfaces,
 - [004 Date-Time UX Adoption Across The App](done/004-datetime-ux-adoption-across-the-app.md) - Adopt the shared date-time display and desktop input primitives across current app surfaces and list any remaining non-migrated ones.
 - [005 Day Arrow Navigation In Calendar Day View](done/005-day-arrow-navigation-in-calendar-day-view.md) - Add previous/next day arrows in Calendar Day view, synchronized with the existing canonical day state.
 - [006 Browser History Day Restoration In Calendar](done/006-browser-history-day-restoration-in-calendar.md) - Synchronize consulted Day view with `?day=YYYY-MM-DD` and restore it through browser back/forward.
+- [007 Day View Today Shortcut](done/007-day-view-today-shortcut.md) - Add an `Aujourd'hui` Day-only control in Day view and keep state/URL synchronization coherent with existing day navigation.
 
 ### Ready
 
 ### To Refine
-- [007 Day View Today Shortcut](to-refine/007-day-view-today-shortcut.md) - Add an `Aujourd'hui` shortcut in Day view that returns directly to the current day.
 - [008 Day View Short Item Title Readability](to-refine/008-day-view-short-item-title-readability.md) - Keep short-duration card titles readable with a second-line-first policy and fallback to first-line shrink-to-fit when needed.
 - [009 Desktop Day View Timeline Time Alignment](to-refine/009-desktop-day-view-timeline-time-alignment.md) - Fix desktop Day timeline vertical positioning so card top and bottom match item start/end times.
 
