@@ -1054,6 +1054,28 @@ a.nav-link:hover {
   font-size: 0.98rem;
 }
 
+.calendar-calendar-item-header--compact {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.calendar-calendar-item-time--compact {
+  line-height: 1.1;
+  flex: 0 0 auto;
+}
+
+.calendar-calendar-item-title--compact {
+  min-width: 0;
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.1;
+  font-size: clamp(11px, calc(0.62rem + 0.35vw), 0.98rem);
+}
+
 .calendar-calendar-item .calendar-card-category {
   margin-top: 0;
 }

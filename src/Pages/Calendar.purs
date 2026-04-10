@@ -80,6 +80,7 @@ module Pages.Calendar
   , resolveDroppedWindowFromIndex
   , DayFocusTarget(..)
   , computeDayFocusTarget
+  , shouldUseCompactTimelineCardLayout
   , indexToTimeLabel
   ) where
 
@@ -1768,6 +1769,8 @@ renderDayDragPreview isMobile draggingId dragHoverIndex items =
         items
     let
       duration = durationMinutesBetween (calendarItemWindowStart item) (calendarItemWindowEnd item)
+      compactClass =
+        guard (shouldUseCompactTimelineCardLayout { isMobile, durationMinutes: duration }) " calendar-calendar-card--compact"
       inlineStyle =
         fold
           [ " --start:"
@@ -1783,8 +1786,8 @@ renderDayDragPreview isMobile draggingId dragHoverIndex items =
           , style inlineStyle
           , attr (AttrName "aria-hidden") "true"
           ]
-          [ div [ class_ "calendar-calendar-card calendar-calendar-card--drag-preview" ]
-              [ renderTimelineCardContent item ]
+          [ div [ class_ $ "calendar-calendar-card calendar-calendar-card--drag-preview" <> compactClass ]
+              [ renderTimelineCardContent { isMobile, durationMinutes: duration, item } ]
           ]
       )
 
@@ -1797,6 +1800,8 @@ renderTimelineItem
   -> HTML w Action
 renderTimelineItem isMobile draggingId focusTargetIdentity layout =
   let
+    isCompact = shouldUseCompactTimelineCardLayout { isMobile, durationMinutes: layout.duration }
+    compactClass = guard isCompact " calendar-calendar-card--compact"
     draggingClass =
       case { draggingId, item: layout.item } of
         { draggingId: Just activeId, item: ServerCalendarItem { id } } | activeId == id ->
@@ -1835,8 +1840,8 @@ renderTimelineItem isMobile draggingId focusTargetIdentity layout =
       )
       [ renderTimelineActionButtons isMobile layout.item
       , div
-          ([ class_ $ calendarItemTimelineCardClass layout.item <> draggingClass ] <> dragProps)
-          [ div touchProps [ renderTimelineCardContent layout.item ] ]
+          ([ class_ $ calendarItemTimelineCardClass layout.item <> draggingClass <> compactClass ] <> dragProps)
+          [ div touchProps [ renderTimelineCardContent { isMobile, durationMinutes: layout.duration, item: layout.item } ] ]
       ]
 
 renderMobileOverlapStack
@@ -1847,6 +1852,8 @@ renderMobileOverlapStack
   -> HTML w Action
 renderMobileOverlapStack draggingId focusTargetIdentity stack =
   let
+    isCompact = shouldUseCompactTimelineCardLayout { isMobile: true, durationMinutes: stack.topDuration }
+    compactClass = guard isCompact " calendar-calendar-card--compact"
     draggingClass =
       case { draggingId, item: stack.topItem } of
         { draggingId: Just activeId, item: ServerCalendarItem { id } } | activeId == id ->
@@ -1894,8 +1901,8 @@ renderMobileOverlapStack draggingId focusTargetIdentity stack =
       ( map (renderMobileOverlapShadow stack.hiddenCount stack.startMin) stack.hiddenCards
           <>
             [ div
-                ([ class_ $ calendarItemTimelineCardClass stack.topItem <> " calendar-calendar-stack-top" <> draggingClass ] <> dragProps)
-                [ div touchProps [ renderTimelineCardContent stack.topItem ]
+                ([ class_ $ calendarItemTimelineCardClass stack.topItem <> " calendar-calendar-stack-top" <> draggingClass <> compactClass ] <> dragProps)
+                [ div touchProps [ renderTimelineCardContent { isMobile: true, durationMinutes: stack.topDuration, item: stack.topItem } ]
                 , renderOverlapSummaryButton overlapSheet
                 ]
             ]
@@ -1925,17 +1932,29 @@ renderMobileOverlapShadow shadowCount groupStartMin hiddenCard =
 
 renderTimelineCardContent
   :: forall w
-   . CalendarItem
+   . { isMobile :: Boolean, durationMinutes :: Int, item :: CalendarItem }
   -> HTML w Action
-renderTimelineCardContent item =
-  div [ class_ "calendar-calendar-content" ]
-    [ div [ class_ "calendar-calendar-meta" ]
-        [ div [ class_ "calendar-calendar-item-time" ]
-            [ text $ calendarItemTimelineTimeText item ]
-        , div [ class_ "calendar-calendar-item-title" ] [ text (calendarItemPrimaryText item) ]
-        , renderCategory (calendarItemCategory item)
-        ]
-    ]
+renderTimelineCardContent { isMobile, durationMinutes, item } =
+  let
+    isCompact = shouldUseCompactTimelineCardLayout { isMobile, durationMinutes }
+  in
+    div [ class_ "calendar-calendar-content" ]
+      [ div [ class_ "calendar-calendar-meta" ]
+          ( if isCompact then
+              [ div [ class_ "calendar-calendar-item-header calendar-calendar-item-header--compact" ]
+                  [ div [ class_ "calendar-calendar-item-time calendar-calendar-item-time--compact" ]
+                      [ text $ calendarItemTimelineTimeText item ]
+                  , div [ class_ "calendar-calendar-item-title calendar-calendar-item-title--compact" ] [ text (calendarItemPrimaryText item) ]
+                  ]
+              ]
+            else
+              [ div [ class_ "calendar-calendar-item-time" ]
+                  [ text $ calendarItemTimelineTimeText item ]
+              , div [ class_ "calendar-calendar-item-title" ] [ text (calendarItemPrimaryText item) ]
+              , renderCategory (calendarItemCategory item)
+              ]
+          )
+      ]
 
 renderOverlapSummaryButton :: forall w. OverlapSheet -> HTML w Action
 renderOverlapSummaryButton overlapSheet =
@@ -4414,6 +4433,20 @@ durationMinutesBetweenRaw start end = do
   startDt <- parseDateTimeLocal start
   endDt <- parseDateTimeLocal end
   pure $ durationMinutesBetween startDt endDt
+
+shouldUseCompactTimelineCardLayout :: { isMobile :: Boolean, durationMinutes :: Int } -> Boolean
+shouldUseCompactTimelineCardLayout { isMobile, durationMinutes } =
+  let
+    safeDuration = max 1 durationMinutes
+    minuteHeightPx =
+      if isMobile then
+        52.0 / 60.0
+      else
+        1.0
+    availableHeightPx = max 36.0 (Int.toNumber safeDuration * minuteHeightPx)
+    minTwoLineHeightPx = 46.0
+  in
+    availableHeightPx < minTwoLineHeightPx
 
 formatDate :: DateTime -> String
 formatDate dt =

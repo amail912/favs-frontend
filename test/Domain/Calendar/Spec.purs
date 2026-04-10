@@ -35,6 +35,7 @@ import Pages.Calendar
   , calendarItemSupportsEdit
   , DayFocusTarget(..)
   , computeDayFocusTarget
+  , shouldUseCompactTimelineCardLayout
   , shiftFocusDate
   )
 import Calendar.Recurrence (RecurrenceRule(..), defaultRecurrenceDraft, generateOccurrencesForMonth)
@@ -463,6 +464,18 @@ spec = do
   describe "Calendar time helpers" do
     it "durationMinutesBetween returns minutes between start and end" do
       durationMinutesBetween (unsafeDateTime "2026-02-19T09:00") (unsafeDateTime "2026-02-19T10:30") `shouldEqual` 90
+
+    it "uses compact timeline layout for short desktop cards" do
+      shouldUseCompactTimelineCardLayout { isMobile: false, durationMinutes: 30 } `shouldEqual` true
+
+    it "keeps two-line timeline layout for long desktop cards" do
+      shouldUseCompactTimelineCardLayout { isMobile: false, durationMinutes: 60 } `shouldEqual` false
+
+    it "uses compact timeline layout for short mobile cards" do
+      shouldUseCompactTimelineCardLayout { isMobile: true, durationMinutes: 45 } `shouldEqual` true
+
+    it "keeps two-line timeline layout for long mobile cards" do
+      shouldUseCompactTimelineCardLayout { isMobile: true, durationMinutes: 60 } `shouldEqual` false
 
   describe "Calendar day initial focus" do
     it "targets current time for today with tasks" do

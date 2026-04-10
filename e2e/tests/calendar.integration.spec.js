@@ -1162,6 +1162,51 @@ test("calendar desktop: drag and drop keeps the focused date and dropped time", 
   })).toHaveCount(0);
 });
 
+test("calendar desktop: short day items use compact title fallback", async ({ authenticatedPage: page }) => {
+  const targetDate = isolatedFutureDate(2140);
+  const focusDate = toLocalDateInput(targetDate);
+  const title = `Desktop compact ${Date.now()}`;
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const createModal = await openCreateModal(page);
+  await createModal.getByPlaceholder("Titre").fill(title);
+  await fillCalendarDateTimeField(createModal, "Début", `${focusDate}T16:00`);
+  await fillCalendarDateTimeField(createModal, "Fin", `${focusDate}T16:30`);
+
+  const createResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items") &&
+      response.request().method() === "POST"
+  );
+
+  await createModal.getByRole("button", { name: "Valider" }).click();
+  expect((await createResponsePromise).ok()).toBeTruthy();
+
+  const card = page.locator(".calendar-calendar-card", {
+    has: page.locator(".calendar-calendar-item-title", { hasText: title })
+  }).first();
+  await expect(card).toBeVisible();
+  await expect(card).toHaveClass(/calendar-calendar-card--compact/);
+  await expect(card.locator(".calendar-calendar-item-title--compact")).toBeVisible();
+  await expect(card.locator(".calendar-calendar-item-title--compact")).toHaveText(title);
+  await expect(card.locator(".calendar-card-category")).toHaveCount(0);
+
+  const timeBox = await card.locator(".calendar-calendar-item-time--compact").boundingBox();
+  const titleBox = await card.locator(".calendar-calendar-item-title--compact").boundingBox();
+  if (!timeBox || !titleBox) {
+    throw new Error("Missing compact timeline typography metrics");
+  }
+  expect(Math.abs(timeBox.y - titleBox.y)).toBeLessThanOrEqual(4);
+
+  const titleFontSizePx = await card.locator(".calendar-calendar-item-title--compact").evaluate(
+    element => parseFloat(window.getComputedStyle(element).fontSize)
+  );
+  expect(titleFontSizePx).toBeGreaterThanOrEqual(11);
+});
+
 test("calendar: create modal resets on cancel", async ({ authenticatedPage: page }) => {
   await calendarTab(page).click();
   await expect(page).toHaveURL(/\/calendar$/);
@@ -1766,6 +1811,57 @@ test("calendar mobile: localized date chip stays aligned with the Day header", a
 
   await trigger.click();
   await expect(page.locator(".calendar-view-date")).toBeFocused();
+});
+
+test("calendar mobile: short day items use compact title fallback", async ({ authenticatedPage: page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForFunction(() => window.innerWidth <= 768);
+  await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+  await page.reload();
+
+  const targetDate = isolatedFutureDate(1536);
+  const focusDate = toLocalDateInput(targetDate);
+  const title = `Mobile compact ${Date.now()}`;
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, focusDate);
+
+  const createModal = await openCreateModal(page);
+  await createModal.getByPlaceholder("Titre").fill(title);
+  await fillCalendarDateTimeField(createModal, "Début", `${focusDate}T16:00`);
+  await fillCalendarDateTimeField(createModal, "Fin", `${focusDate}T16:30`);
+
+  const createResponsePromise = page.waitForResponse(
+    response =>
+      response.url().includes("/api/v1/calendar-items") &&
+      response.request().method() === "POST"
+  );
+
+  await createModal.getByRole("button", { name: "Valider" }).click();
+  expect((await createResponsePromise).ok()).toBeTruthy();
+
+  const card = page.locator(".calendar-calendar-card", {
+    has: page.locator(".calendar-calendar-item-title", { hasText: title })
+  }).first();
+
+  await expect(card).toBeVisible();
+  await expect(card).toHaveClass(/calendar-calendar-card--compact/);
+  await expect(card.locator(".calendar-calendar-item-title--compact")).toBeVisible();
+  await expect(card.locator(".calendar-calendar-item-title--compact")).toHaveText(title);
+  await expect(card.locator(".calendar-card-category")).toHaveCount(0);
+
+  const timeBox = await card.locator(".calendar-calendar-item-time--compact").boundingBox();
+  const titleBox = await card.locator(".calendar-calendar-item-title--compact").boundingBox();
+  if (!timeBox || !titleBox) {
+    throw new Error("Missing compact mobile timeline typography metrics");
+  }
+  expect(Math.abs(timeBox.y - titleBox.y)).toBeLessThanOrEqual(4);
+
+  const titleFontSizePx = await card.locator(".calendar-calendar-item-title--compact").evaluate(
+    element => parseFloat(window.getComputedStyle(element).fontSize)
+  );
+  expect(titleFontSizePx).toBeGreaterThanOrEqual(11);
 });
 
 test("calendar mobile: double tap does not open edit modal", async ({ authenticatedPage: page }) => {
