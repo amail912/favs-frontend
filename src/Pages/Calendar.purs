@@ -500,14 +500,21 @@ handleAction action = handleError $
       st <- get
       let
         today = st ^. (_view <<< _viewTodayDateState)
+        previousFocusDate = st ^. _viewFocusDatePage
       case initialDay of
         Just routedDay ->
-          modify_
-            ( _view
-                %~
-                  setFocusDateState (resolveInitialFocusDate today (Just routedDay))
-                    <<< (_viewMode .~ ViewDay)
-            )
+          let
+            nextFocusDate = resolveInitialFocusDate today (Just routedDay)
+            focusDateChanged = nextFocusDate /= previousFocusDate
+          in
+            do
+              modify_
+                ( _view
+                    %~
+                      setFocusDateState nextFocusDate
+                        <<< (_viewMode .~ ViewDay)
+                )
+              when focusDateChanged refreshDayBoundFocusState
         Nothing ->
           pure unit
     CreateFormAction formAction ->
@@ -543,20 +550,16 @@ handleAction action = handleError $
         ViewOpenEdit _ -> focusModal
         ViewOpenEditFromDoubleClick _ -> focusModal
         ViewChangedAction _ -> do
-          scheduleDayTimelineFocus
-          st' <- get
-          when (st' ^. (_view <<< _viewMode) == ViewDay) $
-            lift loadSharedPresenceForFocusDate
+          refreshDayBoundFocusState
           lift emitRouteSyncOutput
         ViewFocusDateChanged _ -> do
-          scheduleDayTimelineFocus
-          st' <- get
-          when (st' ^. (_view <<< _viewMode) == ViewDay) $
-            lift loadSharedPresenceForFocusDate
+          refreshDayBoundFocusState
           lift emitRouteSyncOutput
-        ViewPreviousDay ->
+        ViewPreviousDay -> do
+          refreshDayBoundFocusState
           lift emitRouteSyncOutput
-        ViewNextDay ->
+        ViewNextDay -> do
+          refreshDayBoundFocusState
           lift emitRouteSyncOutput
         ViewCloseCreate -> do
           st <- get
@@ -852,6 +855,12 @@ emitRouteSyncOutput = do
         }
     )
 
+refreshDayBoundFocusState :: ErrorAgendaAppM Unit
+refreshDayBoundFocusState = do
+  scheduleDayTimelineFocus
+  st <- get
+  when (st ^. (_view <<< _viewMode) == ViewDay) (lift loadSharedPresenceForFocusDate)
+
 refreshItems :: ErrorAgendaAppM Unit
 refreshItems = do
   jsonResponse <- withExceptT toFatalError $ ExceptT $ liftAff getItemsResponse
@@ -986,33 +995,43 @@ loadSubscribedUsers = do
 loadSharedPresenceForFocusDate :: AgendaAppM Unit
 loadSharedPresenceForFocusDate = do
   st <- get
-  let focusDate = st ^. _viewFocusDatePage
+  let
+    focusDate = st ^. _viewFocusDatePage
+    requestId = (st ^. (_calendar <<< _sharedPresenceRequestId)) + 1
+    sharedPresenceLoadError = SharedPresenceError "Impossible de charger les trajets partagés pour cette date."
+  modify_ (_calendar <<< _sharedPresenceRequestId .~ requestId)
   modify_ (_view <<< _viewPresenceInspection .~ Nothing)
   modify_ (_view <<< _viewPresenceInspectionPinned .~ false)
   modify_ (_view <<< _viewActiveModal %~ clearPresenceInspectionModal)
   case buildDayPeriodRange focusDate of
     Nothing ->
-      modify_ (_calendarSharedPresence .~ SharedPresenceError "Impossible de charger les trajets partagés pour cette date.")
+      modify_ (_calendarSharedPresence .~ sharedPresenceLoadError)
     Just { start, end } -> do
       modify_ (_calendarSharedPresence .~ SharedPresenceLoading)
       result <- liftAff $ getPeriodTripsResponse start end
-      case result of
-        Left _ ->
-          modify_ (_calendarSharedPresence .~ SharedPresenceError "Impossible de charger les trajets partagés pour cette date.")
-        Right response ->
-          if statusOk response then
-            case decodePeriodTripsResponse response of
-              Left _ ->
-                modify_ (_calendarSharedPresence .~ SharedPresenceError "Impossible de charger les trajets partagés pour cette date.")
-              Right groups ->
-                case buildDayPeriodDateTimeRange focusDate of
-                  Nothing ->
-                    modify_ (_calendarSharedPresence .~ SharedPresenceError "Impossible de charger les trajets partagés pour cette date.")
-                  Just period ->
-                    modify_ (_calendarSharedPresence .~ SharedPresenceLoaded (deriveSharedPresence period.start period.end (normalizePeriodTripGroups groups)))
-          else
-            modify_ (_calendarSharedPresence .~ SharedPresenceError "Impossible de charger les trajets partagés pour cette date.")
+      isLatestRequest <- isLatestSharedPresenceRequest requestId
+      when isLatestRequest $
+        case result of
+          Left _ ->
+            modify_ (_calendarSharedPresence .~ sharedPresenceLoadError)
+          Right response ->
+            if statusOk response then
+              case decodePeriodTripsResponse response of
+                Left _ ->
+                  modify_ (_calendarSharedPresence .~ sharedPresenceLoadError)
+                Right groups ->
+                  case buildDayPeriodDateTimeRange focusDate of
+                    Nothing ->
+                      modify_ (_calendarSharedPresence .~ sharedPresenceLoadError)
+                    Just period ->
+                      modify_ (_calendarSharedPresence .~ SharedPresenceLoaded (deriveSharedPresence period.start period.end (normalizePeriodTripGroups groups)))
+            else
+              modify_ (_calendarSharedPresence .~ sharedPresenceLoadError)
   where
+  isLatestSharedPresenceRequest nextRequestId = do
+    currentState <- get
+    pure $ (currentState ^. (_calendar <<< _sharedPresenceRequestId)) == nextRequestId
+
   clearPresenceInspectionModal = case _ of
     Just ModalPresenceInspection -> Nothing
     value -> value
@@ -2546,6 +2565,7 @@ type CalendarState =
   , shareList :: ShareListState
   , subscriptionList :: ShareListState
   , sharedPresence :: SharedPresenceLoadState
+  , sharedPresenceRequestId :: Int
   , presenceCuePreferences :: PresenceCuePreferencesState
   }
 
@@ -2560,6 +2580,7 @@ calendarInitialState =
   , shareList: shareListInitialState
   , subscriptionList: shareListInitialState
   , sharedPresence: SharedPresenceLoading
+  , sharedPresenceRequestId: 0
   , presenceCuePreferences: presenceCuePreferencesInitialState
   }
 
@@ -2626,6 +2647,9 @@ _subscriptionList = prop (Proxy :: _ "subscriptionList")
 
 _sharedPresence :: Lens' CalendarState SharedPresenceLoadState
 _sharedPresence = prop (Proxy :: _ "sharedPresence")
+
+_sharedPresenceRequestId :: Lens' CalendarState Int
+_sharedPresenceRequestId = prop (Proxy :: _ "sharedPresenceRequestId")
 
 _presenceCuePreferences :: Lens' CalendarState PresenceCuePreferencesState
 _presenceCuePreferences = prop (Proxy :: _ "presenceCuePreferences")

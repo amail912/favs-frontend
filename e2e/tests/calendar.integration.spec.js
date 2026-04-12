@@ -2183,6 +2183,62 @@ test("calendar day view arrows navigate previous and next day and stay hidden ou
   await expect(todayButton).toHaveCount(0);
 });
 
+test("calendar day rail: day navigation recomputes derived presence with latest day payload", async ({ authenticatedPage: page }) => {
+  const baseDate = isolatedFutureDate(2470);
+  const nextDate = shiftDateByDays(baseDate, 1);
+  const baseFocusDate = toLocalDateInput(baseDate);
+  const nextFocusDate = toLocalDateInput(nextDate);
+  const baseUsername = `presence-day-${Date.now()}-base`;
+  const nextUsername = `presence-day-${Date.now()}-next`;
+
+  await page.route("**/api/v1/trip-sharing/period-trips**", async route => {
+    const url = new URL(route.request().url());
+    const start = url.searchParams.get("start");
+    let body = "[]";
+
+    if (start === `${baseFocusDate}T00:00`) {
+      body = JSON.stringify([
+        {
+          username: baseUsername,
+          trips: defaultSharedPresenceTrips(baseFocusDate)
+        }
+      ]);
+    }
+
+    if (start === `${nextFocusDate}T00:00`) {
+      body = JSON.stringify([
+        {
+          username: nextUsername,
+          trips: defaultSharedPresenceTrips(nextFocusDate)
+        }
+      ]);
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json; charset=utf-8",
+      body
+    });
+  });
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await setCalendarViewDate(page, baseFocusDate);
+
+  await expect(page.locator(`.calendar-presence-rail__segment[data-username="${baseUsername}"]`)).toHaveCount(3);
+  await expect(page.locator(`.calendar-presence-rail__segment[data-username="${nextUsername}"]`)).toHaveCount(0);
+
+  await page.locator(".calendar-view-day-nav__next").click();
+  await expect(page.locator(".calendar-view-date-trigger")).toHaveText(toFrenchDayLabel(nextDate));
+  await expect(page.locator(`.calendar-presence-rail__segment[data-username="${nextUsername}"]`)).toHaveCount(3);
+  await expect(page.locator(`.calendar-presence-rail__segment[data-username="${baseUsername}"]`)).toHaveCount(0);
+
+  await page.locator(".calendar-view-day-nav__previous").click();
+  await expect(page.locator(".calendar-view-date-trigger")).toHaveText(toFrenchDayLabel(baseDate));
+  await expect(page.locator(`.calendar-presence-rail__segment[data-username="${baseUsername}"]`)).toHaveCount(3);
+  await expect(page.locator(`.calendar-presence-rail__segment[data-username="${nextUsername}"]`)).toHaveCount(0);
+});
+
 test("calendar day view today shortcut is a no-op when already focused on today", async ({ authenticatedPage: page }) => {
   const today = new Date();
   const todayValue = toLocalDateInput(today);

@@ -29,6 +29,7 @@ Provide coherent, reusable global UI/UX behavior across shell identity surfaces,
 7. `007` Day view today shortcut.
 8. `008` Day view short item title readability.
 9. `009` Desktop day view timeline time alignment.
+10. `010` Day view derived presence refresh on day change.
 
 ## Stories
 
@@ -42,6 +43,7 @@ Provide coherent, reusable global UI/UX behavior across shell identity surfaces,
 - [007 Day View Today Shortcut](done/007-day-view-today-shortcut.md) - Add an `Aujourd'hui` Day-only control in Day view and keep state/URL synchronization coherent with existing day navigation.
 - [008 Day View Short Item Title Readability](done/008-day-view-short-item-title-readability.md) - Add compact fallback rules for short Day cards with same-line time/title, hidden category, and an `11px` minimum title size.
 - [009 Desktop Day View Timeline Time Alignment](done/009-desktop-day-view-timeline-time-alignment.md) - Fix desktop Day timeline geometry so item card top/bottom align exactly with item start/end times.
+- [010 Day View Derived Presence Refresh On Day Change](done/010-day-view-derived-presence-refresh-on-day-change.md) - Recompute Day rail presence on every consulted-day change, including arrows and history restoration, with stale-response protection.
 
 ### Ready
 
