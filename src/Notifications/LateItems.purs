@@ -9,13 +9,15 @@ import Prelude
 
 import Data.Array (drop, filter, length, mapMaybe, sortBy, take)
 import Data.DateTime (DateTime)
+import Data.DateTime (date) as DateTime
 import Data.Maybe (Maybe(..))
-import Helpers.DateTime as DateTime
+import Helpers.DateTime (formatDisplayDateTime, formatLocalDate) as DateTime
 import Pages.Calendar (CalendarItem(..), CalendarItemContent(..), ItemStatus(..), calendarItemPrimaryText)
 
 type LateItem =
   { id :: Maybe String
   , title :: String
+  , day :: String
   , end :: DateTime
   , endDisplay :: String
   }
@@ -65,6 +67,7 @@ mkLateItem :: Maybe String -> CalendarItem -> DateTime -> LateItem
 mkLateItem id item end =
   { id
   , title: calendarItemPrimaryText item
+  , day: DateTime.formatLocalDate (DateTime.date end)
   , end
   , endDisplay: DateTime.formatDisplayDateTime end
   }

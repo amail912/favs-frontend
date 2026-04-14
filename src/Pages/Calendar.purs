@@ -5,6 +5,7 @@ module Pages.Calendar
   , CalendarRouteOutput(..)
   , normalizeCalendarRouteState
   , resolveInitialFocusDate
+  , findServerItemById
   , CalendarView(..)
   , decodeCalendarItemsResponse
   , CalendarItem(..)
@@ -172,6 +173,7 @@ foreign import viewportVisibleHeight :: Effect Number
 -- BEGIN src/Pages/Calendar.purs
 type Input =
   { initialDay :: Maybe String
+  , initialItemId :: Maybe String
   }
 
 data CalendarRouteOutput = RouteSyncRequested { viewMode :: CalendarView, focusDate :: String }
@@ -442,11 +444,11 @@ component =
     }
 
 initialState :: Input -> State
-initialState { initialDay } =
+initialState { initialDay, initialItemId } =
   { calendar: calendarInitialState
   , sync: syncInitialState
   , mouseDrag: dragInitialState
-  , view: viewInitialState initialDay
+  , view: viewInitialState initialDay initialItemId
   }
 
 _calendar :: Lens' State CalendarState
@@ -498,11 +500,12 @@ handleAction :: Action -> AgendaAppM Unit
 handleAction action = handleError $
   case action of
     Init -> initAction
-    ReceiveInput { initialDay } -> do
+    ReceiveInput { initialDay, initialItemId } -> do
       st <- get
       let
         today = st ^. (_view <<< _viewTodayDateState)
         previousFocusDate = st ^. _viewFocusDatePage
+      modify_ (_view <<< _viewInitialItemId .~ (initialItemId >>= nonEmptyStringMaybe))
       case initialDay of
         Just routedDay ->
           let
@@ -519,6 +522,7 @@ handleAction action = handleError $
               when focusDateChanged refreshDayBoundFocusState
         Nothing ->
           pure unit
+      openInitialItemActionsIfPresent
     CreateFormAction formAction ->
       lift (applyCreateFormAction formAction)
     ShareAction shareAction ->
@@ -871,6 +875,7 @@ refreshItems = do
   jsonResponse <- withExceptT toFatalError $ ExceptT $ liftAff getItemsResponse
   items <- decodeCalendarItemsResponse jsonResponse # pure >>> ExceptT
   modify_ (_calendarItems .~ items)
+  openInitialItemActionsIfPresent
 
 loadPresenceCuePreferences :: AgendaAppM Unit
 loadPresenceCuePreferences = do
@@ -2992,8 +2997,10 @@ type SharedPresenceInspectionHoverSegment =
   }
 
 normalizeCalendarRouteState :: Input -> Input
-normalizeCalendarRouteState { initialDay } =
-  { initialDay: initialDay >>= \day -> if DateTime.isLocalDate day then Just day else Nothing }
+normalizeCalendarRouteState { initialDay, initialItemId } =
+  { initialDay: initialDay >>= \day -> if DateTime.isLocalDate day then Just day else Nothing
+  , initialItemId: initialItemId >>= nonEmptyStringMaybe
+  }
 
 resolveInitialFocusDate :: String -> Maybe String -> String
 resolveInitialFocusDate today maybeDay =
@@ -3005,10 +3012,31 @@ nonEmptyStringMaybe :: String -> Maybe String
 nonEmptyStringMaybe raw =
   if raw == "" then Nothing else Just raw
 
+findServerItemById :: String -> Array CalendarItem -> Maybe CalendarItem
+findServerItemById targetId =
+  find
+    ( case _ of
+        ServerCalendarItem { id } -> id == targetId
+        _ -> false
+    )
+
+openInitialItemActionsIfPresent :: ErrorAgendaAppM Unit
+openInitialItemActionsIfPresent = do
+  st <- get
+  case st ^. (_view <<< _viewInitialItemId) of
+    Nothing -> pure unit
+    Just itemId ->
+      case findServerItemById itemId (st ^. _calendarItems) of
+        Nothing -> pure unit
+        Just item -> do
+          modify_ (_view <<< _viewInitialItemId .~ Nothing)
+          handleViewAction (ViewOpenItemActions item)
+
 type ViewState =
   { viewMode :: CalendarView
   , focusDate :: String
   , todayDate :: String
+  , initialItemId :: Maybe String
   , activeModal :: Maybe AgendaModal
   , overlapSheet :: Maybe OverlapSheet
   , sharedPresenceOverflowSheet :: Maybe SharedPresenceOverflowSheet
@@ -3031,11 +3059,12 @@ type ViewState =
   , dayFocusIgnoreScroll :: Boolean
   }
 
-viewInitialState :: Maybe String -> ViewState
-viewInitialState initialDay =
+viewInitialState :: Maybe String -> Maybe String -> ViewState
+viewInitialState initialDay initialItemId =
   { viewMode: ViewDay
   , focusDate: fromMaybe "" initialDay
   , todayDate: ""
+  , initialItemId: initialItemId >>= nonEmptyStringMaybe
   , activeModal: Nothing
   , overlapSheet: Nothing
   , sharedPresenceOverflowSheet: Nothing
@@ -3074,6 +3103,12 @@ _viewTodayDateState =
   lens
     _.todayDate
     (_ { todayDate = _ })
+
+_viewInitialItemId :: Lens' ViewState (Maybe String)
+_viewInitialItemId =
+  lens
+    _.initialItemId
+    (_ { initialItemId = _ })
 
 _viewActiveModal :: Lens' ViewState (Maybe AgendaModal)
 _viewActiveModal =

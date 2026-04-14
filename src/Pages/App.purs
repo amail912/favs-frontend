@@ -22,7 +22,7 @@ import Pages.Admin (component) as Admin
 import Pages.Calendar (CalendarRouteOutput(..), CalendarView(..), component, decodeCalendarItemsResponse) as Calendar
 import Pages.Checklists (component) as Checklists
 import Control.Monad.RWS (get, modify_)
-import Data.Array (find, head, length)
+import Data.Array (find, head, length, mapMaybe)
 import DOM.HTML.Indexed.ButtonType (ButtonType(..))
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Data.Argonaut.Core (Json, jsonEmptyObject)
@@ -76,6 +76,7 @@ type ChildSlots =
 
 type CalendarRouteState =
   { day :: Maybe String
+  , item :: Maybe String
   }
 
 data DefinedRoute = Note | Checklist | Calendar CalendarRouteState | Admin | Signup | Signin
@@ -100,7 +101,7 @@ parseRouteString rawPath =
     if path == "/" || path == "" then Root
     else case parseDefinedRoutePath path of
       Just (Calendar _) ->
-        Route (Calendar { day: parseCalendarDay query })
+        Route (Calendar { day: parseCalendarDay query, item: parseCalendarItem query })
       Just route ->
         Route route
       Nothing ->
@@ -114,11 +115,13 @@ parseRouteString rawPath =
       _ -> ""
 
 defaultCalendarRoute :: DefinedRoute
-defaultCalendarRoute = Calendar { day: Nothing }
+defaultCalendarRoute = Calendar { day: Nothing, item: Nothing }
 
 normalizeCalendarRouteState :: CalendarRouteState -> CalendarRouteState
-normalizeCalendarRouteState { day } =
-  { day: day >>= \raw -> if DateTime.isLocalDate raw then Just raw else Nothing }
+normalizeCalendarRouteState { day, item } =
+  { day: day >>= \raw -> if DateTime.isLocalDate raw then Just raw else Nothing
+  , item: item >>= nonEmptyStringMaybe
+  }
 
 routeFromDefined :: DefinedRoute -> Route
 routeFromDefined = Route
@@ -152,9 +155,17 @@ printRoute :: Route -> String
 printRoute = case _ of
   Root -> "/"
   Route (Calendar calendarRoute) ->
-    case calendarRoute.day of
-      Just day -> printDefinedRoutePath defaultCalendarRoute <> "?day=" <> day
-      Nothing -> printDefinedRoutePath defaultCalendarRoute
+    let
+      dayQuery = map (\day -> "day=" <> day) calendarRoute.day
+      itemQuery = map (\item -> "item=" <> item) calendarRoute.item
+      queryParts = mapMaybe identity [ dayQuery, itemQuery ]
+      querySuffix =
+        if length queryParts == 0 then
+          ""
+        else
+          "?" <> StringCommon.joinWith "&" queryParts
+    in
+      printDefinedRoutePath defaultCalendarRoute <> querySuffix
   Route route ->
     printDefinedRoutePath route
   NotFound -> "/not-found"
@@ -163,6 +174,14 @@ parseCalendarDay :: String -> Maybe String
 parseCalendarDay rawQuery =
   findMapQueryValue "day" rawQuery >>= \value ->
     if DateTime.isLocalDate value then Just value else Nothing
+
+parseCalendarItem :: String -> Maybe String
+parseCalendarItem rawQuery =
+  findMapQueryValue "item" rawQuery >>= nonEmptyStringMaybe
+
+nonEmptyStringMaybe :: String -> Maybe String
+nonEmptyStringMaybe raw =
+  if raw == "" then Nothing else Just raw
 
 findMapQueryValue :: String -> String -> Maybe String
 findMapQueryValue key rawQuery =
@@ -194,6 +213,7 @@ subscribeToRouting nav = do
 data Action
   = RouteChanged Route
   | NavigateTo DefinedRoute
+  | NavigateToLateItem String String
   | HandleCalendarOutput Calendar.CalendarRouteOutput
   | LoadLateItems
   | LateItemsLoaded (Array LateItems.LateItem)
@@ -315,13 +335,31 @@ handleAction (NavigateTo route) = do
   let nextRoute = routeFromDefined route
   modify_ _ { currentRoute = nextRoute }
   navigateWith _.pushState st.nav nextRoute
+handleAction (NavigateToLateItem day itemId) = do
+  st <- get
+  let
+    nextRoute =
+      routeFromDefined
+        ( Calendar
+            ( normalizeCalendarRouteState
+                { day: Just day
+                , item: Just itemId
+                }
+            )
+        )
+  modify_ \nextState ->
+    nextState
+      { currentRoute = nextRoute
+      , lateItems = nextState.lateItems { isSheetOpen = false }
+      }
+  navigateWith _.pushState st.nav nextRoute
 handleAction (HandleCalendarOutput (Calendar.RouteSyncRequested { viewMode, focusDate })) = do
   st <- get
   let
     nextRoute =
       case viewMode of
         Calendar.ViewDay ->
-          Route (Calendar (normalizeCalendarRouteState { day: Just focusDate }))
+          Route (Calendar (normalizeCalendarRouteState { day: Just focusDate, item: Nothing }))
         _ ->
           Route defaultCalendarRoute
   when (st.currentRoute /= nextRoute) do
@@ -537,16 +575,35 @@ renderLateItemsSheetBody lateItems
 
 renderLateItemsRow :: forall w. LateItems.LateItem -> HTML w Action
 renderLateItemsRow lateItem =
-  li [ class_ "list-group-item app-late-items-row" ]
-    [ div [ class_ "app-late-items-row__title" ] [ text lateItem.title ]
-    , div [ class_ "app-late-items-row__meta text-muted" ] [ text ("Termine le " <> lateItem.endDisplay) ]
-    ]
+  case lateItem.id of
+    Just itemId ->
+      li [ class_ "list-group-item p-0" ]
+        [ button
+            [ class_ "btn btn-link text-start text-decoration-none w-100 app-late-items-row app-late-items-row--interactive"
+            , onClick (const (NavigateToLateItem lateItem.day itemId))
+            ]
+            [ div [ class_ "app-late-items-row__title" ] [ text lateItem.title ]
+            , div [ class_ "app-late-items-row__meta text-muted" ] [ text ("Termine le " <> lateItem.endDisplay) ]
+            ]
+        ]
+    Nothing ->
+      li [ class_ "list-group-item app-late-items-row" ]
+        [ div [ class_ "app-late-items-row__title" ] [ text lateItem.title ]
+        , div [ class_ "app-late-items-row__meta text-muted" ] [ text ("Termine le " <> lateItem.endDisplay) ]
+        ]
 
 currentComponent :: AuthStatus -> DefinedRoute -> H.ComponentHTML Action ChildSlots Aff
 currentComponent _ Note = slot_ (Proxy :: _ "notes") unit Notes.component unit
 currentComponent _ Checklist = slot_ (Proxy :: _ "checklists") unit Checklists.component unit
 currentComponent _ (Calendar calendarRoute) =
-  slot (Proxy :: _ "calendar") unit Calendar.component { initialDay: calendarRoute.day } HandleCalendarOutput
+  slot
+    (Proxy :: _ "calendar")
+    unit
+    Calendar.component
+    { initialDay: calendarRoute.day
+    , initialItemId: calendarRoute.item
+    }
+    HandleCalendarOutput
 currentComponent (Authenticated (AuthenticatedProfile { username })) Admin =
   slot_ (Proxy :: _ "admin") unit Admin.component { currentUsername: username }
 currentComponent _ Admin = text ""

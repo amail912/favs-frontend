@@ -131,6 +131,20 @@ authTest("late-items reminder chip stays hidden when no late item exists", async
   await authExpect(lateItemsChip(page)).toHaveCount(0);
 });
 
+test("calendar route with a missing targeted item remains usable", async ({ context, page, baseURL }) => {
+  await authenticateAdmin(context, baseURL);
+  await mockLateItemsRoute(page, buildLateTaskItems(2));
+
+  await page.goto("/calendar?day=2000-03-01&item=item-does-not-exist");
+  await expect(page.locator(".calendar-view-date-trigger")).toBeVisible();
+  await expect(page.locator(".calendar-item-actions-sheet")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Semaine" }).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await page.getByRole("button", { name: "Jour" }).click();
+  await expect(page).toHaveURL(/\/calendar\?day=/);
+});
+
 authTest("approved non-admin user cannot discover or open the admin route", async ({ authenticatedPage: page }) => {
   await page.goto("/notes");
   await authExpect(adminTab(page)).toHaveCount(0);

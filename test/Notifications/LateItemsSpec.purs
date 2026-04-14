@@ -40,6 +40,7 @@ spec =
         newest = mkTaskItem "newest" Todo "Newest" "2026-04-10T12:00" "2026-04-10T13:00"
         lateItems = LateItems.deriveLateItems now [ older, newest, newer ]
       map _.title lateItems `shouldEqual` [ "Newest", "Newer", "Older" ]
+      map _.day lateItems `shouldEqual` [ "2026-04-10", "2026-04-10", "2026-04-10" ]
 
     it "supports first-50 pagination and has-more detection" do
       let

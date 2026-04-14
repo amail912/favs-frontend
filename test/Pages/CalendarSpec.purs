@@ -15,7 +15,7 @@ import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
 import Helpers.DateTime as DateTime
 import Helpers.DateTime (formatCalendarDayDateLabelWithReference)
-import Pages.Calendar (ItemType(..), PresenceCueColorToken(..), SharedPresenceCuePreference(..), SharedPresenceLoadState(..), SharedPresenceState(..), buildSharedPresenceRailView, buildSharedPresenceSegmentLayouts, calendarItemDeletionTarget, decodeCalendarItemsResponse, decodePeriodTripsResponse, decodePresenceCuePreferencesJson, decodeSharedUsersResponse, decodeTripPlacesResponse, deriveSharedPresence, encodePresenceCuePreferencesJson, maxVisibleSharedPresenceUsers, normalizePeriodTripGroups, presenceInspectionAriaLabel, presenceInspectionStateText, presenceInspectionTimeText, resolveInitialFocusDate, resolveSharedPresenceToneClass, shareWriteErrorMessage, sharedPresenceLaneToneClass, sharedPresenceSegmentRailClass, shouldRenderDayCalendarShell, shouldRenderSharedPresenceRail, subscriptionWriteErrorMessage, tripWriteErrorMessage, validateShareUsername, CalendarItem(..))
+import Pages.Calendar (ItemType(..), PresenceCueColorToken(..), SharedPresenceCuePreference(..), SharedPresenceLoadState(..), SharedPresenceState(..), buildSharedPresenceRailView, buildSharedPresenceSegmentLayouts, calendarItemDeletionTarget, decodeCalendarItemsResponse, decodePeriodTripsResponse, decodePresenceCuePreferencesJson, decodeSharedUsersResponse, decodeTripPlacesResponse, deriveSharedPresence, encodePresenceCuePreferencesJson, findServerItemById, maxVisibleSharedPresenceUsers, normalizePeriodTripGroups, presenceInspectionAriaLabel, presenceInspectionStateText, presenceInspectionTimeText, resolveInitialFocusDate, resolveSharedPresenceToneClass, shareWriteErrorMessage, sharedPresenceLaneToneClass, sharedPresenceSegmentRailClass, shouldRenderDayCalendarShell, shouldRenderSharedPresenceRail, subscriptionWriteErrorMessage, tripWriteErrorMessage, validateShareUsername, CalendarItem(..))
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (fail, shouldEqual)
 import Test.Support.Builders (calendarContent, serverCalendarItem, unsafeDateTime)
@@ -73,6 +73,15 @@ spec =
         `shouldEqual` Just { id: "task-1", title: "Delete me" }
       calendarItemDeletionTarget newItem
         `shouldEqual` Nothing
+
+    it "finds only persisted items by id when resolving route targets" do
+      let
+        serverItemA = serverCalendarItem "task-1" (calendarContent Task "Task A" "2026-04-02T08:00" "2026-04-02T09:00")
+        serverItemB = serverCalendarItem "task-2" (calendarContent Task "Task B" "2026-04-02T09:00" "2026-04-02T10:00")
+        draftItem = NewCalendarItem { content: calendarContent Task "Draft" "2026-04-02T10:00" "2026-04-02T11:00" }
+        items = [ draftItem, serverItemA, serverItemB ]
+      findServerItemById "task-2" items `shouldEqual` Just serverItemB
+      findServerItemById "missing" items `shouldEqual` Nothing
 
     it "normalizes grouped period trips while preserving order" do
       let
