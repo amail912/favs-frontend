@@ -218,6 +218,52 @@ test("admin cancels approved-user deletion and keeps the user visible", async ({
   await expect(approvedRow(page, "existing-user")).toBeVisible();
 });
 
+test("admin modal: browser back closes delete confirmation without validating", async ({ context, page, baseURL }) => {
+  const users = [
+    { username: "admin", roles: ["admin"], approved: true },
+    { username: "existing-user", roles: ["member"], approved: true }
+  ];
+  let deleteRequestCount = 0;
+
+  await signInAsAdmin(context, page, baseURL);
+  await mockEmptyPendingApprovals(page);
+
+  await page.route("**/api/v1/admin/users", async route => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json; charset=utf-8",
+      body: JSON.stringify(users)
+    });
+  });
+
+  await page.route("**/api/v1/admin/users/existing-user", async route => {
+    deleteRequestCount += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json; charset=utf-8",
+      body: "{}"
+    });
+  });
+
+  await page.goto("/admin");
+  await expect(approvedRow(page, "existing-user")).toBeVisible();
+  await approvedRow(page, "existing-user").getByRole("button", { name: "Supprimer" }).click();
+
+  const modal = page.locator(".admin-delete-confirm-modal .app-modal__dialog");
+  await expect(modal).toBeVisible();
+
+  await page.goBack();
+
+  await expect(page.locator(".admin-delete-confirm-modal")).toHaveCount(0);
+  await expect(approvedRow(page, "existing-user")).toBeVisible();
+  expect(deleteRequestCount).toBe(0);
+});
+
 test("admin confirms approved-user deletion and sees the user disappear", async ({ context, page, baseURL }) => {
   const users = [
     { username: "admin", roles: ["admin"], approved: true },

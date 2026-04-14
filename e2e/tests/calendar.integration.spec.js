@@ -308,6 +308,36 @@ test("calendar integration: create task in day view", async ({ authenticatedPage
   await appTitle(page).click();
 });
 
+test("calendar modal: browser back closes create modal without validating", async ({ authenticatedPage: page }) => {
+  let createRequestCount = 0;
+
+  await page.route("**/api/v1/calendar-items", async route => {
+    if (route.request().method() === "POST") {
+      createRequestCount += 1;
+      await route.fulfill({
+        status: 201,
+        contentType: "application/json; charset=utf-8",
+        body: "{}"
+      });
+      return;
+    }
+
+    await route.continue();
+  });
+
+  await calendarTab(page).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+
+  const modal = await openCreateModal(page);
+  await modal.getByPlaceholder("Titre").fill(`Back closes modal ${Date.now()}`);
+
+  await page.goBack();
+
+  await expect(page.locator(".app-modal__dialog", { hasText: "Créer un item" })).toHaveCount(0);
+  await expect(page).toHaveURL(/\/calendar/);
+  expect(createRequestCount).toBe(0);
+});
+
 test("calendar integration: delete item from day timeline", async ({ authenticatedPage: page }) => {
   const targetDate = isolatedFutureDate(1520);
   const focusDate = toLocalDateInput(targetDate);

@@ -50,6 +50,7 @@ import Halogen.HTML.Events (onClick)
 import Halogen.HTML.Properties (disabled)
 import Control.Monad.RWS (get, modify_)
 import Ui.Modal as Modal
+import Ui.ModalHistory as ModalHistory
 import Ui.Utils (class_)
 
 type Input =
@@ -104,6 +105,7 @@ instance showPendingActionKind :: Show PendingActionKind where
 
 data Action
   = Initialize
+  | GlobalPopState
   | RetryPendingLoad
   | ApprovePendingSignup String
   | DeletePendingSignup String
@@ -374,8 +376,11 @@ isApprovedDeleteInFlight { approvedDeleteInFlight } username =
 handleAction :: Action -> AdminAppM Unit
 handleAction = case _ of
   Initialize -> do
+    subscribeToGlobalPopState
     loadPendingSignups
     loadApprovedUsers
+  GlobalPopState ->
+    closeDeleteConfirmationFromBrowserBack
   RetryPendingLoad -> loadPendingSignups
   ApprovePendingSignup username -> do
     modify_ (beginPendingAction username PendingApprove)
@@ -386,10 +391,13 @@ handleAction = case _ of
     result <- liftAff $ deletePendingSignupResponse username
     handlePendingRowActionResult result
   RetryApprovedLoad -> loadApprovedUsers
-  RequestDeleteApprovedUser username ->
+  RequestDeleteApprovedUser username -> do
+    armModalBackNavigation
     modify_ (openApprovedDeleteConfirmation username)
   CancelDeleteApprovedUser ->
-    modify_ closeApprovedDeleteConfirmation
+    do
+      consumeModalBackNavigation
+      modify_ closeApprovedDeleteConfirmation
   ConfirmDeleteApprovedUser -> do
     state <- get
     case state.approvedDeleteTarget of
@@ -398,6 +406,25 @@ handleAction = case _ of
         modify_ (beginApprovedDelete username)
         result <- liftAff $ deleteApprovedUserResponse username
         handleApprovedDeleteResult result
+
+subscribeToGlobalPopState :: AdminAppM Unit
+subscribeToGlobalPopState =
+  ModalHistory.subscribeToGlobalPopState GlobalPopState
+
+armModalBackNavigation :: AdminAppM Unit
+armModalBackNavigation =
+  ModalHistory.armModalBackNavigation (isJust <<< _.approvedDeleteTarget)
+
+consumeModalBackNavigation :: AdminAppM Unit
+consumeModalBackNavigation =
+  ModalHistory.consumeModalBackNavigation (isJust <<< _.approvedDeleteTarget)
+
+closeDeleteConfirmationFromBrowserBack :: AdminAppM Unit
+closeDeleteConfirmationFromBrowserBack = do
+  state <- get
+  case state.approvedDeleteTarget of
+    Nothing -> pure unit
+    Just _ -> modify_ closeApprovedDeleteConfirmation
 
 handlePendingRowActionResult :: Either Error (Response String) -> AdminAppM Unit
 handlePendingRowActionResult result =

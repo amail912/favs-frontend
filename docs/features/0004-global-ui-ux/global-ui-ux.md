@@ -14,6 +14,7 @@ Provide coherent, reusable global UI/UX behavior across shell identity surfaces,
 - Day view quick return to current day.
 - Day view short-duration item readability fallback.
 - Desktop Day timeline visual alignment with item times.
+- Browser back closes modals with cancel semantics.
 - Mobile behavior remains native input based.
 
 ## Backend Contract Input
@@ -30,6 +31,7 @@ Provide coherent, reusable global UI/UX behavior across shell identity surfaces,
 8. `008` Day view short item title readability.
 9. `009` Desktop day view timeline time alignment.
 10. `010` Day view derived presence refresh on day change.
+11. `011` Browser back closes modal without validating action.
 
 ## Stories
 
@@ -44,6 +46,7 @@ Provide coherent, reusable global UI/UX behavior across shell identity surfaces,
 - [008 Day View Short Item Title Readability](done/008-day-view-short-item-title-readability.md) - Add compact fallback rules for short Day cards with same-line time/title, hidden category, and an `11px` minimum title size.
 - [009 Desktop Day View Timeline Time Alignment](done/009-desktop-day-view-timeline-time-alignment.md) - Fix desktop Day timeline geometry so item card top/bottom align exactly with item start/end times.
 - [010 Day View Derived Presence Refresh On Day Change](done/010-day-view-derived-presence-refresh-on-day-change.md) - Recompute Day rail presence on every consulted-day change, including arrows and history restoration, with stale-response protection.
+- [011 Browser Back Closes Modal Without Validating Action](done/011-browser-back-closes-modal-without-validating-action.md) - Add back-button modal dismissal with cancel semantics so back closes open modal surfaces without validating pending actions.
 
 ### Ready
 

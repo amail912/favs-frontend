@@ -130,6 +130,7 @@ import Ui.AuthSession as AuthSession
 import Ui.DateTimePicker as DateTimePicker
 import Ui.LocalStorage as LocalStorage
 import Ui.Modal (renderBottomSheet, renderModal, renderModalWithActionState, renderModalWithValidateState) as Modal
+import Ui.ModalHistory as ModalHistory
 import Ui.Utils (class_)
 import Web.Event.Event (EventType(..), preventDefault)
 import Web.HTML (window)
@@ -219,6 +220,7 @@ data Action
   | SyncDismissUpdateError
   | GlobalKeyDown String
   | GlobalResize
+  | GlobalPopState
   | ImportApplyItems (Array CalendarItemContent)
   | CreateRecurrenceCmd Recurrence.RecurrenceCommand
   | EditRecurrenceCmd Recurrence.RecurrenceCommand
@@ -592,6 +594,8 @@ handleAction action = handleError $
     GlobalResize -> do
       viewport <- liftEffect $ window >>= Window.innerWidth
       handleViewAction (ViewSetIsMobile (viewport <= 768))
+    GlobalPopState ->
+      closeActiveModalFromBrowserBack
     CreateRecurrenceCmd (Recurrence.RecurrenceApplied draft) ->
       modify_
         ( _calendar
@@ -837,6 +841,7 @@ initAction = do
   handleViewAction (ViewSetIsMobile (viewport <= 768))
   subscribeToGlobalKeyDown
   subscribeToGlobalResize
+  subscribeToGlobalPopState
   lift loadPresenceCuePreferences
   lift loadTripPlaces
   lift loadSharedUsers
@@ -1362,6 +1367,60 @@ subscribeToGlobalResize = do
       Just GlobalResize
   _ <- lift $ subscribe emitter
   pure unit
+
+subscribeToGlobalPopState :: ErrorAgendaAppM Unit
+subscribeToGlobalPopState =
+  lift $ ModalHistory.subscribeToGlobalPopState GlobalPopState
+
+armModalBackNavigation :: ErrorAgendaAppM Unit
+armModalBackNavigation =
+  lift $
+    ModalHistory.armModalBackNavigation
+      \st -> st ^. (_view <<< _viewActiveModal) /= Nothing
+
+consumeModalBackNavigation :: ErrorAgendaAppM Unit
+consumeModalBackNavigation =
+  lift $
+    ModalHistory.consumeModalBackNavigation
+      \st -> st ^. (_view <<< _viewActiveModal) /= Nothing
+
+closeActiveModalFromBrowserBack :: ErrorAgendaAppM Unit
+closeActiveModalFromBrowserBack = do
+  st <- get
+  case st ^. (_view <<< _viewActiveModal) of
+    Nothing ->
+      pure unit
+    Just ModalCreateItem -> do
+      let
+        lastMode = st ^. _calendarLastCreateMode
+      modify_
+        ( (_calendarDraft .~ emptyCreateDraft lastMode)
+            <<< (_calendar <<< _createEndManuallyEdited .~ false)
+            <<< (_calendarValidationError .~ Nothing)
+            <<< (_view <<< _viewActiveModal .~ Nothing)
+        )
+    Just ModalEditItem ->
+      modify_
+        ( (_view <<< _viewEditPanel .~ Nothing)
+            <<< (_view <<< _viewActiveModal .~ Nothing)
+            <<< (_view <<< _viewItemActionsItem .~ Nothing)
+            <<< (_view <<< _viewDeleteConfirmTarget .~ Nothing)
+            <<< (_view <<< _viewDeleteInFlight .~ Nothing)
+            <<< (_view <<< _viewDeleteFeedback .~ Nothing)
+        )
+    Just _ ->
+      modify_
+        ( _view %~
+            ( (_viewActiveModal .~ Nothing)
+                <<< clearDeleteState
+                <<< (_viewOverlapSheet .~ Nothing)
+                <<< (_viewSharedPresenceOverflowSheet .~ Nothing)
+                <<< (_viewPresenceInspection .~ Nothing)
+                <<< (_viewPresenceInspectionPinned .~ false)
+                <<< (_viewPresenceInspectionInitialTopPx .~ Nothing)
+                <<< clearPresenceInspectionHoverState
+            )
+        )
 
 render :: State -> H.ComponentHTML Action Slots Aff
 render { calendar, sync, mouseDrag, view } =
@@ -3262,18 +3321,21 @@ handleViewAction = case _ of
     else
       modify_ (_view <<< _viewDayFocusUserScrolled .~ true)
   ViewOpenModal modal ->
-    modify_
-      ( _view %~
-          ( (_viewActiveModal .~ Just modal)
-              <<< clearDeleteState
-              <<< clearPresenceInspectionHoverState
-              <<< (_viewSharedPresenceOverflowSheet .~ Nothing)
-          )
-      )
+    do
+      armModalBackNavigation
+      modify_
+        ( _view %~
+            ( (_viewActiveModal .~ Just modal)
+                <<< clearDeleteState
+                <<< clearPresenceInspectionHoverState
+                <<< (_viewSharedPresenceOverflowSheet .~ Nothing)
+            )
+        )
   ViewOpenItemActions item ->
     case calendarItemDeletionTarget item of
       Nothing -> pure unit
-      Just _ ->
+      Just _ -> do
+        armModalBackNavigation
         modify_
           ( _view %~
               ( (_viewItemActionsItem .~ Just item)
@@ -3287,7 +3349,8 @@ handleViewAction = case _ of
   ViewRequestDelete item ->
     case calendarItemDeletionTarget item of
       Nothing -> pure unit
-      Just target ->
+      Just target -> do
+        armModalBackNavigation
         modify_
           ( _view %~
               ( (_viewItemActionsItem .~ Nothing)
@@ -3335,18 +3398,20 @@ handleViewAction = case _ of
   ViewDismissDeleteFeedback ->
     modify_ (_view <<< _viewDeleteFeedback .~ Nothing)
   ViewOpenOverlapSheet overlapSheet ->
-    modify_
-      ( _view
-          %~
-            ( (_viewOverlapSheet .~ Just overlapSheet)
-                <<< (_viewSharedPresenceOverflowSheet .~ Nothing)
-                <<< (_viewPresenceInspection .~ Nothing)
-                <<< (_viewPresenceInspectionPinned .~ false)
-                <<< clearDeleteState
-                <<< clearPresenceInspectionHoverState
-                <<< (_viewActiveModal .~ Just ModalOverlapGroup)
-            )
-      )
+    do
+      armModalBackNavigation
+      modify_
+        ( _view
+            %~
+              ( (_viewOverlapSheet .~ Just overlapSheet)
+                  <<< (_viewSharedPresenceOverflowSheet .~ Nothing)
+                  <<< (_viewPresenceInspection .~ Nothing)
+                  <<< (_viewPresenceInspectionPinned .~ false)
+                  <<< clearDeleteState
+                  <<< clearPresenceInspectionHoverState
+                  <<< (_viewActiveModal .~ Just ModalOverlapGroup)
+              )
+        )
   ViewPromoteOverlapItem overlapSheet item ->
     modify_
       ( _view
@@ -3357,18 +3422,20 @@ handleViewAction = case _ of
             )
       )
   ViewOpenSharedPresenceOverflow overflowSheet ->
-    modify_
-      ( _view
-          %~
-            ( (_viewSharedPresenceOverflowSheet .~ Just overflowSheet)
-                <<< (_viewOverlapSheet .~ Nothing)
-                <<< (_viewPresenceInspection .~ Nothing)
-                <<< (_viewPresenceInspectionPinned .~ false)
-                <<< clearDeleteState
-                <<< clearPresenceInspectionHoverState
-                <<< (_viewActiveModal .~ Just ModalSharedPresenceOverflow)
-            )
-      )
+    do
+      armModalBackNavigation
+      modify_
+        ( _view
+            %~
+              ( (_viewSharedPresenceOverflowSheet .~ Just overflowSheet)
+                  <<< (_viewOverlapSheet .~ Nothing)
+                  <<< (_viewPresenceInspection .~ Nothing)
+                  <<< (_viewPresenceInspectionPinned .~ false)
+                  <<< clearDeleteState
+                  <<< clearPresenceInspectionHoverState
+                  <<< (_viewActiveModal .~ Just ModalSharedPresenceOverflow)
+              )
+        )
   ViewPresenceSegmentMouseEnter inspection -> do
     st <- get
     let isMobileNow = st ^. (_view <<< _viewIsMobile)
@@ -3415,6 +3482,9 @@ handleViewAction = case _ of
     st <- get
     let isMobileNow = st ^. (_view <<< _viewIsMobile)
     let isPinned = st ^. (_view <<< _viewPresenceInspectionPinned)
+    case trigger, isMobileNow of
+      PresenceInspectTap, true -> armModalBackNavigation
+      _, _ -> pure unit
     panelTopPx <-
       if isMobileNow then
         pure Nothing
@@ -3486,31 +3556,38 @@ handleViewAction = case _ of
     modify_ (_calendarPresenceCuePreferences .~ nextState)
     liftEffect $ persistPresenceCuePreferences nextState
   ViewCloseModal ->
-    modify_
-      ( _view %~
-          ( (_viewActiveModal .~ Nothing)
-              <<< clearDeleteState
-              <<< (_viewOverlapSheet .~ Nothing)
-              <<< (_viewSharedPresenceOverflowSheet .~ Nothing)
-              <<< (_viewPresenceInspection .~ Nothing)
-              <<< (_viewPresenceInspectionPinned .~ false)
-              <<< (_viewPresenceInspectionInitialTopPx .~ Nothing)
-              <<< clearPresenceInspectionHoverState
-          )
-      )
+    do
+      consumeModalBackNavigation
+      modify_
+        ( _view %~
+            ( (_viewActiveModal .~ Nothing)
+                <<< clearDeleteState
+                <<< (_viewOverlapSheet .~ Nothing)
+                <<< (_viewSharedPresenceOverflowSheet .~ Nothing)
+                <<< (_viewPresenceInspection .~ Nothing)
+                <<< (_viewPresenceInspectionPinned .~ false)
+                <<< (_viewPresenceInspectionInitialTopPx .~ Nothing)
+                <<< clearPresenceInspectionHoverState
+            )
+        )
   ViewOpenCreate ->
-    modify_
-      ( _view %~
-          ( (_viewActiveModal .~ Just ModalCreateItem)
-              <<< clearDeleteState
-          )
-      )
+    do
+      armModalBackNavigation
+      modify_
+        ( _view %~
+            ( (_viewActiveModal .~ Just ModalCreateItem)
+                <<< clearDeleteState
+            )
+        )
   ViewCloseCreate ->
-    modify_ (_view <<< _viewActiveModal .~ Nothing)
+    do
+      consumeModalBackNavigation
+      modify_ (_view <<< _viewActiveModal .~ Nothing)
   ViewOpenEdit item ->
     case buildEditDraft item of
       Nothing -> pure unit
-      Just draft ->
+      Just draft -> do
+        armModalBackNavigation
         modify_
           ( _view
               %~
@@ -3566,14 +3643,16 @@ handleViewAction = case _ of
                 EditTaskDraft _ ->
                   modify_ (_syncUpdateErrorState .~ Just (updateErrorMessage (unwrap resp.status)))
   ViewEditCancel ->
-    modify_
-      ( (_view <<< _viewEditPanel .~ Nothing)
-          <<< (_view <<< _viewActiveModal .~ Nothing)
-          <<< (_view <<< _viewItemActionsItem .~ Nothing)
-          <<< (_view <<< _viewDeleteConfirmTarget .~ Nothing)
-          <<< (_view <<< _viewDeleteInFlight .~ Nothing)
-          <<< (_view <<< _viewDeleteFeedback .~ Nothing)
-      )
+    do
+      consumeModalBackNavigation
+      modify_
+        ( (_view <<< _viewEditPanel .~ Nothing)
+            <<< (_view <<< _viewActiveModal .~ Nothing)
+            <<< (_view <<< _viewItemActionsItem .~ Nothing)
+            <<< (_view <<< _viewDeleteConfirmTarget .~ Nothing)
+            <<< (_view <<< _viewDeleteInFlight .~ Nothing)
+            <<< (_view <<< _viewDeleteFeedback .~ Nothing)
+        )
   ViewSetIsMobile isMobile ->
     modify_ (_view <<< _viewIsMobile .~ isMobile)
   where
