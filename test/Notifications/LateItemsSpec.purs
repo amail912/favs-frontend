@@ -3,6 +3,7 @@ module Test.Notifications.LateItemsSpec (spec) where
 import Prelude
 
 import Data.Array (length, replicate)
+import Data.Either (Either(..))
 import Notifications.LateItems as LateItems
 import Pages.Calendar (CalendarItem, CalendarItemContent(..), ItemStatus(..), ItemType(..))
 import Test.Spec (Spec, describe, it)
@@ -41,6 +42,7 @@ spec =
         lateItems = LateItems.deriveLateItems now [ older, newest, newer ]
       map _.title lateItems `shouldEqual` [ "Newest", "Newer", "Older" ]
       map _.day lateItems `shouldEqual` [ "2026-04-10", "2026-04-10", "2026-04-10" ]
+      map _.plannedDurationMinutes lateItems `shouldEqual` [ 60, 60, 60 ]
 
     it "supports first-50 pagination and has-more detection" do
       let
@@ -50,6 +52,26 @@ spec =
       length (LateItems.visibleLateItems 50 lateItems) `shouldEqual` 50
       LateItems.hasMoreLateItems 50 lateItems `shouldEqual` true
       LateItems.hasMoreLateItems 100 lateItems `shouldEqual` false
+
+    it "normalizes quick-complete prefill to a positive multiple of 5" do
+      LateItems.normalizeQuickCompleteDurationMinutes 60
+        `shouldEqual` { value: 60, wasRounded: false }
+      LateItems.normalizeQuickCompleteDurationMinutes 61
+        `shouldEqual` { value: 60, wasRounded: true }
+      LateItems.normalizeQuickCompleteDurationMinutes 63
+        `shouldEqual` { value: 65, wasRounded: true }
+      LateItems.normalizeQuickCompleteDurationMinutes 1
+        `shouldEqual` { value: 5, wasRounded: true }
+
+    it "validates quick-complete duration input as integer multiple of 5" do
+      LateItems.validateQuickCompleteDurationInput "15" `shouldEqual` Right 15
+      LateItems.validateQuickCompleteDurationInput " 20 " `shouldEqual` Right 20
+      LateItems.validateQuickCompleteDurationInput "0"
+        `shouldEqual` Left "La durée doit être supérieure à 0."
+      LateItems.validateQuickCompleteDurationInput "17"
+        `shouldEqual` Left "La durée doit être un multiple de 5 minutes."
+      LateItems.validateQuickCompleteDurationInput "abc"
+        `shouldEqual` Left "La durée doit être un nombre entier."
 
 mkTaskItem :: String -> ItemStatus -> String -> String -> String -> CalendarItem
 mkTaskItem id status title start end =

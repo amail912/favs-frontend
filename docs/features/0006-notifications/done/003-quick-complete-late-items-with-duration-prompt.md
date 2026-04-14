@@ -19,8 +19,9 @@ The reminder sheet supports an in-context quick complete action that asks for du
 - New backend endpoints.
 
 ## Technical Details
-- Quick complete opens a confirmation/prompt surface requesting duration in minutes.
-- Default input value is computed from planned duration (`windowEnd - windowStart`), clamped to a positive integer.
+- Quick complete opens an inline prompt in the selected late-item row requesting duration in minutes.
+- Default input value is computed from planned duration (`windowEnd - windowStart`) and normalized to a positive multiple of 5.
+- If planned duration is unexpectedly not a multiple of 5, log a warning in console and round to the nearest multiple of 5.
 - Submit triggers existing validate API (`/api/v1/calendar-items/:id/validate`) with `duree_reelle_minutes`.
 - On success:
   - target item leaves late list if no longer eligible,
@@ -32,12 +33,13 @@ The reminder sheet supports an in-context quick complete action that asks for du
 
 ## Acceptance Criteria
 - Each late-item row exposes a clear quick complete action.
-- Triggering quick complete opens duration prompt before API call.
+- Triggering quick complete opens inline duration prompt before API call.
 - Prompt input is prefilled with planned duration in minutes.
 - Confirming with valid duration sends validate request for selected item.
 - Successful completion updates reminder list/count without closing the sheet.
-- Invalid duration blocks submission with clear feedback.
+- Invalid duration (including non-multiple-of-5) blocks submission with clear feedback.
 - Backend/network failure displays error feedback and preserves user context.
+- If all late items are completed from the sheet, the sheet remains open and shows an explicit empty state.
 
 ## Tests
 - Unit tests for planned-duration-to-prefill conversion, including boundary values.

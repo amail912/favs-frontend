@@ -17,7 +17,7 @@ import Affjax.Web (Response, post)
 import Affjax.RequestBody (RequestBody(..))
 import Affjax.ResponseFormat (string)
 import Api.Auth (AuthenticatedProfile(..), getAuthProfileResponse, isAdminProfile)
-import Api.Calendar (getItemsResponse)
+import Api.Calendar (ValidateItemPayload(..), getItemsResponse, validateItemResponse)
 import Pages.Admin (component) as Admin
 import Pages.Calendar (CalendarRouteOutput(..), CalendarView(..), component, decodeCalendarItemsResponse) as Calendar
 import Pages.Checklists (component) as Checklists
@@ -46,6 +46,7 @@ import Effect (Effect)
 import Effect.Aff (Aff)
 import Effect.Aff.Class (liftAff)
 import Effect.Class (class MonadEffect)
+import Effect.Console as Console
 import Effect.Now (nowDateTime)
 import Data.Newtype (unwrap)
 import Foreign (Foreign, unsafeToForeign)
@@ -214,6 +215,10 @@ data Action
   = RouteChanged Route
   | NavigateTo DefinedRoute
   | NavigateToLateItem String String
+  | OpenLateItemQuickComplete LateItems.LateItem
+  | UpdateLateItemQuickCompleteMinutes String
+  | ConfirmLateItemQuickComplete
+  | CancelLateItemQuickComplete
   | HandleCalendarOutput Calendar.CalendarRouteOutput
   | LoadLateItems
   | LateItemsLoaded (Array LateItems.LateItem)
@@ -226,12 +231,21 @@ data Action
   | RefreshAuthStatus
   | InitializeRouting
 
+type LateItemsQuickCompleteState =
+  { itemId :: String
+  , minutesInput :: String
+  , validationError :: Maybe String
+  , submitError :: Maybe String
+  , isSubmitting :: Boolean
+  }
+
 type LateItemsState =
   { isLoading :: Boolean
   , loadError :: Maybe String
   , items :: Array LateItems.LateItem
   , visibleLimit :: Int
   , isSheetOpen :: Boolean
+  , quickCompletePrompt :: Maybe LateItemsQuickCompleteState
   }
 
 type State =
@@ -272,6 +286,7 @@ initialLateItemsState =
   , items: []
   , visibleLimit: 50
   , isSheetOpen: false
+  , quickCompletePrompt: Nothing
   }
 
 historyState :: Foreign
@@ -350,9 +365,127 @@ handleAction (NavigateToLateItem day itemId) = do
   modify_ \nextState ->
     nextState
       { currentRoute = nextRoute
-      , lateItems = nextState.lateItems { isSheetOpen = false }
+      , lateItems = nextState.lateItems { isSheetOpen = false, quickCompletePrompt = Nothing }
       }
   navigateWith _.pushState st.nav nextRoute
+handleAction (OpenLateItemQuickComplete lateItem) =
+  case lateItem.id of
+    Nothing -> pure unit
+    Just itemId -> do
+      let
+        normalized = LateItems.normalizeQuickCompleteDurationMinutes lateItem.plannedDurationMinutes
+      when normalized.wasRounded
+        ( liftEffect
+            ( Console.warn
+                ( "Planned duration was not a multiple of 5 for late item "
+                    <> itemId
+                    <> "; rounded to nearest multiple."
+                )
+            )
+        )
+      modify_ \st ->
+        st
+          { lateItems =
+              st.lateItems
+                { quickCompletePrompt =
+                    Just
+                      { itemId
+                      , minutesInput: show normalized.value
+                      , validationError: Nothing
+                      , submitError: Nothing
+                      , isSubmitting: false
+                      }
+                }
+          }
+handleAction (UpdateLateItemQuickCompleteMinutes raw) =
+  modify_ \st ->
+    st
+      { lateItems =
+          st.lateItems
+            { quickCompletePrompt =
+                map
+                  ( _
+                      { minutesInput = raw
+                      , validationError = Nothing
+                      , submitError = Nothing
+                      }
+                  )
+                  st.lateItems.quickCompletePrompt
+            }
+      }
+handleAction ConfirmLateItemQuickComplete = do
+  st <- get
+  case st.lateItems.quickCompletePrompt of
+    Nothing -> pure unit
+    Just prompt ->
+      case LateItems.validateQuickCompleteDurationInput prompt.minutesInput of
+        Left validationError ->
+          modify_ \nextState ->
+            nextState
+              { lateItems =
+                  nextState.lateItems
+                    { quickCompletePrompt =
+                        map
+                          (_ { validationError = Just validationError, submitError = Nothing })
+                          nextState.lateItems.quickCompletePrompt
+                    }
+              }
+        Right minutes -> do
+          modify_ \nextState ->
+            nextState
+              { lateItems =
+                  nextState.lateItems
+                    { quickCompletePrompt =
+                        map
+                          (_ { isSubmitting = true, validationError = Nothing, submitError = Nothing })
+                          nextState.lateItems.quickCompletePrompt
+                    }
+              }
+          result <- liftAff $ validateItemResponse prompt.itemId (ValidateItemPayload { duree_reelle_minutes: minutes })
+          case result of
+            Left err ->
+              modify_ \nextState ->
+                nextState
+                  { lateItems =
+                      nextState.lateItems
+                        { quickCompletePrompt =
+                            map
+                              ( _
+                                  { isSubmitting = false
+                                  , submitError = Just ("Impossible de valider l'item en retard: " <> printError err)
+                                  }
+                              )
+                              nextState.lateItems.quickCompletePrompt
+                        }
+                  }
+            Right response ->
+              if statusOk response then do
+                modify_ \nextState ->
+                  nextState
+                    { lateItems =
+                        nextState.lateItems
+                          { quickCompletePrompt = Nothing
+                          }
+                    }
+                handleAction LoadLateItems
+              else
+                modify_ \nextState ->
+                  nextState
+                    { lateItems =
+                        nextState.lateItems
+                          { quickCompletePrompt =
+                              map
+                                ( _
+                                    { isSubmitting = false
+                                    , submitError = Just ("Impossible de valider l'item en retard (HTTP " <> show (unwrap response.status) <> ").")
+                                    }
+                                )
+                                nextState.lateItems.quickCompletePrompt
+                          }
+                    }
+handleAction CancelLateItemQuickComplete =
+  modify_ \st ->
+    st { lateItems = st.lateItems { quickCompletePrompt = Nothing } }
 handleAction (HandleCalendarOutput (Calendar.RouteSyncRequested { viewMode, focusDate })) = do
   st <- get
   let
@@ -421,7 +554,7 @@ handleAction (LateItemsLoaded items) =
             , loadError = Nothing
             , items = items
             , visibleLimit = 50
-            , isSheetOpen = if length items == 0 then false else st.lateItems.isSheetOpen
+            , isSheetOpen = st.lateItems.isSheetOpen
             }
       }
 handleAction (LateItemsLoadFailed message) =
@@ -433,13 +566,13 @@ handleAction (LateItemsLoadFailed message) =
             , loadError = Just message
             , items = []
             , visibleLimit = 50
-            , isSheetOpen = false
+            , isSheetOpen = st.lateItems.isSheetOpen
             }
       }
 handleAction OpenLateItemsSheet =
   modify_ \st -> st { lateItems = st.lateItems { isSheetOpen = true } }
 handleAction CloseLateItemsSheet =
-  modify_ \st -> st { lateItems = st.lateItems { isSheetOpen = false } }
+  modify_ \st -> st { lateItems = st.lateItems { isSheetOpen = false, quickCompletePrompt = Nothing } }
 handleAction LoadMoreLateItems =
   modify_ \st ->
     st { lateItems = st.lateItems { visibleLimit = st.lateItems.visibleLimit + 50 } }
@@ -557,10 +690,13 @@ renderLateItemsSheetBody lateItems
   | otherwise =
       div [ class_ "app-late-items-sheet" ]
         [ maybe (text "") (\message -> div [ class_ "app-late-items-sheet__error alert alert-danger" ] [ text message ]) lateItems.loadError
-        , ul [ class_ "app-late-items-list list-group" ]
-            ( map renderLateItemsRow
-                (LateItems.visibleLateItems lateItems.visibleLimit lateItems.items)
-            )
+        , if length lateItems.items == 0 then
+            div [ class_ "app-late-items-sheet__empty text-muted" ] [ text "Aucun item en retard." ]
+          else
+            ul [ class_ "app-late-items-list list-group" ]
+              ( map (\item -> renderLateItemsRow lateItems.quickCompletePrompt item)
+                  (LateItems.visibleLateItems lateItems.visibleLimit lateItems.items)
+              )
         , if LateItems.hasMoreLateItems lateItems.visibleLimit lateItems.items then
             div [ class_ "app-late-items-sheet__more" ]
               [ button
@@ -573,23 +709,71 @@ renderLateItemsSheetBody lateItems
             text ""
         ]
 
-renderLateItemsRow :: forall w. LateItems.LateItem -> HTML w Action
-renderLateItemsRow lateItem =
+renderLateItemsRow :: forall w. Maybe LateItemsQuickCompleteState -> LateItems.LateItem -> HTML w Action
+renderLateItemsRow quickCompletePrompt lateItem =
   case lateItem.id of
     Just itemId ->
-      li [ class_ "list-group-item p-0" ]
-        [ button
-            [ class_ "btn btn-link text-start text-decoration-none w-100 app-late-items-row app-late-items-row--interactive"
-            , onClick (const (NavigateToLateItem lateItem.day itemId))
-            ]
-            [ div [ class_ "app-late-items-row__title" ] [ text lateItem.title ]
-            , div [ class_ "app-late-items-row__meta text-muted" ] [ text ("Termine le " <> lateItem.endDisplay) ]
-            ]
-        ]
+      let
+        isPromptOpen =
+          maybe false (\prompt -> prompt.itemId == itemId) quickCompletePrompt
+      in
+        li [ class_ "list-group-item app-late-items-row" ]
+          [ div [ class_ "d-flex align-items-start justify-content-between gap-2" ]
+              [ button
+                  [ class_ "btn btn-link text-start text-decoration-none p-0 flex-grow-1 app-late-items-row__navigate"
+                  , onClick (const (NavigateToLateItem lateItem.day itemId))
+                  ]
+                  [ div [ class_ "app-late-items-row__title" ] [ text lateItem.title ]
+                  , div [ class_ "app-late-items-row__meta text-muted" ] [ text ("Termine le " <> lateItem.endDisplay) ]
+                  ]
+              , button
+                  [ class_ "btn btn-sm btn-outline-success app-late-items-row__quick-complete"
+                  , onClick (const (OpenLateItemQuickComplete lateItem))
+                  ]
+                  [ text "Valider" ]
+              ]
+          , if isPromptOpen then
+              renderLateItemsQuickCompletePrompt quickCompletePrompt
+            else
+              text ""
+          ]
     Nothing ->
       li [ class_ "list-group-item app-late-items-row" ]
         [ div [ class_ "app-late-items-row__title" ] [ text lateItem.title ]
         , div [ class_ "app-late-items-row__meta text-muted" ] [ text ("Termine le " <> lateItem.endDisplay) ]
+        ]
+
+renderLateItemsQuickCompletePrompt :: forall w. Maybe LateItemsQuickCompleteState -> HTML w Action
+renderLateItemsQuickCompletePrompt quickCompletePrompt =
+  case quickCompletePrompt of
+    Nothing -> text ""
+    Just prompt ->
+      div [ class_ "app-late-items-row__quick-complete-form mt-2" ]
+        [ div [ class_ "d-flex flex-column gap-2" ]
+            [ label [ class_ "form-label mb-0" ] [ text "Durée réelle (minutes)" ]
+            , input
+                [ class_ "form-control form-control-sm app-late-items-row__quick-complete-input"
+                , type_ InputNumber
+                , value prompt.minutesInput
+                , onValueChange UpdateLateItemQuickCompleteMinutes
+                ]
+            , maybe (text "") (\message -> div [ class_ "text-danger small app-late-items-row__quick-complete-validation" ] [ text message ]) prompt.validationError
+            , maybe (text "") (\message -> div [ class_ "text-danger small app-late-items-row__quick-complete-error" ] [ text message ]) prompt.submitError
+            , div [ class_ "d-flex gap-2 justify-content-end" ]
+                [ button
+                    [ class_ "btn btn-sm btn-outline-secondary app-late-items-row__quick-complete-cancel"
+                    , onClick (const CancelLateItemQuickComplete)
+                    , disabled prompt.isSubmitting
+                    ]
+                    [ text "Annuler" ]
+                , button
+                    [ class_ "btn btn-sm btn-primary app-late-items-row__quick-complete-confirm"
+                    , onClick (const ConfirmLateItemQuickComplete)
+                    , disabled prompt.isSubmitting
+                    ]
+                    [ text (if prompt.isSubmitting then "Validation..." else "Valider") ]
+                ]
+            ]
         ]
 
 currentComponent :: AuthStatus -> DefinedRoute -> H.ComponentHTML Action ChildSlots Aff
