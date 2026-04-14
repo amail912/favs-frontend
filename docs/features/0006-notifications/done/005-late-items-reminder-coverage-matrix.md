@@ -4,7 +4,7 @@
 As a team, we want explicit and sufficient test coverage for late-item reminders so behavior remains stable across UI, routing, and completion flows.
 
 ## Outcome
-A mandatory coverage matrix defines what must be validated at unit, integration, and E2E levels before marking late-item reminder stories done.
+A mandatory coverage matrix now maps each reminder behavior to concrete automated tests and acts as a closure gate for stories `001` to `004`.
 
 ## In Scope
 - Coverage requirements for stories `001` to `004`.
@@ -26,6 +26,25 @@ A mandatory coverage matrix defines what must be validated at unit, integration,
   - route-change refresh behavior and stale-response safety.
 - "Done" requires all mandatory tests passing in CI for impacted stories.
 
+## Coverage Matrix
+- Eligibility filtering + descending ordering:
+  - Unit: `test/Notifications/LateItemsSpec.purs`
+- Pagination (first 50 + has more):
+  - Unit: `test/Notifications/LateItemsSpec.purs`
+  - E2E: `e2e/tests/notifications.reminder-coverage.spec.js` (`chip/sheet...pagination`)
+- Quick-complete duration normalization + validation:
+  - Unit: `test/Notifications/LateItemsSpec.purs`
+- Reminder visibility policy and refresh routing gates:
+  - Integration/pure: `test/Pages/AppSpec.purs`
+- Route-change refresh stale-response protection:
+  - Integration/pure: `test/Pages/AppSpec.purs` (`ignores stale late-items responses...`)
+- Navigation from reminder row to Calendar day+item actions:
+  - E2E: `e2e/tests/notifications.reminder-coverage.spec.js` (`selecting a row...`)
+- Quick-complete success with in-sheet refresh:
+  - E2E: `e2e/tests/notifications.reminder-coverage.spec.js` (`quick-complete success...`)
+- Quick-complete failure and retry path:
+  - E2E: `e2e/tests/notifications.reminder-coverage.spec.js` (`failure...retry succeeds`)
+
 ## Acceptance Criteria
 - Every late-item reminder behavior in stories `001` to `004` is mapped to at least one test layer.
 - Critical correctness rules (eligibility, navigation targeting, completion call semantics) are covered by automated tests.
@@ -33,10 +52,8 @@ A mandatory coverage matrix defines what must be validated at unit, integration,
 - Story closure checklist references this matrix as mandatory gate.
 
 ## Tests
-- Unit: eligibility, ordering, duration prefill computation.
-- Integration: chip/sheet state transitions, route parsing/printing, refresh race handling.
-- E2E:
-  - cross-tab chip visibility and sheet opening,
-  - navigation from sheet row to Calendar target actions,
-  - quick complete success path and in-sheet refresh,
-  - quick complete failure/retry path.
+- `npm test`
+- `npm run lint`
+- `npm run format`
+- `npx playwright test e2e/tests/notifications.reminder-coverage.spec.js`
+- `npm run e2e`

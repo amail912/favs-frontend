@@ -5,9 +5,11 @@ import Prelude
 import Api.Auth (AuthenticatedProfile(..))
 import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
-import Pages.App (AuthStatus(..), DefinedRoute(..), Route(..), connectedIdentityLabel, parseRouteString, resolveGuardedRoute, shouldRefreshLateItemsForRoute, visibleTabs)
+import Notifications.LateItems as LateItems
+import Pages.App (AuthStatus(..), DefinedRoute(..), Route(..), applyLateItemsLoadFailed, applyLateItemsLoaded, beginLateItemsRequest, connectedIdentityLabel, initialLateItemsState, parseRouteString, resolveGuardedRoute, shouldRefreshLateItemsForRoute, visibleTabs)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
+import Test.Support.Builders (unsafeDateTime)
 
 spec :: Spec Unit
 spec =
@@ -53,9 +55,33 @@ spec =
       shouldRefreshLateItemsForRoute (Authenticated memberProfile) (Route Note) `shouldEqual` true
       shouldRefreshLateItemsForRoute (Authenticated memberProfile) (Route Checklist) `shouldEqual` true
       shouldRefreshLateItemsForRoute (Authenticated memberProfile) (Route (Calendar { day: Nothing, item: Nothing })) `shouldEqual` true
+      shouldRefreshLateItemsForRoute (Authenticated memberProfile) (Route Admin) `shouldEqual` false
+      shouldRefreshLateItemsForRoute (Authenticated adminProfile) (Route Admin) `shouldEqual` true
       shouldRefreshLateItemsForRoute (Authenticated memberProfile) (Route Signup) `shouldEqual` false
       shouldRefreshLateItemsForRoute (Authenticated memberProfile) NotFound `shouldEqual` false
       shouldRefreshLateItemsForRoute (Authenticated memberProfile) Root `shouldEqual` false
+
+    it "ignores stale late-items responses and keeps items on active failures" do
+      let
+        staleItem = mockLateItem "stale" "Stale item"
+        freshItem = mockLateItem "fresh" "Fresh item"
+        firstRequest = beginLateItemsRequest initialLateItemsState
+        secondRequest = beginLateItemsRequest firstRequest.lateItems
+        staleLoaded = applyLateItemsLoaded firstRequest.requestId [ staleItem ] secondRequest.lateItems
+        freshLoaded = applyLateItemsLoaded secondRequest.requestId [ freshItem ] secondRequest.lateItems
+        thirdRequest = beginLateItemsRequest freshLoaded
+        staleFailure = applyLateItemsLoadFailed secondRequest.requestId "stale error" thirdRequest.lateItems
+        activeFailure = applyLateItemsLoadFailed thirdRequest.requestId "active error" thirdRequest.lateItems
+      map _.title staleLoaded.items `shouldEqual` []
+      staleLoaded.activeRequestId `shouldEqual` Just secondRequest.requestId
+      map _.title freshLoaded.items `shouldEqual` [ "Fresh item" ]
+      freshLoaded.activeRequestId `shouldEqual` Nothing
+      staleFailure.isLoading `shouldEqual` true
+      staleFailure.loadError `shouldEqual` Nothing
+      map _.title activeFailure.items `shouldEqual` [ "Fresh item" ]
+      activeFailure.loadError `shouldEqual` Just "active error"
+      activeFailure.isLoading `shouldEqual` false
+      activeFailure.activeRequestId `shouldEqual` Nothing
 
 memberProfile :: AuthenticatedProfile
 memberProfile =
@@ -72,3 +98,13 @@ adminProfile =
     , roles: [ "admin" ]
     , approved: true
     }
+
+mockLateItem :: String -> String -> LateItems.LateItem
+mockLateItem id title =
+  { id: Just id
+  , title
+  , day: "2026-04-10"
+  , end: unsafeDateTime "2026-04-10T09:00"
+  , endDisplay: "10/04/2026 09:00"
+  , plannedDurationMinutes: 60
+  }

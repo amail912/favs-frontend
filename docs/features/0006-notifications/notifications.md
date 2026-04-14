@@ -33,12 +33,12 @@ Help users notice and resolve overdue work quickly from anywhere in the app, wit
 
 ### Done
 - [001 Global Late-Items Reminder Surface](done/001-global-late-items-reminder-surface.md) - Show a cross-page late-items chip in shared app chrome and open a bottom sheet entrypoint when late items exist.
+- [002 Late-Items Sheet Navigation To Calendar Actions](done/002-late-items-sheet-navigation-to-calendar-actions.md) - Let users open Calendar day context and item actions directly from a late-item row.
+- [003 Quick Complete Late Items With Duration Prompt](done/003-quick-complete-late-items-with-duration-prompt.md) - Resolve late items from the reminder sheet via validate action with a prefilled duration prompt.
+- [004 Late-Items Refresh On Route Changes](done/004-late-items-refresh-on-route-changes.md) - Keep reminder data fresh by recomputing notifications on every address-bar navigation change.
+- [005 Late-Items Reminder Coverage Matrix](done/005-late-items-reminder-coverage-matrix.md) - Define required unit/integration/E2E coverage for late-items reminder reliability.
 
 ### Ready
-- [002 Late-Items Sheet Navigation To Calendar Actions](ready/002-late-items-sheet-navigation-to-calendar-actions.md) - Let users open Calendar day context and item actions directly from a late-item row.
-- [003 Quick Complete Late Items With Duration Prompt](ready/003-quick-complete-late-items-with-duration-prompt.md) - Resolve late items from the reminder sheet via validate action with a prefilled duration prompt.
-- [004 Late-Items Refresh On Route Changes](ready/004-late-items-refresh-on-route-changes.md) - Keep reminder data fresh by recomputing notifications on every address-bar navigation change.
-- [005 Late-Items Reminder Coverage Matrix](ready/005-late-items-reminder-coverage-matrix.md) - Define required unit/integration/E2E coverage for late-items reminder reliability.
 
 ### To Refine
 
