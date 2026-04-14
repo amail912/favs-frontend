@@ -2,8 +2,13 @@ const base = require("@playwright/test");
 const { test: authTest, expect: authExpect } = require("../fixtures/authenticated");
 const {
   adminTab,
+  calendarTab,
   checklistsTab,
   connectedIdentity,
+  lateItemsChip,
+  lateItemsLoadMore,
+  lateItemsRows,
+  lateItemsSheet,
   notesTab,
   signupMenuButton,
   signupUsernameInput,
@@ -16,6 +21,11 @@ const { test, expect } = base;
 async function signInAsAdmin(context, page, baseURL) {
   const adminIdentity = await withExistingUser({ kind: "admin" });
   const session = await signinUser(adminIdentity);
+  await attachSessionCookie(context, baseURL, session);
+  await page.goto("/");
+}
+
+async function attachSessionCookie(context, baseURL, session) {
   const hostname = new URL(baseURL).hostname;
 
   await context.addCookies([
@@ -29,8 +39,41 @@ async function signInAsAdmin(context, page, baseURL) {
       sameSite: "Lax"
     }
   ]);
+}
 
-  await page.goto("/");
+async function authenticateAdmin(context, baseURL) {
+  const adminIdentity = await withExistingUser({ kind: "admin" });
+  const session = await signinUser(adminIdentity);
+  await attachSessionCookie(context, baseURL, session);
+}
+
+function buildLateTaskItems(count) {
+  return Array.from({ length: count }, (_, index) => {
+    const minute = `${index % 60}`.padStart(2, "0");
+    return {
+      id: `late-${index + 1}`,
+      type: "BLOC_PLANIFIE",
+      titre: `Late task ${index + 1}`,
+      fenetre_debut: `2000-03-01T08:${minute}`,
+      fenetre_fin: `2000-03-01T09:${minute}`,
+      statut: "TODO",
+      categorie: "Reminder"
+    };
+  });
+}
+
+async function mockLateItemsRoute(page, items) {
+  await page.route("**/api/v1/calendar-items**", async route => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json; charset=utf-8",
+        body: JSON.stringify(items)
+      });
+      return;
+    }
+    await route.continue();
+  });
 }
 
 test("root route redirects to /notes", async ({ page }) => {
@@ -81,6 +124,11 @@ authTest("authenticated user can sign out from auth menu", async ({ authenticate
 authTest("authenticated shell shows the connected username", async ({ authenticatedPage: page, authIdentity }) => {
   await page.goto("/notes");
   await authExpect(connectedIdentity(page)).toHaveText(`Connecté: ${authIdentity.username}`);
+});
+
+authTest("late-items reminder chip stays hidden when no late item exists", async ({ authenticatedPage: page }) => {
+  await page.goto("/notes");
+  await authExpect(lateItemsChip(page)).toHaveCount(0);
 });
 
 authTest("approved non-admin user cannot discover or open the admin route", async ({ authenticatedPage: page }) => {

@@ -12,15 +12,17 @@ module Pages.App
 
 import Prelude hiding (div, (/))
 
+import Affjax (printError)
 import Affjax.Web (Response, post)
 import Affjax.RequestBody (RequestBody(..))
 import Affjax.ResponseFormat (string)
 import Api.Auth (AuthenticatedProfile(..), getAuthProfileResponse, isAdminProfile)
+import Api.Calendar (getItemsResponse)
 import Pages.Admin (component) as Admin
-import Pages.Calendar (CalendarRouteOutput(..), CalendarView(..), component) as Calendar
+import Pages.Calendar (CalendarRouteOutput(..), CalendarView(..), component, decodeCalendarItemsResponse) as Calendar
 import Pages.Checklists (component) as Checklists
 import Control.Monad.RWS (get, modify_)
-import Data.Array (find, head)
+import Data.Array (find, head, length)
 import DOM.HTML.Indexed.ButtonType (ButtonType(..))
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Data.Argonaut.Core (Json, jsonEmptyObject)
@@ -30,7 +32,7 @@ import Data.Argonaut.Encode (class EncodeJson, encodeJson, (:=), (~>))
 import Data.Bifunctor (lmap)
 import Data.Char (toCharCode)
 import Data.Either (Either(..), either)
-import Data.Foldable (all, foldMap)
+import Data.Foldable (all, fold, foldMap)
 import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.Monoid (guard)
@@ -39,15 +41,17 @@ import Data.String.CodeUnits as String
 import Data.String.Common as StringCommon
 import Data.String.Pattern (Pattern(..))
 import Helpers.DateTime as DateTime
+import Notifications.LateItems as LateItems
 import Effect (Effect)
 import Effect.Aff (Aff)
 import Effect.Aff.Class (liftAff)
 import Effect.Class (class MonadEffect)
+import Effect.Now (nowDateTime)
 import Data.Newtype (unwrap)
 import Foreign (Foreign, unsafeToForeign)
 import Halogen (Component, HalogenM, Slot, ComponentHTML, defaultEval, mkComponent, mkEval) as H
 import Halogen (HalogenM, liftEffect, raise, subscribe)
-import Halogen.HTML (HTML, a, div, h1, nav, slot, slot_, text, form, label, input, button)
+import Halogen.HTML (HTML, a, button, div, form, h1, input, label, li, nav, slot, slot_, span, text, ul)
 import Halogen.HTML.Events (onClick, onValueChange, onSubmit)
 import Halogen.HTML.Properties (for, type_, name, placeholder, id, value, disabled)
 import Halogen.Subscription as Sub
@@ -55,6 +59,7 @@ import Pages.Notes (component) as Notes
 import Routing.PushState (PushStateInterface, makeInterface, matchesWith)
 import Type.Prelude (Proxy(..))
 import Ui.AuthSession as AuthSession
+import Ui.Modal as Modal
 import Ui.Utils (class_)
 import Web.Event.Event (Event, preventDefault)
 
@@ -190,15 +195,30 @@ data Action
   = RouteChanged Route
   | NavigateTo DefinedRoute
   | HandleCalendarOutput Calendar.CalendarRouteOutput
+  | LoadLateItems
+  | LateItemsLoaded (Array LateItems.LateItem)
+  | LateItemsLoadFailed String
+  | OpenLateItemsSheet
+  | CloseLateItemsSheet
+  | LoadMoreLateItems
   | SignOut
   | HandleAuthOutput AuthOutput
   | RefreshAuthStatus
   | InitializeRouting
 
+type LateItemsState =
+  { isLoading :: Boolean
+  , loadError :: Maybe String
+  , items :: Array LateItems.LateItem
+  , visibleLimit :: Int
+  , isSheetOpen :: Boolean
+  }
+
 type State =
   { currentRoute :: Route
   , nav :: Maybe PushStateInterface
   , authStatus :: AuthStatus
+  , lateItems :: LateItemsState
   }
 
 data AuthStatus
@@ -222,6 +242,16 @@ initialState = const
   { currentRoute: Route Note
   , nav: Nothing
   , authStatus: AuthUnknown
+  , lateItems: initialLateItemsState
+  }
+
+initialLateItemsState :: LateItemsState
+initialLateItemsState =
+  { isLoading: false
+  , loadError: Nothing
+  , items: []
+  , visibleLimit: 50
+  , isSheetOpen: false
   }
 
 historyState :: Foreign
@@ -321,6 +351,7 @@ handleAction InitializeRouting = do
   modify_ _ { nav = Just nav }
   subscribeToRouting nav
   handleAction RefreshAuthStatus
+  handleAction LoadLateItems
 handleAction RefreshAuthStatus = do
   authStatus <- loadProfileAuthStatus
   case authStatus of
@@ -329,18 +360,67 @@ handleAction RefreshAuthStatus = do
     _ ->
       liftEffect AuthSession.clearAuthenticatedUsername
   modify_ _ { authStatus = authStatus }
+handleAction LoadLateItems = do
+  modify_ \st ->
+    st { lateItems = st.lateItems { isLoading = true, loadError = Nothing } }
+  result <- liftAff getItemsResponse
+  case result of
+    Left err ->
+      handleAction (LateItemsLoadFailed (printError err))
+    Right response ->
+      case Calendar.decodeCalendarItemsResponse response of
+        Left _ ->
+          handleAction (LateItemsLoadFailed "Impossible de charger les items en retard.")
+        Right items -> do
+          now <- liftEffect nowDateTime
+          handleAction (LateItemsLoaded (LateItems.deriveLateItems now items))
+handleAction (LateItemsLoaded items) =
+  modify_ \st ->
+    st
+      { lateItems =
+          st.lateItems
+            { isLoading = false
+            , loadError = Nothing
+            , items = items
+            , visibleLimit = 50
+            , isSheetOpen = if length items == 0 then false else st.lateItems.isSheetOpen
+            }
+      }
+handleAction (LateItemsLoadFailed message) =
+  modify_ \st ->
+    st
+      { lateItems =
+          st.lateItems
+            { isLoading = false
+            , loadError = Just message
+            , items = []
+            , visibleLimit = 50
+            , isSheetOpen = false
+            }
+      }
+handleAction OpenLateItemsSheet =
+  modify_ \st -> st { lateItems = st.lateItems { isSheetOpen = true } }
+handleAction CloseLateItemsSheet =
+  modify_ \st -> st { lateItems = st.lateItems { isSheetOpen = false } }
+handleAction LoadMoreLateItems =
+  modify_ \st ->
+    st { lateItems = st.lateItems { visibleLimit = st.lateItems.visibleLimit + 50 } }
 
 render :: State -> H.ComponentHTML Action ChildSlots Aff
-render { currentRoute, authStatus } =
+render { currentRoute, authStatus, lateItems } =
   case resolveGuardedRoute authStatus currentRoute of
     Nothing -> renderLoading authStatus
     Just (Route route) ->
       div [ class_ "container" ]
-        ( [ h1 [ class_ "text-center" ] [ text "FAVS" ]
-          , authMenu authStatus
-          ]
-            <> (if route /= Signup && route /= Signin then [ nav [ class_ "row nav nav-tabs" ] (map (\tabRoute -> tab tabRoute route) (visibleTabs authStatus)) ] else [])
-            <> [ currentComponent authStatus route ]
+        ( fold
+            [ [ h1 [ class_ "text-center" ] [ text "FAVS" ]
+              , authMenu authStatus
+              , renderLateItemsChip authStatus route lateItems
+              ]
+            , if route /= Signup && route /= Signin then [ nav [ class_ "row nav nav-tabs" ] (map (\tabRoute -> tab tabRoute route) (visibleTabs authStatus)) ] else []
+            , [ currentComponent authStatus route ]
+            , [ renderLateItemsSheet authStatus route lateItems ]
+            ]
         )
     Just Root -> text ""
     Just NotFound -> renderNotFound authStatus
@@ -398,6 +478,69 @@ authMenu authStatus =
         , button [ class_ "btn btn-outline-secondary btn-sm", onClick (const $ NavigateTo Signup) ] [ text "Signup" ]
         ]
       AuthUnknown -> []
+
+canRenderLateItemsReminder :: AuthStatus -> DefinedRoute -> Boolean
+canRenderLateItemsReminder authStatus route =
+  case authStatus of
+    Authenticated _ ->
+      route /= Signup && route /= Signin
+    _ ->
+      false
+
+renderLateItemsChip :: forall w. AuthStatus -> DefinedRoute -> LateItemsState -> HTML w Action
+renderLateItemsChip authStatus route lateItems =
+  if canRenderLateItemsReminder authStatus route && length lateItems.items > 0 then
+    div [ class_ "app-late-items-chip-wrapper mb-2" ]
+      [ button
+          [ class_ "btn btn-sm app-late-items-chip"
+          , onClick (const OpenLateItemsSheet)
+          ]
+          [ span [ class_ "app-late-items-chip__label" ] [ text "Items en retard" ]
+          , span [ class_ "app-late-items-chip__count" ] [ text (show (length lateItems.items)) ]
+          ]
+      ]
+  else
+    text ""
+
+renderLateItemsSheet :: forall w. AuthStatus -> DefinedRoute -> LateItemsState -> HTML w Action
+renderLateItemsSheet authStatus route lateItems =
+  if canRenderLateItemsReminder authStatus route && lateItems.isSheetOpen then
+    Modal.renderBottomSheet "Items en retard"
+      [ renderLateItemsSheetBody lateItems ]
+      CloseLateItemsSheet
+  else
+    text ""
+
+renderLateItemsSheetBody :: forall w. LateItemsState -> HTML w Action
+renderLateItemsSheetBody lateItems
+  | lateItems.isLoading =
+      div [ class_ "app-late-items-sheet app-late-items-sheet--loading" ]
+        [ text "Chargement..." ]
+  | otherwise =
+      div [ class_ "app-late-items-sheet" ]
+        [ maybe (text "") (\message -> div [ class_ "app-late-items-sheet__error alert alert-danger" ] [ text message ]) lateItems.loadError
+        , ul [ class_ "app-late-items-list list-group" ]
+            ( map renderLateItemsRow
+                (LateItems.visibleLateItems lateItems.visibleLimit lateItems.items)
+            )
+        , if LateItems.hasMoreLateItems lateItems.visibleLimit lateItems.items then
+            div [ class_ "app-late-items-sheet__more" ]
+              [ button
+                  [ class_ "btn btn-sm btn-outline-secondary app-late-items-load-more"
+                  , onClick (const LoadMoreLateItems)
+                  ]
+                  [ text "Afficher plus" ]
+              ]
+          else
+            text ""
+        ]
+
+renderLateItemsRow :: forall w. LateItems.LateItem -> HTML w Action
+renderLateItemsRow lateItem =
+  li [ class_ "list-group-item app-late-items-row" ]
+    [ div [ class_ "app-late-items-row__title" ] [ text lateItem.title ]
+    , div [ class_ "app-late-items-row__meta text-muted" ] [ text ("Termine le " <> lateItem.endDisplay) ]
+    ]
 
 currentComponent :: AuthStatus -> DefinedRoute -> H.ComponentHTML Action ChildSlots Aff
 currentComponent _ Note = slot_ (Proxy :: _ "notes") unit Notes.component unit

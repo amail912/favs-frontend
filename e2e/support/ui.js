@@ -26,6 +26,22 @@ function connectedIdentity(page) {
   return page.locator(".auth-menu__identity");
 }
 
+function lateItemsChip(page) {
+  return page.locator(".app-late-items-chip");
+}
+
+function lateItemsSheet(page) {
+  return page.locator(".app-late-items-sheet");
+}
+
+function lateItemsRows(page) {
+  return page.locator(".app-late-items-row");
+}
+
+function lateItemsLoadMore(page) {
+  return page.locator(".app-late-items-load-more");
+}
+
 function createButton(page) {
   return page.getByRole("button", { name: "+" });
 }
@@ -64,6 +80,10 @@ module.exports = {
   appTitle,
   checklistsTab,
   connectedIdentity,
+  lateItemsChip,
+  lateItemsSheet,
+  lateItemsRows,
+  lateItemsLoadMore,
   createAccountButton,
   createButton,
   notesTab,
