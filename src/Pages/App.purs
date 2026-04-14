@@ -7,6 +7,7 @@ module Pages.App
   , connectedIdentityLabel
   , parseRouteString
   , resolveGuardedRoute
+  , shouldRefreshLateItemsForRoute
   , visibleTabs
   ) where
 
@@ -221,8 +222,8 @@ data Action
   | CancelLateItemQuickComplete
   | HandleCalendarOutput Calendar.CalendarRouteOutput
   | LoadLateItems
-  | LateItemsLoaded (Array LateItems.LateItem)
-  | LateItemsLoadFailed String
+  | LateItemsLoaded Int (Array LateItems.LateItem)
+  | LateItemsLoadFailed Int String
   | OpenLateItemsSheet
   | CloseLateItemsSheet
   | LoadMoreLateItems
@@ -246,6 +247,8 @@ type LateItemsState =
   , visibleLimit :: Int
   , isSheetOpen :: Boolean
   , quickCompletePrompt :: Maybe LateItemsQuickCompleteState
+  , nextRequestId :: Int
+  , activeRequestId :: Maybe Int
   }
 
 type State =
@@ -287,7 +290,15 @@ initialLateItemsState =
   , visibleLimit: 50
   , isSheetOpen: false
   , quickCompletePrompt: Nothing
+  , nextRequestId: 1
+  , activeRequestId: Nothing
   }
+
+shouldRefreshLateItemsForRoute :: AuthStatus -> Route -> Boolean
+shouldRefreshLateItemsForRoute authStatus route =
+  case resolveGuardedRoute authStatus route of
+    Just (Route definedRoute) -> canRenderLateItemsReminder authStatus definedRoute
+    _ -> false
 
 historyState :: Foreign
 historyState = unsafeToForeign unit
@@ -343,8 +354,11 @@ handleAction (RouteChanged Root) = do
   let route = routeFromDefined Note
   modify_ _ { currentRoute = route }
   navigateWith _.replaceState st.nav route
-handleAction (RouteChanged route) =
+  when (shouldRefreshLateItemsForRoute st.authStatus route) (handleAction LoadLateItems)
+handleAction (RouteChanged route) = do
+  st <- get
   modify_ _ { currentRoute = route }
+  when (shouldRefreshLateItemsForRoute st.authStatus route) (handleAction LoadLateItems)
 handleAction (NavigateTo route) = do
   st <- get
   let nextRoute = routeFromDefined route
@@ -532,43 +546,61 @@ handleAction RefreshAuthStatus = do
       liftEffect AuthSession.clearAuthenticatedUsername
   modify_ _ { authStatus = authStatus }
 handleAction LoadLateItems = do
+  st <- get
+  when (shouldRefreshLateItemsForRoute st.authStatus st.currentRoute) do
+    let requestId = st.lateItems.nextRequestId
+    modify_ \nextState ->
+      nextState
+        { lateItems =
+            nextState.lateItems
+              { isLoading = true
+              , loadError = Nothing
+              , nextRequestId = requestId + 1
+              , activeRequestId = Just requestId
+              }
+        }
+    result <- liftAff getItemsResponse
+    case result of
+      Left err ->
+        handleAction (LateItemsLoadFailed requestId (printError err))
+      Right response ->
+        case Calendar.decodeCalendarItemsResponse response of
+          Left _ ->
+            handleAction (LateItemsLoadFailed requestId "Impossible de charger les items en retard.")
+          Right items -> do
+            now <- liftEffect nowDateTime
+            handleAction (LateItemsLoaded requestId (LateItems.deriveLateItems now items))
+handleAction (LateItemsLoaded requestId items) =
   modify_ \st ->
-    st { lateItems = st.lateItems { isLoading = true, loadError = Nothing } }
-  result <- liftAff getItemsResponse
-  case result of
-    Left err ->
-      handleAction (LateItemsLoadFailed (printError err))
-    Right response ->
-      case Calendar.decodeCalendarItemsResponse response of
-        Left _ ->
-          handleAction (LateItemsLoadFailed "Impossible de charger les items en retard.")
-        Right items -> do
-          now <- liftEffect nowDateTime
-          handleAction (LateItemsLoaded (LateItems.deriveLateItems now items))
-handleAction (LateItemsLoaded items) =
+    if st.lateItems.activeRequestId == Just requestId then
+      st
+        { lateItems =
+            st.lateItems
+              { isLoading = false
+              , loadError = Nothing
+              , items = items
+              , visibleLimit = 50
+              , isSheetOpen = st.lateItems.isSheetOpen
+              , activeRequestId = Nothing
+              }
+        }
+    else
+      st
+handleAction (LateItemsLoadFailed requestId message) =
   modify_ \st ->
-    st
-      { lateItems =
-          st.lateItems
-            { isLoading = false
-            , loadError = Nothing
-            , items = items
-            , visibleLimit = 50
-            , isSheetOpen = st.lateItems.isSheetOpen
-            }
-      }
-handleAction (LateItemsLoadFailed message) =
-  modify_ \st ->
-    st
-      { lateItems =
-          st.lateItems
-            { isLoading = false
-            , loadError = Just message
-            , items = []
-            , visibleLimit = 50
-            , isSheetOpen = st.lateItems.isSheetOpen
-            }
-      }
+    if st.lateItems.activeRequestId == Just requestId then
+      st
+        { lateItems =
+            st.lateItems
+              { isLoading = false
+              , loadError = Just message
+              , visibleLimit = 50
+              , isSheetOpen = st.lateItems.isSheetOpen
+              , activeRequestId = Nothing
+              }
+        }
+    else
+      st
 handleAction OpenLateItemsSheet =
   modify_ \st -> st { lateItems = st.lateItems { isSheetOpen = true } }
 handleAction CloseLateItemsSheet =

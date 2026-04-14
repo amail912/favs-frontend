@@ -5,7 +5,7 @@ import Prelude
 import Api.Auth (AuthenticatedProfile(..))
 import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
-import Pages.App (AuthStatus(..), DefinedRoute(..), Route(..), connectedIdentityLabel, parseRouteString, resolveGuardedRoute, visibleTabs)
+import Pages.App (AuthStatus(..), DefinedRoute(..), Route(..), connectedIdentityLabel, parseRouteString, resolveGuardedRoute, shouldRefreshLateItemsForRoute, visibleTabs)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
 
@@ -47,6 +47,15 @@ spec =
       connectedIdentityLabel Unauthenticated `shouldEqual` Nothing
       connectedIdentityLabel (Authenticated memberProfile) `shouldEqual` Just "Connecté: member"
       connectedIdentityLabel (Authenticated adminProfile) `shouldEqual` Just "Connecté: admin"
+
+    it "refreshes late-items only on authenticated reminder-visible routes" do
+      shouldRefreshLateItemsForRoute Unauthenticated (Route Note) `shouldEqual` false
+      shouldRefreshLateItemsForRoute (Authenticated memberProfile) (Route Note) `shouldEqual` true
+      shouldRefreshLateItemsForRoute (Authenticated memberProfile) (Route Checklist) `shouldEqual` true
+      shouldRefreshLateItemsForRoute (Authenticated memberProfile) (Route (Calendar { day: Nothing, item: Nothing })) `shouldEqual` true
+      shouldRefreshLateItemsForRoute (Authenticated memberProfile) (Route Signup) `shouldEqual` false
+      shouldRefreshLateItemsForRoute (Authenticated memberProfile) NotFound `shouldEqual` false
+      shouldRefreshLateItemsForRoute (Authenticated memberProfile) Root `shouldEqual` false
 
 memberProfile :: AuthenticatedProfile
 memberProfile =

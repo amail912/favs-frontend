@@ -18,10 +18,11 @@ Late-item reminder data refreshes on every address-bar-affecting route change an
 - Background synchronization beyond route transitions.
 
 ## Technical Details
-- Refresh is triggered whenever application navigation changes the route/URL.
+- Refresh is triggered whenever application navigation changes the route/URL on authenticated reminder-visible routes (Notes, Checklists, Calendar, Admin).
 - Refresh is also triggered immediately after successful quick complete action.
 - Chip count and sheet rows update from a single canonical refreshed data source.
-- If overlapping requests occur, stale responses must not overwrite newer state.
+- During route-triggered refresh, previously rendered chip/list data remains visible until the latest response applies.
+- If overlapping requests occur, stale responses must not overwrite newer state (request sequencing).
 
 ## Acceptance Criteria
 - Navigating between authenticated tabs recomputes reminder data.
@@ -29,6 +30,7 @@ Late-item reminder data refreshes on every address-bar-affecting route change an
 - If sheet is open during refresh, its visible list updates without forcing sheet close.
 - After quick complete success, list/count update without waiting for a later navigation.
 - In case of concurrent refreshes, final rendered state matches latest completed refresh intent.
+- Failed refresh does not clear previously rendered late-item list/count.
 
 ## Tests
 - Integration test for route-change-triggered refresh dispatch.
