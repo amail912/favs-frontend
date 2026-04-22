@@ -20,7 +20,7 @@ Help users notice and resolve overdue work quickly from anywhere in the app, wit
 
 ## Backend Contract Input
 - Existing calendar list endpoint: `GET /api/v1/calendar-items`.
-- Existing completion endpoint: `POST /api/v1/calendar-items/:id/validate`.
+- Existing completion path: status update through `POST /api/v1/calendar-items`.
 
 ## Recommended Delivery Order
 1. `001` Global late-items reminder surface.
@@ -37,6 +37,7 @@ Help users notice and resolve overdue work quickly from anywhere in the app, wit
 - [003 Quick Complete Late Items With Duration Prompt](done/003-quick-complete-late-items-with-duration-prompt.md) - Resolve late items from the reminder sheet via validate action with a prefilled duration prompt.
 - [004 Late-Items Refresh On Route Changes](done/004-late-items-refresh-on-route-changes.md) - Keep reminder data fresh by recomputing notifications on every address-bar navigation change.
 - [005 Late-Items Reminder Coverage Matrix](done/005-late-items-reminder-coverage-matrix.md) - Define required unit/integration/E2E coverage for late-items reminder reliability.
+- [006 Quick Complete Late Items Via Status Update](done/006-quick-complete-via-status-update.md) - Replace removed `/validate` completion call with status-based update and response-driven late-items state transitions.
 
 ### Ready
 

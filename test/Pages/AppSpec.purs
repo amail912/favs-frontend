@@ -7,9 +7,10 @@ import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
 import Notifications.LateItems as LateItems
 import Pages.App (AuthStatus(..), DefinedRoute(..), Route(..), applyLateItemsLoadFailed, applyLateItemsLoaded, beginLateItemsRequest, connectedIdentityLabel, initialLateItemsState, parseRouteString, resolveGuardedRoute, shouldRefreshLateItemsForRoute, visibleTabs)
+import Pages.Calendar (ItemType(..))
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
-import Test.Support.Builders (unsafeDateTime)
+import Test.Support.Builders (calendarContent, serverCalendarItem, unsafeDateTime)
 
 spec :: Spec Unit
 spec =
@@ -102,6 +103,7 @@ adminProfile =
 mockLateItem :: String -> String -> LateItems.LateItem
 mockLateItem id title =
   { id: Just id
+  , sourceItem: serverCalendarItem id (calendarContent Task title "2026-04-10T08:00" "2026-04-10T09:00")
   , title
   , day: "2026-04-10"
   , end: unsafeDateTime "2026-04-10T09:00"

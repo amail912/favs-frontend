@@ -24,9 +24,9 @@ import Affjax.Web (Response, post)
 import Affjax.RequestBody (RequestBody(..))
 import Affjax.ResponseFormat (string)
 import Api.Auth (AuthenticatedProfile(..), getAuthProfileResponse, isAdminProfile)
-import Api.Calendar (ValidateItemPayload(..), getItemsResponse, validateItemResponse)
+import Api.Calendar (getItemsResponse, updateItemResponse)
 import Pages.Admin (component) as Admin
-import Pages.Calendar (CalendarRouteOutput(..), CalendarView(..), component, decodeCalendarItemsResponse) as Calendar
+import Pages.Calendar (CalendarRouteOutput(..), CalendarView(..), CalendarItem(..), component, decodeCalendarItemsResponse) as Calendar
 import Pages.Checklists (component) as Checklists
 import Control.Monad.RWS (get, modify_)
 import Data.Array (find, head, length, mapMaybe)
@@ -492,59 +492,120 @@ handleAction ConfirmLateItemQuickComplete = do
                           nextState.lateItems.quickCompletePrompt
                     }
               }
-        Right minutes -> do
-          modify_ \nextState ->
-            nextState
-              { lateItems =
-                  nextState.lateItems
-                    { quickCompletePrompt =
-                        map
-                          (_ { isSubmitting = true, validationError = Nothing, submitError = Nothing })
-                          nextState.lateItems.quickCompletePrompt
-                    }
-              }
-          result <- liftAff $ validateItemResponse prompt.itemId (ValidateItemPayload { duree_reelle_minutes: minutes })
-          case result of
-            Left err ->
+        Right minutes ->
+          case find (\item -> item.id == Just prompt.itemId) st.lateItems.items of
+            Nothing ->
               modify_ \nextState ->
                 nextState
                   { lateItems =
                       nextState.lateItems
                         { quickCompletePrompt =
                             map
-                              ( _
-                                  { isSubmitting = false
-                                  , submitError = Just ("Impossible de valider l'item en retard: " <> printError err)
-                                  }
-                              )
+                              (_ { isSubmitting = false, submitError = Just "Impossible de retrouver l'item en retard." })
                               nextState.lateItems.quickCompletePrompt
                         }
                   }
-            Right response ->
-              if statusOk response then do
-                modify_ \nextState ->
-                  nextState
-                    { lateItems =
-                        nextState.lateItems
-                          { quickCompletePrompt = Nothing
+            Just lateItem ->
+              case LateItems.buildQuickCompleteUpdatedItem minutes lateItem of
+                Nothing ->
+                  modify_ \nextState ->
+                    nextState
+                      { lateItems =
+                          nextState.lateItems
+                            { quickCompletePrompt =
+                                map
+                                  (_ { isSubmitting = false, submitError = Just "Impossible de preparer la mise a jour de l'item en retard." })
+                                  nextState.lateItems.quickCompletePrompt
+                            }
+                      }
+                Just updatedItemPayload -> do
+                  modify_ \nextState ->
+                    nextState
+                      { lateItems =
+                          nextState.lateItems
+                            { quickCompletePrompt =
+                                map
+                                  (_ { isSubmitting = true, validationError = Nothing, submitError = Nothing })
+                                  nextState.lateItems.quickCompletePrompt
+                            }
+                      }
+                  result <- liftAff $ updateItemResponse prompt.itemId updatedItemPayload
+                  case result of
+                    Left err ->
+                      modify_ \nextState ->
+                        nextState
+                          { lateItems =
+                              nextState.lateItems
+                                { quickCompletePrompt =
+                                    map
+                                      ( _
+                                          { isSubmitting = false
+                                          , submitError = Just ("Impossible de mettre a jour l'item en retard: " <> printError err)
+                                          }
+                                      )
+                                      nextState.lateItems.quickCompletePrompt
+                                }
                           }
-                    }
-                handleAction LoadLateItems
-              else
-                modify_ \nextState ->
-                  nextState
-                    { lateItems =
-                        nextState.lateItems
-                          { quickCompletePrompt =
-                              map
-                                ( _
-                                    { isSubmitting = false
-                                    , submitError = Just ("Impossible de valider l'item en retard (HTTP " <> show (unwrap response.status) <> ").")
+                    Right response ->
+                      if statusOk response then
+                        case decodeJson response.body of
+                          Left _ ->
+                            modify_ \nextState ->
+                              nextState
+                                { lateItems =
+                                    nextState.lateItems
+                                      { quickCompletePrompt =
+                                          map
+                                            ( _
+                                                { isSubmitting = false
+                                                , submitError = Just "Mise a jour reussie mais reponse serveur inexploitable."
+                                                }
+                                            )
+                                            nextState.lateItems.quickCompletePrompt
+                                      }
+                                }
+                          Right updatedItem ->
+                            case updatedItem of
+                              Calendar.ServerCalendarItem _ -> do
+                                now <- liftEffect nowDateTime
+                                modify_ \nextState ->
+                                  nextState
+                                    { lateItems =
+                                        nextState.lateItems
+                                          { items = LateItems.applyQuickCompleteUpdatedItem now updatedItem nextState.lateItems.items
+                                          , quickCompletePrompt = Nothing
+                                          }
                                     }
-                                )
-                                nextState.lateItems.quickCompletePrompt
-                          }
-                    }
+                              _ ->
+                                modify_ \nextState ->
+                                  nextState
+                                    { lateItems =
+                                        nextState.lateItems
+                                          { quickCompletePrompt =
+                                              map
+                                                ( _
+                                                    { isSubmitting = false
+                                                    , submitError = Just "Mise a jour reussie mais item serveur non retourne."
+                                                    }
+                                                )
+                                                nextState.lateItems.quickCompletePrompt
+                                          }
+                                    }
+                      else
+                        modify_ \nextState ->
+                          nextState
+                            { lateItems =
+                                nextState.lateItems
+                                  { quickCompletePrompt =
+                                      map
+                                        ( _
+                                            { isSubmitting = false
+                                            , submitError = Just ("Impossible de mettre a jour l'item en retard (HTTP " <> show (unwrap response.status) <> ").")
+                                            }
+                                        )
+                                        nextState.lateItems.quickCompletePrompt
+                                  }
+                            }
 handleAction CancelLateItemQuickComplete =
   modify_ \st ->
     st { lateItems = st.lateItems { quickCompletePrompt = Nothing } }

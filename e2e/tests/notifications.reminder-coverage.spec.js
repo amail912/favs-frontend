@@ -27,7 +27,7 @@ function buildLateTaskItems(count) {
 async function mockLateItemsApi(page, options = {}) {
   const state = {
     items: options.items ? options.items.map(item => ({ ...item })) : [],
-    validateCalls: []
+    updateCalls: []
   };
 
   await page.route("**/api/v1/calendar-items**", async route => {
@@ -44,13 +44,13 @@ async function mockLateItemsApi(page, options = {}) {
       return;
     }
 
-    if (method === "POST" && url.includes("/validate")) {
-      const itemId = url.split("/api/v1/calendar-items/")[1]?.split("/validate")[0] || "";
+    if (method === "POST" && url.endsWith("/api/v1/calendar-items")) {
       const payload = request.postDataJSON();
-      state.validateCalls.push({ itemId, payload });
+      const itemId = payload?.id || "";
+      state.updateCalls.push({ itemId, payload });
 
-      if (typeof options.onValidate === "function") {
-        const outcome = options.onValidate({ itemId, payload, state });
+      if (typeof options.onUpdate === "function") {
+        const outcome = options.onUpdate({ itemId, payload, state });
         if (outcome && outcome.status) {
           await route.fulfill({
             status: outcome.status,
@@ -61,11 +61,17 @@ async function mockLateItemsApi(page, options = {}) {
         }
       }
 
-      state.items = state.items.filter(item => item.id !== itemId);
+      state.items = state.items.map(item => {
+        if (item.id !== itemId) return item;
+        return {
+          ...item,
+          ...payload
+        };
+      });
       await route.fulfill({
         status: 200,
         contentType: "application/json; charset=utf-8",
-        body: "{}"
+        body: JSON.stringify(state.items.find(item => item.id === itemId) || payload || {})
       });
       return;
     }
@@ -141,7 +147,7 @@ test("late reminders: quick-complete success keeps sheet open and refreshes coun
   await expect(page.locator(".app-late-items-row__quick-complete-input")).toHaveValue("60");
   await page.locator(".app-late-items-row__quick-complete-confirm").click();
 
-  await expect.poll(() => state.validateCalls.length).toBe(1);
+  await expect.poll(() => state.updateCalls.length).toBe(1);
   await expect(lateItemsSheet(page)).toBeVisible();
   await expect(lateItemsChip(page).locator(".app-late-items-chip__count")).toHaveText("1");
   await expect(lateItemsRows(page)).toHaveCount(1);
@@ -152,13 +158,16 @@ test("late reminders: quick-complete failure shows inline feedback and retry suc
   let attempt = 0;
   await mockLateItemsApi(page, {
     items: mockedItems,
-    onValidate: ({ itemId, state }) => {
+    onUpdate: ({ itemId, state }) => {
       attempt += 1;
       if (attempt === 1) {
         return { status: 500, body: "{\"error\":\"boom\"}" };
       }
-      state.items = state.items.filter(item => item.id !== itemId);
-      return { status: 200, body: "{}" };
+      state.items = state.items.map(item => {
+        if (item.id !== itemId) return item;
+        return { ...item, statut: "DONE" };
+      });
+      return { status: 200, body: JSON.stringify(state.items.find(item => item.id === itemId) || {}) };
     }
   });
 
@@ -175,4 +184,38 @@ test("late reminders: quick-complete failure shows inline feedback and retry suc
   await expect(lateItemsSheet(page)).toBeVisible();
   await expect(page.locator(".app-late-items-sheet__empty")).toBeVisible();
   await expect(lateItemsChip(page)).toHaveCount(0);
+});
+
+test("late reminders: quick-complete keeps item when response remains late", async ({ authenticatedPage: page }) => {
+  const mockedItems = buildLateTaskItems(1);
+  await mockLateItemsApi(page, {
+    items: mockedItems,
+    onUpdate: ({ itemId, state, payload }) => {
+      state.items = state.items.map(item => {
+        if (item.id !== itemId) return item;
+        return {
+          ...item,
+          ...payload,
+          titre: "Still late task",
+          statut: "TODO"
+        };
+      });
+      return {
+        status: 200,
+        body: JSON.stringify(state.items[0])
+      };
+    }
+  });
+
+  await page.goto("/notes");
+  await lateItemsChip(page).click();
+  await expect(lateItemsRows(page)).toHaveCount(1);
+
+  await lateItemsRows(page).first().locator(".app-late-items-row__quick-complete").click();
+  await page.locator(".app-late-items-row__quick-complete-confirm").click();
+
+  await expect(lateItemsSheet(page)).toBeVisible();
+  await expect(lateItemsRows(page)).toHaveCount(1);
+  await expect(lateItemsRows(page).first().locator(".app-late-items-row__title")).toHaveText("Still late task");
+  await expect(lateItemsChip(page).locator(".app-late-items-chip__count")).toHaveText("1");
 });

@@ -1,6 +1,8 @@
 module Notifications.LateItems
   ( LateItem
   , deriveLateItems
+  , buildQuickCompleteUpdatedItem
+  , applyQuickCompleteUpdatedItem
   , visibleLateItems
   , hasMoreLateItems
   , normalizeQuickCompleteDurationMinutes
@@ -9,7 +11,7 @@ module Notifications.LateItems
 
 import Prelude
 
-import Data.Array (drop, filter, length, mapMaybe, sortBy, take)
+import Data.Array (cons, drop, filter, length, mapMaybe, sortBy, take)
 import Data.DateTime (DateTime)
 import Data.DateTime (date) as DateTime
 import Data.Int as Int
@@ -21,6 +23,7 @@ import Pages.Calendar (CalendarItem(..), CalendarItemContent(..), ItemStatus(..)
 
 type LateItem =
   { id :: Maybe String
+  , sourceItem :: CalendarItem
   , title :: String
   , day :: String
   , end :: DateTime
@@ -72,12 +75,52 @@ toLateItem item =
 mkLateItem :: Maybe String -> CalendarItem -> DateTime -> Int -> LateItem
 mkLateItem id item end plannedDurationMinutes =
   { id
+  , sourceItem: item
   , title: calendarItemPrimaryText item
   , day: DateTime.formatLocalDate (DateTime.date end)
   , end
   , endDisplay: DateTime.formatDisplayDateTime end
   , plannedDurationMinutes
   }
+
+buildQuickCompleteUpdatedItem :: Int -> LateItem -> Maybe CalendarItem
+buildQuickCompleteUpdatedItem minutes lateItem =
+  case lateItem.sourceItem of
+    ServerCalendarItem { id, content: TaskCalendarItemContent content } ->
+      Just
+        ( ServerCalendarItem
+            { id
+            , content:
+                TaskCalendarItemContent
+                  ( content
+                      { status = Done
+                      , actualDurationMinutes = Just minutes
+                      }
+                  )
+            }
+        )
+    _ ->
+      Nothing
+
+applyQuickCompleteUpdatedItem :: DateTime -> CalendarItem -> Array LateItem -> Array LateItem
+applyQuickCompleteUpdatedItem now updatedItem lateItems =
+  sortBy compareEndDesc
+    ( case toLateItemIfEligible now updatedItem of
+        Just lateItem -> cons lateItem withoutUpdated
+        Nothing -> withoutUpdated
+    )
+  where
+  compareEndDesc left right = compare right.end left.end
+  withoutUpdated =
+    case updatedItem of
+      ServerCalendarItem { id } ->
+        filter (\item -> item.id /= Just id) lateItems
+      _ ->
+        lateItems
+
+toLateItemIfEligible :: DateTime -> CalendarItem -> Maybe LateItem
+toLateItemIfEligible now item =
+  if isLateItem now item then toLateItem item else Nothing
 
 normalizeQuickCompleteDurationMinutes :: Int -> { value :: Int, wasRounded :: Boolean }
 normalizeQuickCompleteDurationMinutes raw =

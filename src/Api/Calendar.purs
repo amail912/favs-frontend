@@ -15,8 +15,6 @@ module Api.Calendar
   , createItemResponse
   , updateItemResponse
   , deleteItemResponse
-  , validateItemResponse
-  , ValidateItemPayload(..)
   , TripPlace(..)
   , TripSharingUser(..)
   , PeriodTrip(..)
@@ -76,9 +74,6 @@ deletePath itemId = "/api/v1/calendar-items/" <> itemId
 updateMethod :: Method
 updateMethod = POST
 
-validatePath :: String -> String
-validatePath itemId = "/api/v1/calendar-items/" <> itemId <> "/validate"
-
 getItemsResponse :: Aff JsonResponse
 getItemsResponse = Affjax.get json listPath
 
@@ -118,14 +113,6 @@ updateItemResponse itemId item =
 deleteItemResponse :: String -> Aff TextResponse
 deleteItemResponse itemId = Affjax.delete string (deletePath itemId)
 
-validateItemResponse :: String -> ValidateItemPayload -> Aff JsonResponse
-validateItemResponse itemId payload =
-  Affjax.post json (validatePath itemId)
-    (jsonBody payload)
-
-newtype ValidateItemPayload = ValidateItemPayload
-  { duree_reelle_minutes :: Int }
-
 newtype TripPlace = TripPlace
   { name :: String }
 
@@ -143,10 +130,6 @@ newtype PeriodTripGroup = PeriodTripGroup
   { username :: String
   , trips :: Array PeriodTrip
   }
-
-instance encodeValidateItemPayload :: EncodeJson ValidateItemPayload where
-  encodeJson (ValidateItemPayload payload) =
-    "duree_reelle_minutes" := payload.duree_reelle_minutes ~> jsonEmptyObject
 
 instance decodeTripPlace :: DecodeJson TripPlace where
   decodeJson json = do
