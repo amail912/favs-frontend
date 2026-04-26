@@ -132,6 +132,7 @@ import Ui.DateTimePicker as DateTimePicker
 import Ui.LocalStorage as LocalStorage
 import Ui.Modal (renderBottomSheet, renderModal, renderModalWithActionState, renderModalWithValidateState) as Modal
 import Ui.ModalHistory as ModalHistory
+import Ui.Scroll (scrollElementIntoView)
 import Ui.Utils (class_)
 import Web.Event.Event (EventType(..), preventDefault)
 import Web.HTML (window)
@@ -166,9 +167,6 @@ import Data.Int as Int
 import Data.Traversable (traverse)
 
 -- foldl comes from Data.Array in this module
-
-foreign import scrollElementIntoView :: Element -> Effect Unit
-foreign import viewportVisibleHeight :: Effect Number
 
 -- BEGIN src/Pages/Calendar.purs
 type Input =
@@ -3697,7 +3695,8 @@ handleViewAction = case _ of
     case timelineRef, gridRef of
       Just _, Just gridEl -> do
         gridRect <- liftEffect $ getBoundingClientRect gridEl
-        viewportHeightPx <- liftEffect viewportVisibleHeight
+        w <- liftEffect window
+        viewportHeightPx <- Int.toNumber <$> liftEffect (Window.innerHeight w)
         let minuteHeightPx = if gridRect.height <= 0.0 then 0.0 else gridRect.height / 1440.0
         if minuteHeightPx <= 0.0 then
           pure Nothing
