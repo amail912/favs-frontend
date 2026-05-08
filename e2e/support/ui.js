@@ -14,6 +14,10 @@ function adminTab(page) {
   return page.locator("a.nav-link", { hasText: "Admin" });
 }
 
+function financeTab(page) {
+  return page.locator("a.nav-link", { hasText: "Finance" });
+}
+
 function signupMenuButton(page) {
   return page.getByRole("button", { name: "Signup" });
 }
@@ -80,6 +84,7 @@ module.exports = {
   appTitle,
   checklistsTab,
   connectedIdentity,
+  financeTab,
   lateItemsChip,
   lateItemsSheet,
   lateItemsRows,

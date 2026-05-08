@@ -12,6 +12,7 @@ module Pages.App
   , applyLateItemsLoadFailed
   , connectedIdentityLabel
   , parseRouteString
+  , printRoute
   , resolveGuardedRoute
   , shouldRefreshLateItemsForRoute
   , visibleTabs
@@ -70,6 +71,9 @@ import Ui.AuthSession as AuthSession
 import Ui.Modal as Modal
 import Ui.Utils (class_)
 import Web.Event.Event (Event, preventDefault)
+import Web.HTML (window)
+import Web.HTML.Location as Location
+import Web.HTML.Window as Window
 
 type OpaqueSlot slot = forall query. H.Slot query Void slot
 type CalendarSlot slot = forall query. H.Slot query Calendar.CalendarRouteOutput slot
@@ -87,7 +91,7 @@ type CalendarRouteState =
   , item :: Maybe String
   }
 
-data DefinedRoute = Note | Checklist | Calendar CalendarRouteState | Admin | Signup | Signin
+data DefinedRoute = Note | Checklist | Calendar CalendarRouteState | FinanceTransactions | FinanceReports | Admin | Signup | Signin
 
 derive instance definedRouteGeneric :: Generic DefinedRoute _
 derive instance definedRouteEq :: Eq DefinedRoute
@@ -139,6 +143,8 @@ printDefinedRoutePath = case _ of
   Note -> "/notes"
   Checklist -> "/checklists"
   Calendar _ -> "/calendar"
+  FinanceTransactions -> "/finance/transactions"
+  FinanceReports -> "/finance/reports"
   Admin -> "/admin"
   Signup -> "/signup"
   Signin -> "/signin"
@@ -151,6 +157,12 @@ parseDefinedRoutePath = case _ of
   "checklists" -> Just Checklist
   "/calendar" -> Just defaultCalendarRoute
   "calendar" -> Just defaultCalendarRoute
+  "/finance" -> Just FinanceTransactions
+  "finance" -> Just FinanceTransactions
+  "/finance/transactions" -> Just FinanceTransactions
+  "finance/transactions" -> Just FinanceTransactions
+  "/finance/reports" -> Just FinanceReports
+  "finance/reports" -> Just FinanceReports
   "/admin" -> Just Admin
   "admin" -> Just Admin
   "/signup" -> Just Signup
@@ -217,6 +229,16 @@ subscribeToRouting nav = do
     )
     nav
   pure unit
+
+shouldCanonicalizeFinanceRoute :: Route -> Effect Boolean
+shouldCanonicalizeFinanceRoute = case _ of
+  Route FinanceTransactions -> do
+    win <- window
+    location <- Window.location win
+    pathname <- Location.pathname location
+    pure (pathname == "/finance")
+  _ ->
+    pure false
 
 data Action
   = RouteChanged Route
@@ -363,6 +385,16 @@ statusOk r = unwrap r.status >= 200 && unwrap r.status < 300
 
 resolveGuardedRoute :: AuthStatus -> Route -> Maybe Route
 resolveGuardedRoute authStatus route = case route of
+  Route FinanceTransactions ->
+    case authStatus of
+      AuthUnknown -> Nothing
+      Authenticated _ -> Just route
+      _ -> Just NotFound
+  Route FinanceReports ->
+    case authStatus of
+      AuthUnknown -> Nothing
+      Authenticated _ -> Just route
+      _ -> Just NotFound
   Route Admin ->
     case authStatus of
       AuthUnknown -> Nothing
@@ -372,8 +404,12 @@ resolveGuardedRoute authStatus route = case route of
 
 visibleTabs :: AuthStatus -> Array DefinedRoute
 visibleTabs authStatus =
-  [ Note, Checklist, defaultCalendarRoute ] <> guard (canViewAdminNav authStatus) [ Admin ]
+  [ Note, Checklist, defaultCalendarRoute ]
+    <> guard (canViewFinanceNav authStatus) [ FinanceTransactions ]
+    <> guard (canViewAdminNav authStatus) [ Admin ]
   where
+  canViewFinanceNav (Authenticated _) = true
+  canViewFinanceNav _ = false
   canViewAdminNav (Authenticated profile) = isAdminProfile profile
   canViewAdminNav _ = false
 
@@ -406,6 +442,9 @@ handleAction (RouteChanged Root) = do
 handleAction (RouteChanged route) = do
   st <- get
   modify_ _ { currentRoute = route }
+  shouldNormalize <- liftEffect (shouldCanonicalizeFinanceRoute route)
+  when shouldNormalize $
+    navigateWith _.replaceState st.nav route
   when (shouldRefreshLateItemsForRoute st.authStatus route) (handleAction LoadLateItems)
 handleAction (NavigateTo route) = do
   st <- get
@@ -895,11 +934,26 @@ currentComponent _ (Calendar calendarRoute) =
     , initialItemId: calendarRoute.item
     }
     HandleCalendarOutput
+currentComponent _ FinanceTransactions = renderFinancePlaceholder "Transactions"
+currentComponent _ FinanceReports = renderFinancePlaceholder "Reports"
 currentComponent (Authenticated (AuthenticatedProfile { username })) Admin =
   slot_ (Proxy :: _ "admin") unit Admin.component { currentUsername: username }
 currentComponent _ Admin = text ""
 currentComponent _ Signup = slot (Proxy :: _ "signup") unit signupComponent unit HandleAuthOutput
 currentComponent _ Signin = slot (Proxy :: _ "signin") unit signinComponent unit HandleAuthOutput
+
+renderFinancePlaceholder :: String -> H.ComponentHTML Action ChildSlots Aff
+renderFinancePlaceholder sectionLabel =
+  div [ class_ "row justify-content-center py-4" ]
+    [ div [ class_ "col-12 col-md-10 col-lg-7" ]
+        [ div [ class_ "card shadow-sm border-0 finance-route-placeholder" ]
+            [ div [ class_ "card-body p-4 text-center" ]
+                [ h1 [ class_ "h4 mb-2" ] [ text "Finance" ]
+                , div [ class_ "text-muted" ] [ text ("Surface " <> sectionLabel <> " prête pour les prochaines stories.") ]
+                ]
+            ]
+        ]
+    ]
 
 tab :: forall w. DefinedRoute -> DefinedRoute -> HTML w Action
 tab tabRoute activeRoute =
@@ -915,12 +969,18 @@ sameTab :: DefinedRoute -> DefinedRoute -> Boolean
 sameTab left right =
   case left, right of
     Calendar _, Calendar _ -> true
+    FinanceTransactions, FinanceTransactions -> true
+    FinanceTransactions, FinanceReports -> true
+    FinanceReports, FinanceTransactions -> true
+    FinanceReports, FinanceReports -> true
     _, _ -> left == right
 
 tabLabel :: DefinedRoute -> String
 tabLabel Note = "Notes"
 tabLabel Checklist = "Checklists"
 tabLabel (Calendar _) = "Calendar"
+tabLabel FinanceTransactions = "Finance"
+tabLabel FinanceReports = "Finance"
 tabLabel Admin = "Admin"
 tabLabel Signup = "Signup"
 tabLabel Signin = "Signin"

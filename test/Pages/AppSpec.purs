@@ -6,7 +6,7 @@ import Api.Auth (AuthenticatedProfile(..))
 import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
 import Notifications.LateItems as LateItems
-import Pages.App (AuthStatus(..), DefinedRoute(..), Route(..), applyLateItemsLoadFailed, applyLateItemsLoaded, beginLateItemsRequest, connectedIdentityLabel, initialLateItemsState, parseRouteString, resolveGuardedRoute, shouldRefreshLateItemsForRoute, visibleTabs)
+import Pages.App (AuthStatus(..), DefinedRoute(..), Route(..), applyLateItemsLoadFailed, applyLateItemsLoaded, beginLateItemsRequest, connectedIdentityLabel, initialLateItemsState, parseRouteString, printRoute, resolveGuardedRoute, shouldRefreshLateItemsForRoute, visibleTabs)
 import Pages.Calendar (ItemType(..))
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
@@ -15,8 +15,15 @@ import Test.Support.Builders (calendarContent, serverCalendarItem, unsafeDateTim
 spec :: Spec Unit
 spec =
   describe "App routing and auth gating" do
-    it "parses the admin route" do
+    it "parses finance and admin routes" do
+      parseRouteString "/finance" `shouldEqual` Right (Route FinanceTransactions)
+      parseRouteString "/finance/transactions" `shouldEqual` Right (Route FinanceTransactions)
+      parseRouteString "/finance/reports" `shouldEqual` Right (Route FinanceReports)
       parseRouteString "/admin" `shouldEqual` Right (Route Admin)
+
+    it "prints canonical finance routes" do
+      printRoute (Route FinanceTransactions) `shouldEqual` "/finance/transactions"
+      printRoute (Route FinanceReports) `shouldEqual` "/finance/reports"
 
     it "parses calendar routes with and without a valid day query" do
       parseRouteString "/calendar" `shouldEqual` Right (Route (Calendar { day: Nothing, item: Nothing }))
@@ -25,14 +32,26 @@ spec =
       parseRouteString "/calendar?day=invalid&item=task-1" `shouldEqual` Right (Route (Calendar { day: Nothing, item: Just "task-1" }))
       parseRouteString "/calendar?day=2026-04-02&item=" `shouldEqual` Right (Route (Calendar { day: Just "2026-04-02", item: Nothing }))
 
-    it "shows admin tab only for admin profiles" do
+    it "shows finance for authenticated users and admin only for admin profiles" do
       visibleTabs AuthUnknown `shouldEqual` [ Note, Checklist, Calendar { day: Nothing, item: Nothing } ]
       visibleTabs Unauthenticated `shouldEqual` [ Note, Checklist, Calendar { day: Nothing, item: Nothing } ]
-      visibleTabs (Authenticated memberProfile) `shouldEqual` [ Note, Checklist, Calendar { day: Nothing, item: Nothing } ]
-      visibleTabs (Authenticated adminProfile) `shouldEqual` [ Note, Checklist, Calendar { day: Nothing, item: Nothing }, Admin ]
+      visibleTabs (Authenticated memberProfile) `shouldEqual` [ Note, Checklist, Calendar { day: Nothing, item: Nothing }, FinanceTransactions ]
+      visibleTabs (Authenticated adminProfile) `shouldEqual` [ Note, Checklist, Calendar { day: Nothing, item: Nothing }, FinanceTransactions, Admin ]
+
+    it "keeps finance routes unresolved while auth status is unknown" do
+      resolveGuardedRoute AuthUnknown (Route FinanceTransactions) `shouldEqual` Nothing
+      resolveGuardedRoute AuthUnknown (Route FinanceReports) `shouldEqual` Nothing
 
     it "keeps admin route unresolved while auth status is unknown" do
       resolveGuardedRoute AuthUnknown (Route Admin) `shouldEqual` Nothing
+
+    it "gates finance routes to not-found for unauthenticated users" do
+      resolveGuardedRoute Unauthenticated (Route FinanceTransactions) `shouldEqual` Just NotFound
+      resolveGuardedRoute Unauthenticated (Route FinanceReports) `shouldEqual` Just NotFound
+
+    it "allows authenticated users to access finance routes" do
+      resolveGuardedRoute (Authenticated memberProfile) (Route FinanceTransactions) `shouldEqual` Just (Route FinanceTransactions)
+      resolveGuardedRoute (Authenticated memberProfile) (Route FinanceReports) `shouldEqual` Just (Route FinanceReports)
 
     it "gates admin route to not-found for non-admin users" do
       resolveGuardedRoute Unauthenticated (Route Admin) `shouldEqual` Just NotFound

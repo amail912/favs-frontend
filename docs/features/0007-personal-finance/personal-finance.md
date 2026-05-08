@@ -65,9 +65,9 @@ Help users manage financial operations as explicit, explainable facts: capture t
 ## Stories
 
 ### Done
+- [001 Finance Route Entry And Guarded Navigation](done/001-finance-route-entry-and-guarded-navigation.md) - Introduce `/finance`, `/finance/transactions`, and `/finance/reports`, expose one authenticated `Finance` tab, and normalize `/finance` to the transactions landing route.
 
 ### Ready
-- [001 Finance Route Entry And Guarded Navigation](ready/001-finance-route-entry-and-guarded-navigation.md) - Introduce `/finance`, `/finance/transactions`, and `/finance/reports`, expose one authenticated `Finance` tab, and normalize `/finance` to the transactions landing route.
 - [002 Finance Workspace Shell And Primary Navigation](ready/002-finance-workspace-shell-and-primary-navigation.md) - Add a dedicated finance-local subnav row for `Transactions` and `Reports`, with the finance `+` visible on `Transactions` only.
 - [003 Finance Nested Flow Context And Return Semantics](ready/003-finance-nested-flow-context-and-return-semantics.md) - Define create and detail as local modal or sheet overlays that preserve finance context and use shared modal-history back behavior.
 - [004 Finance Backend Contract Adoption](ready/004-finance-backend-contract-adoption.md) - Establish the initial `Api.Finance*` contract layer and shared finance types aligned to the existing `/api/v1/finance` backend.

@@ -5,6 +5,7 @@ const {
   calendarTab,
   checklistsTab,
   connectedIdentity,
+  financeTab,
   lateItemsChip,
   lateItemsLoadMore,
   lateItemsRows,
@@ -111,6 +112,14 @@ authTest("navigation tabs update browser URL", async ({ authenticatedPage: page 
   await authExpect(connectedIdentity(page)).toHaveText(/Connecté: /);
 });
 
+authTest("authenticated user sees finance navigation and lands on transactions", async ({ authenticatedPage: page }) => {
+  await page.goto("/notes");
+  await authExpect(financeTab(page)).toBeVisible();
+  await financeTab(page).click();
+  await authExpect(page).toHaveURL(/\/finance\/transactions$/);
+  await authExpect(page.locator(".finance-route-placeholder")).toContainText("Finance");
+});
+
 authTest("authenticated user can sign out from auth menu", async ({ authenticatedPage: page }) => {
   await page.goto("/notes");
   await authExpect(connectedIdentity(page)).toHaveText(/Connecté: /);
@@ -152,6 +161,26 @@ authTest("approved non-admin user cannot discover or open the admin route", asyn
   await page.goto("/admin");
   await authExpect(page.getByText("404")).toBeVisible();
   await authExpect(page.getByText("Page introuvable")).toBeVisible();
+});
+
+test("unauthenticated user cannot open finance routes", async ({ page }) => {
+  await page.goto("/finance/transactions");
+  await expect(page.getByText("404")).toBeVisible();
+  await expect(page.getByText("Page introuvable")).toBeVisible();
+});
+
+authTest("authenticated direct /finance entry canonicalizes to /finance/transactions", async ({ authenticatedPage: page }) => {
+  await page.goto("/finance");
+  await authExpect(page).toHaveURL(/\/finance\/transactions$/);
+  await authExpect(page.locator(".finance-route-placeholder")).toContainText("Transactions");
+});
+
+authTest("authenticated finance route stays accessible after reload", async ({ authenticatedPage: page }) => {
+  await page.goto("/finance/reports");
+  await authExpect(page.locator(".finance-route-placeholder")).toContainText("Reports");
+  await page.reload();
+  await authExpect(page).toHaveURL(/\/finance\/reports$/);
+  await authExpect(page.locator(".finance-route-placeholder")).toContainText("Reports");
 });
 
 test("admin user sees admin navigation and can open admin page", async ({ context, page, baseURL }) => {
