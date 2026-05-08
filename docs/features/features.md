@@ -8,3 +8,4 @@ This section tracks the active feature backlogs in English.
 - [Global UI UX](0004-global-ui-ux/global-ui-ux.md) - Deliver cross-app UI/UX foundations including authenticated identity surfaces, calendar day navigation ergonomics, and reusable date-time UX.
 - [Calendar Item Lifecycle UX](0005-calendar-item-lifecycle-ux/calendar-item-lifecycle-ux.md) - Add direct, device-adapted calendar item lifecycle actions, starting with safe in-place deletion.
 - [Notifications](0006-notifications/notifications.md) - Add cross-page reminders that surface and resolve late calendar items quickly.
+- [Personal Finance](0007-personal-finance/personal-finance.md) - Add a finance workspace for transaction capture, refinement, and explainable analysis.
