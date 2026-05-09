@@ -2264,3 +2264,15 @@ a.nav-link:hover {
   inset: 0;
   z-index: 80;
 }
+
+.finance-ledger-row--actionable {
+  cursor: pointer;
+}
+
+.finance-ledger-row--actionable:hover {
+  background: rgba(25, 135, 84, 0.06);
+}
+
+.finance-ledger-row--adjustment {
+  border-left: 4px solid rgba(13, 110, 253, 0.6);
+}

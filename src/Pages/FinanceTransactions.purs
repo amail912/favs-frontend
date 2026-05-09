@@ -35,7 +35,6 @@ import Data.Foldable (fold)
 import Data.Maybe (Maybe(..), isJust, maybe)
 import Data.Monoid (guard)
 import Data.Newtype (unwrap)
-import Data.String.Common as StringCommon
 import Effect.Aff (Aff)
 import Effect.Aff.Class (liftAff)
 import Halogen (Component, ComponentHTML, HalogenM, defaultEval, mkComponent, mkEval) as H
@@ -59,7 +58,9 @@ type State =
   , remoteState :: LedgerRemoteState
   }
 
-data Output = RouteSyncRequested LedgerContext
+data Output
+  = RouteSyncRequested LedgerContext
+  | OpenTransactionDetail String
 
 data LedgerRemoteState
   = LedgerLoading
@@ -105,6 +106,7 @@ data Action
   | ClearFrom
   | ClearTo
   | ResetFilters
+  | OpenRow String
 
 component :: forall q. H.Component q Input Output Aff
 component =
@@ -290,26 +292,30 @@ renderRows rows =
 
 renderRow :: FinanceLedgerRow -> H.ComponentHTML Action () Aff
 renderRow row =
-  tr [ class_ "finance-ledger-row" ]
+  tr [ class_ ("finance-ledger-row finance-ledger-row--actionable" <> guard row.hasAdjustment " finance-ledger-row--adjustment"), onClick (const (OpenRow row.id)) ]
     [ td [ class_ "finance-ledger-row__amount" ] [ text row.amountLabel ]
     , td [ class_ "finance-ledger-row__direction" ] [ span [ class_ ("badge " <> row.directionClass) ] [ text row.directionLabel ] ]
     , td [ class_ "finance-ledger-row__account" ] [ text row.accountLabel ]
     , td [ class_ "finance-ledger-row__occurred-at" ] [ text row.occurredAtLabel ]
     , td [ class_ "finance-ledger-row__category" ] [ text row.categoryLabel ]
-    , td [ class_ "finance-ledger-row__facts" ] [ text (factsLabel row) ]
+    , td [ class_ "finance-ledger-row__facts" ] [ renderFacts row ]
     ]
 
-factsLabel :: FinanceLedgerRow -> String
-factsLabel row =
-  if null facts then "-" else StringCommon.joinWith ", " facts
+renderFacts :: FinanceLedgerRow -> H.ComponentHTML Action () Aff
+renderFacts row =
+  if null facts then
+    text "-"
+  else
+    div [ class_ "d-flex flex-wrap gap-1" ] facts
   where
   facts =
     fold
-      [ guard row.hasSplit [ "split" ]
-      , guard row.hasTransfer [ "transfer" ]
-      , guard row.hasNote [ "note" ]
-      , guard row.hasAdjustment [ "adjustment" ]
+      [ guard row.hasSplit [ badge "split" ]
+      , guard row.hasTransfer [ badge "transfer" ]
+      , guard row.hasNote [ badge "note" ]
+      , guard row.hasAdjustment [ badge "adjustment" ]
       ]
+  badge label = span [ class_ "badge text-bg-secondary finance-ledger-fact" ] [ text label ]
 
 renderEmptyState :: String -> String -> H.ComponentHTML Action () Aff
 renderEmptyState title subtitle =
@@ -361,6 +367,8 @@ handleAction = case _ of
     raise (RouteSyncRequested cleared)
     modify_ beginLedgerLoad
     loadLedger
+  OpenRow transactionId ->
+    raise (OpenTransactionDetail transactionId)
 
 clearOne :: (LedgerContext -> LedgerContext) -> H.HalogenM State Action () Output Aff Unit
 clearOne updateContext = do

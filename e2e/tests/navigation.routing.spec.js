@@ -7,6 +7,7 @@ const {
   connectedIdentity,
   financeCreateOverlay,
   financeCreateButton,
+  financeDetailOverlay,
   financeReportsTab,
   financeShell,
   financeTab,
@@ -75,6 +76,51 @@ async function mockLateItemsRoute(page, items) {
         status: 200,
         contentType: "application/json; charset=utf-8",
         body: JSON.stringify(items)
+      });
+      return;
+    }
+    await route.continue();
+  });
+}
+
+function buildFinanceTransactions(count) {
+  return Array.from({ length: count }, (_, index) => {
+    const minute = `${index % 60}`.padStart(2, "0");
+    return {
+      id: `tx-${index + 1}`,
+      direction: index % 2 === 0 ? "sent" : "received",
+      accountId: "acc-1",
+      amount: 10 + index,
+      occurredAt: `2026-05-10T09:${minute}:00Z`,
+      recordedAt: `2026-05-10T09:${minute}:05Z`,
+      transfer: index === 1 ? { linkedTransactionId: "tx-99", linkType: "transfer" } : null,
+      category: index === 2 ? null : { id: "cat-1" },
+      splits: index === 0 ? [{ amount: 3, category: "cat-1" }] : [],
+      notes: index === 2 ? [{ id: "note-1", text: "memo" }] : [],
+      adjustment: index === 3 ? { kind: "balance-snapshot" } : null
+    };
+  });
+}
+
+async function mockFinanceLedgerRoutes(page, transactions) {
+  await page.route("**/api/v1/finance/accounts**", async route => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json; charset=utf-8",
+        body: JSON.stringify([{ id: "acc-1", name: "Primary account", status: "active" }])
+      });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.route("**/api/v1/finance/transactions**", async route => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json; charset=utf-8",
+        body: JSON.stringify(transactions)
       });
       return;
     }
@@ -265,6 +311,32 @@ authTest("finance create overlay success closes without changing route", async (
   await authExpect(financeCreateOverlay(page)).toHaveCount(0);
   await authExpect(page).toHaveURL(/\/finance\/transactions$/);
   await authExpect(financeTransactionsTab(page)).toHaveClass(/active/);
+});
+
+authTest("finance ledger row opens detail overlay and preserves route and scroll on close", async ({ authenticatedPage: page }) => {
+  const transactions = buildFinanceTransactions(80);
+  await mockFinanceLedgerRoutes(page, transactions);
+
+  await page.goto("/finance/transactions?from=2026-05-01T00:00:00Z&to=2026-05-31T23:59:59Z");
+  await authExpect(page.locator(".finance-ledger-row")).toHaveCount(80);
+  await authExpect(page.locator(".finance-ledger-row__facts")).toContainText("split");
+  await authExpect(page.locator(".finance-ledger-row__facts")).toContainText("transfer");
+  await authExpect(page.locator(".finance-ledger-row__facts")).toContainText("note");
+  await authExpect(page.locator(".finance-ledger-row__facts")).toContainText("adjustment");
+
+  await page.evaluate(() => window.scrollTo(0, 1200));
+  const beforeOpenScroll = await page.evaluate(() => Math.trunc(window.scrollY));
+
+  await page.locator(".finance-ledger-row").first().click();
+  await authExpect(financeDetailOverlay(page)).toBeVisible();
+  await authExpect(financeDetailOverlay(page)).toContainText("Transaction: tx-1");
+  await authExpect(page).toHaveURL(/\/finance\/transactions\?from=2026-05-01T00:00:00Z&to=2026-05-31T23:59:59Z$/);
+
+  await page.getByRole("button", { name: "Fermer" }).click();
+  await authExpect(financeDetailOverlay(page)).toHaveCount(0);
+  await authExpect(page).toHaveURL(/\/finance\/transactions\?from=2026-05-01T00:00:00Z&to=2026-05-31T23:59:59Z$/);
+  const afterCloseScroll = await page.evaluate(() => Math.trunc(window.scrollY));
+  expect(Math.abs(afterCloseScroll - beforeOpenScroll)).toBeLessThanOrEqual(2);
 });
 
 test("admin user sees admin navigation and can open admin page", async ({ context, page, baseURL }) => {

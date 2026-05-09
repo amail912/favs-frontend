@@ -71,8 +71,10 @@ spec =
     it "tracks finance overlay visibility only on finance routes" do
       isFinanceOverlayOpen Nothing `shouldEqual` false
       isFinanceOverlayOpen (Just FinanceCreateOverlay) `shouldEqual` true
+      isFinanceOverlayOpen (Just (FinanceDetailOverlay "tx-1")) `shouldEqual` true
       shouldRenderFinanceOverlay defaultTransactionsRoute Nothing `shouldEqual` false
       shouldRenderFinanceOverlay defaultTransactionsRoute (Just FinanceCreateOverlay) `shouldEqual` true
+      shouldRenderFinanceOverlay defaultTransactionsRoute (Just (FinanceDetailOverlay "tx-1")) `shouldEqual` true
       shouldRenderFinanceOverlay FinanceReports (Just FinanceCreateOverlay) `shouldEqual` true
       shouldRenderFinanceOverlay Note (Just FinanceCreateOverlay) `shouldEqual` false
 

@@ -38,6 +38,10 @@ function financeCreateOverlay(page) {
   return page.locator(".finance-create-overlay");
 }
 
+function financeDetailOverlay(page) {
+  return page.locator(".finance-detail-overlay");
+}
+
 function signupMenuButton(page) {
   return page.getByRole("button", { name: "Signup" });
 }
@@ -105,6 +109,7 @@ module.exports = {
   checklistsTab,
   connectedIdentity,
   financeCreateOverlay,
+  financeDetailOverlay,
   financeCreateButton,
   financeReportsTab,
   financeShell,

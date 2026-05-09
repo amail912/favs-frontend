@@ -103,3 +103,9 @@ Do not introduce:
   - close detail and observe preserved filter and order context
   - close detail and observe return to the same scroll position
   - inspect transactions with split, transfer, note, and adjustment states and verify their indicators
+
+## Implementation Notes
+- Ledger rows are now the primary detail-open target: clicking a row emits a detail-open output carrying the transaction id.
+- The `facts` cell now renders informational badges (`split`, `transfer`, `note`, `adjustment`) with no separate click targets.
+- Opened detail uses the existing finance overlay contract in `Pages.App` via `FinanceDetailOverlay`, with a placeholder modal until story `011`.
+- Window scroll position is captured before opening detail and restored when detail closes (close button or browser back).

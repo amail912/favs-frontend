@@ -80,6 +80,7 @@ import Ui.CreateButton as CreateButton
 import Ui.Modal as Modal
 import Ui.ModalHistory as ModalHistory
 import Ui.Utils (class_)
+import Ui.WindowScroll as WindowScroll
 import Web.Event.Event (Event, preventDefault)
 import Web.HTML (window)
 import Web.HTML.Location as Location
@@ -362,6 +363,7 @@ type State =
   , nav :: Maybe PushStateInterface
   , authStatus :: AuthStatus
   , financeOverlay :: Maybe FinanceOverlay
+  , financeOverlayScrollY :: Maybe Int
   , lateItems :: LateItemsState
   }
 
@@ -387,6 +389,7 @@ initialState = const
   , nav: Nothing
   , authStatus: AuthUnknown
   , financeOverlay: Nothing
+  , financeOverlayScrollY: Nothing
   , lateItems: initialLateItemsState
   }
 
@@ -541,12 +544,12 @@ handleAction :: Action -> H.HalogenM State Action ChildSlots Void Aff Unit
 handleAction (RouteChanged Root) = do
   st <- get
   let route = routeFromDefined Note
-  modify_ _ { currentRoute = route, financeOverlay = Nothing }
+  modify_ _ { currentRoute = route, financeOverlay = Nothing, financeOverlayScrollY = Nothing }
   navigateWith _.replaceState st.nav route
   when (shouldRefreshLateItemsForRoute st.authStatus route) (handleAction LoadLateItems)
 handleAction (RouteChanged route) = do
   st <- get
-  modify_ _ { currentRoute = route, financeOverlay = financeOverlayAfterRouteChange route st.financeOverlay }
+  modify_ _ { currentRoute = route, financeOverlay = financeOverlayAfterRouteChange route st.financeOverlay, financeOverlayScrollY = financeOverlayScrollYAfterRouteChange route st.financeOverlay }
   shouldNormalize <- liftEffect (shouldCanonicalizeFinanceRoute route)
   when shouldNormalize $
     navigateWith _.replaceState st.nav route
@@ -554,7 +557,7 @@ handleAction (RouteChanged route) = do
 handleAction (NavigateTo route) = do
   st <- get
   let nextRoute = routeFromDefined route
-  modify_ _ { currentRoute = nextRoute, financeOverlay = Nothing }
+  modify_ _ { currentRoute = nextRoute, financeOverlay = Nothing, financeOverlayScrollY = Nothing }
   navigateWith _.pushState st.nav nextRoute
 handleAction GlobalPopState =
   closeFinanceOverlayFromBrowserBack
@@ -562,10 +565,10 @@ handleAction FinanceCreateClicked =
   openFinanceCreateOverlay
 handleAction CloseFinanceOverlay = do
   consumeFinanceOverlayBackNavigation
-  modify_ _ { financeOverlay = Nothing }
+  closeFinanceOverlayAndRestoreScroll
 handleAction CompleteFinanceOverlayPlaceholder = do
   consumeFinanceOverlayBackNavigation
-  modify_ _ { financeOverlay = Nothing }
+  closeFinanceOverlayAndRestoreScroll
 handleAction (NavigateToLateItem day itemId) = do
   st <- get
   let
@@ -786,6 +789,12 @@ handleAction (HandleTransactionsOutput (FinanceTransactions.RouteSyncRequested t
         navigateWith _.pushState st.nav nextRoute
     _ ->
       pure unit
+handleAction (HandleTransactionsOutput (FinanceTransactions.OpenTransactionDetail transactionId)) = do
+  state <- get
+  when (routeCanOpenFinanceOverlay state.currentRoute) do
+    scrollY <- liftEffect WindowScroll.getWindowScrollY
+    armFinanceOverlayBackNavigation
+    modify_ _ { financeOverlay = Just (FinanceDetailOverlay transactionId), financeOverlayScrollY = Just scrollY }
 handleAction (HandleAuthOutput (SignupSucceeded username)) = do
   st <- get
   liftEffect $ AuthSession.storeAuthenticatedUsername username
@@ -796,14 +805,14 @@ handleAction (HandleAuthOutput (SigninSucceeded profile@(AuthenticatedProfile { 
   st <- get
   liftEffect $ AuthSession.storeAuthenticatedUsername username
   let route = routeFromDefined Note
-  modify_ _ { currentRoute = route, authStatus = Authenticated profile, financeOverlay = Nothing }
+  modify_ _ { currentRoute = route, authStatus = Authenticated profile, financeOverlay = Nothing, financeOverlayScrollY = Nothing }
   navigateWith _.pushState st.nav route
 handleAction SignOut = do
   st <- get
   _ <- liftAff $ post string "/api/signout" Nothing
   liftEffect AuthSession.clearAuthenticatedUsername
   let route = routeFromDefined Signin
-  modify_ _ { authStatus = Unauthenticated, currentRoute = route, financeOverlay = Nothing }
+  modify_ _ { authStatus = Unauthenticated, currentRoute = route, financeOverlay = Nothing, financeOverlayScrollY = Nothing }
   navigateWith _.pushState st.nav route
 handleAction InitializeRouting = do
   nav <- liftEffect makeInterface
@@ -1147,7 +1156,19 @@ renderFinanceOverlay route financeOverlay =
           , label: "Simuler l'enregistrement"
           }
       Just (FinanceDetailOverlay _) ->
-        text ""
+        Modal.renderModal "Détail transaction"
+          [ div [ class_ "finance-detail-overlay text-center" ]
+              [ div [ class_ "fw-semibold mb-2" ] [ text "Ouverture detail transaction prête pour la story 011." ]
+              , div [ class_ "text-muted" ]
+                  [ text
+                      case financeOverlay of
+                        Just (FinanceDetailOverlay transactionId) -> "Transaction: " <> transactionId
+                        _ -> ""
+                  ]
+              ]
+          ]
+          CloseFinanceOverlay
+          CloseFinanceOverlay
       Nothing ->
         text ""
   else
@@ -1190,13 +1211,12 @@ openFinanceCreateOverlay = do
   state <- get
   when (routeCanOpenFinanceOverlay state.currentRoute) do
     armFinanceOverlayBackNavigation
-    modify_ _ { financeOverlay = Just FinanceCreateOverlay }
+    modify_ _ { financeOverlay = Just FinanceCreateOverlay, financeOverlayScrollY = Nothing }
 
 closeFinanceOverlayFromBrowserBack :: H.HalogenM State Action ChildSlots Void Aff Unit
 closeFinanceOverlayFromBrowserBack = do
   state <- get
-  when (isFinanceOverlayOpen state.financeOverlay)
-    (modify_ _ { financeOverlay = Nothing })
+  when (isFinanceOverlayOpen state.financeOverlay) closeFinanceOverlayAndRestoreScroll
 
 routeCanOpenFinanceOverlay :: Route -> Boolean
 routeCanOpenFinanceOverlay = case _ of
@@ -1209,6 +1229,23 @@ financeOverlayAfterRouteChange route financeOverlay =
     financeOverlay
   else
     Nothing
+
+financeOverlayScrollYAfterRouteChange :: Route -> Maybe FinanceOverlay -> Maybe Int
+financeOverlayScrollYAfterRouteChange _ _ = Nothing
+
+closeFinanceOverlayAndRestoreScroll :: H.HalogenM State Action ChildSlots Void Aff Unit
+closeFinanceOverlayAndRestoreScroll = do
+  state <- get
+  case state.financeOverlay of
+    Just (FinanceDetailOverlay _) ->
+      case state.financeOverlayScrollY of
+        Just scrollY -> do
+          liftEffect (WindowScroll.setWindowScrollY scrollY)
+          modify_ _ { financeOverlay = Nothing, financeOverlayScrollY = Nothing }
+        Nothing ->
+          modify_ _ { financeOverlay = Nothing, financeOverlayScrollY = Nothing }
+    _ ->
+      modify_ _ { financeOverlay = Nothing, financeOverlayScrollY = Nothing }
 
 tabLabel :: DefinedRoute -> String
 tabLabel Note = "Notes"
