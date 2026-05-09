@@ -35,6 +35,7 @@ import Api.Calendar (getItemsResponse, updateItemResponse)
 import Pages.Admin (component) as Admin
 import Pages.Calendar (CalendarRouteOutput(..), CalendarView(..), CalendarItem(..), component, decodeCalendarItemsResponse) as Calendar
 import Pages.Checklists (component) as Checklists
+import Pages.FinanceTransactions (component) as FinanceTransactions
 import Control.Monad.RWS (get, modify_)
 import Data.Array (find, head, length, mapMaybe)
 import DOM.HTML.Indexed.ButtonType (ButtonType(..))
@@ -89,6 +90,7 @@ type ChildSlots =
   ( notes :: OpaqueSlot Unit
   , checklists :: OpaqueSlot Unit
   , calendar :: CalendarSlot Unit
+  , financeTransactions :: OpaqueSlot Unit
   , admin :: OpaqueSlot Unit
   , signup :: AuthSlot Unit
   , signin :: AuthSlot Unit
@@ -1015,7 +1017,14 @@ renderFinanceShell route =
           else
             text ""
         ]
-    , renderFinancePlaceholderBody route
+    , if route == FinanceTransactions then
+        slot_
+          (Proxy :: _ "financeTransactions")
+          unit
+          FinanceTransactions.component
+          { hasActiveContext: false }
+      else
+        renderFinancePlaceholderBody route
     ]
 
 financeLocalTab :: forall w. DefinedRoute -> DefinedRoute -> HTML w Action

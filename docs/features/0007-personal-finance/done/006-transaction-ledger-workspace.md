@@ -104,3 +104,9 @@ Behavioral contract to make explicit:
   - see explicit empty-state messaging when no transactions exist
   - see recoverable error behavior when list loading fails
   - see the create entrypoint present from the ledger workspace
+
+## Implementation Notes (2026-05-09)
+- Added a dedicated `Pages.FinanceTransactions` component and mounted it under `/finance/transactions` from `Pages.App`.
+- Implemented backend loading through `Api.Finance.getTransactions` and account-name resolution through `Api.Finance.getAccounts` with fallback to `accountId`.
+- Added explicit ledger states: loading, loaded rows, empty, no-results (context-aware), and error with retry.
+- Added unit/integration coverage in `Test.Pages.FinanceTransactionsSpec` and adjusted finance navigation E2E expectations to target the ledger workspace instead of the old placeholder.

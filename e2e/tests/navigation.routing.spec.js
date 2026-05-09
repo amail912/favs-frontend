@@ -127,7 +127,7 @@ authTest("authenticated user sees finance navigation and lands on transactions",
   await authExpect(financeTransactionsTab(page)).toHaveClass(/active/);
   await authExpect(financeReportsTab(page)).toBeVisible();
   await authExpect(financeCreateButton(page)).toBeVisible();
-  await authExpect(page.locator(".finance-route-placeholder")).toContainText("Finance Transactions");
+  await authExpect(page.locator(".finance-ledger-workspace")).toBeVisible();
 });
 
 authTest("authenticated user can sign out from auth menu", async ({ authenticatedPage: page }) => {
@@ -186,7 +186,7 @@ authTest("authenticated direct /finance entry canonicalizes to /finance/transact
   await authExpect(financeShell(page)).toBeVisible();
   await authExpect(financeTransactionsTab(page)).toHaveClass(/active/);
   await authExpect(financeCreateButton(page)).toBeVisible();
-  await authExpect(page.locator(".finance-route-placeholder")).toContainText("Transactions");
+  await authExpect(page.locator(".finance-ledger-workspace")).toBeVisible();
 });
 
 authTest("authenticated finance route stays accessible after reload", async ({ authenticatedPage: page }) => {
