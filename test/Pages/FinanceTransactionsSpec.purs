@@ -33,7 +33,8 @@ spec =
     it "transitions from loading to loaded rows" do
       let
         loadingState =
-          { hasActiveContext: false
+          { context: { accountId: Nothing, from: Nothing, to: Nothing }
+          , draftContext: { accountId: Nothing, from: Nothing, to: Nothing }
           , remoteState: LedgerLoading
           }
         loadedState = applyLedgerLoadSuccess [ sampleTransaction ] [ sampleAccount ] loadingState
@@ -46,7 +47,8 @@ spec =
     it "transitions from loading to empty when no transactions and no context" do
       let
         loadingState =
-          { hasActiveContext: false
+          { context: { accountId: Nothing, from: Nothing, to: Nothing }
+          , draftContext: { accountId: Nothing, from: Nothing, to: Nothing }
           , remoteState: LedgerLoading
           }
         loadedState = applyLedgerLoadSuccess [] [] loadingState
@@ -57,7 +59,8 @@ spec =
     it "transitions from loading to no-results when context is active and no rows match" do
       let
         loadingState =
-          { hasActiveContext: true
+          { context: { accountId: Just "acc-1", from: Nothing, to: Nothing }
+          , draftContext: { accountId: Just "acc-1", from: Nothing, to: Nothing }
           , remoteState: LedgerLoading
           }
         loadedState = applyLedgerLoadSuccess [] [] loadingState
@@ -68,7 +71,8 @@ spec =
     it "transitions from loading to error and can retry" do
       let
         loadingState =
-          { hasActiveContext: false
+          { context: { accountId: Nothing, from: Nothing, to: Nothing }
+          , draftContext: { accountId: Nothing, from: Nothing, to: Nothing }
           , remoteState: LedgerLoading
           }
         erroredState = applyLedgerLoadFailure "boom" loadingState

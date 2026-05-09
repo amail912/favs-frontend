@@ -117,3 +117,9 @@ Do not introduce:
   - reload and observe restored ledger context
   - navigate through several filter changes and use browser back and forward to restore each context
   - drill down from reports into a filtered ledger context
+
+## Implementation Notes
+- Implemented `Transactions` route state as `{ accountId :: Maybe String, from :: Maybe String, to :: Maybe String }` in `Pages.App`, with parse/print support for `/finance/transactions` query params.
+- `Pages.FinanceTransactions` now treats this route state as canonical ledger context, loads transactions with that context, and raises route-sync outputs when filters are applied/cleared/reset.
+- Added visible filter controls and active-filter chips for `accountId`, `from`, and `to`, plus `Apply` and full `Reset`.
+- Added route-level unit coverage in `AppSpec` for finance query parsing/printing and added navigation E2E coverage for URL persistence through reload and back navigation.

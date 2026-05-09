@@ -1,7 +1,9 @@
 module Pages.FinanceTransactions
   ( component
+  , Output(..)
   , LedgerRemoteState(..)
   , LedgerBodyState(..)
+  , LedgerContext
   , FinanceLedgerRow
   , beginLedgerLoad
   , applyLedgerLoadSuccess
@@ -19,18 +21,16 @@ import Api.Finance (getAccounts, getTransactions)
 import Api.FinanceContract
   ( FinanceAccount(..)
   , FinanceAccountsQuery(..)
-  , FinanceAccountsStatus(..)
   , FinanceTransaction(..)
   , FinanceTransactionCategory(..)
   , FinanceTransactionDirection(..)
   , FinanceTransactionsQuery(..)
   )
-import Data.Argonaut.Core (Json)
+import Control.Monad.RWS (get, modify_)
 import Data.Argonaut.Decode (decodeJson)
 import Data.Array (find, null)
 import Data.Bifunctor (lmap)
 import Data.Either (Either(..))
-import Control.Monad.RWS (get, modify_)
 import Data.Foldable (fold)
 import Data.Maybe (Maybe(..), isJust, maybe)
 import Data.Monoid (guard)
@@ -39,18 +39,27 @@ import Data.String.Common as StringCommon
 import Effect.Aff (Aff)
 import Effect.Aff.Class (liftAff)
 import Halogen (Component, ComponentHTML, HalogenM, defaultEval, mkComponent, mkEval) as H
-import Halogen.HTML (button, div, span, table, tbody, td, text, th, thead, tr)
-import Halogen.HTML.Events (onClick)
+import Halogen (raise)
+import Halogen.HTML (button, div, option, select, span, table, tbody, td, text, th, thead, tr, input)
+import Halogen.HTML.Events (onClick, onValueChange)
+import Halogen.HTML.Properties (value)
 import Ui.Utils (class_)
 
-type Input =
-  { hasActiveContext :: Boolean
+type LedgerContext =
+  { accountId :: Maybe String
+  , from :: Maybe String
+  , to :: Maybe String
   }
 
+type Input = LedgerContext
+
 type State =
-  { hasActiveContext :: Boolean
+  { context :: LedgerContext
+  , draftContext :: LedgerContext
   , remoteState :: LedgerRemoteState
   }
+
+data Output = RouteSyncRequested LedgerContext
 
 data LedgerRemoteState
   = LedgerLoading
@@ -88,8 +97,16 @@ data Action
   = Initialize
   | RetryLoad
   | LedgerLoadedResult (Either String { transactions :: Array FinanceTransaction, accounts :: Array FinanceAccount })
+  | UpdateAccountId String
+  | UpdateFrom String
+  | UpdateTo String
+  | ApplyFilters
+  | ClearAccountId
+  | ClearFrom
+  | ClearTo
+  | ResetFilters
 
-component :: forall q. H.Component q Input Void Aff
+component :: forall q. H.Component q Input Output Aff
 component =
   H.mkComponent
     { initialState
@@ -101,8 +118,9 @@ component =
     }
 
 initialState :: Input -> State
-initialState { hasActiveContext } =
-  { hasActiveContext
+initialState input =
+  { context: input
+  , draftContext: input
   , remoteState: LedgerLoading
   }
 
@@ -121,7 +139,7 @@ applyLedgerLoadFailure message state =
   state { remoteState = LedgerLoadError message }
 
 deriveLedgerBodyState :: State -> LedgerBodyState
-deriveLedgerBodyState { hasActiveContext, remoteState } =
+deriveLedgerBodyState { context, remoteState } =
   case remoteState of
     LedgerLoading ->
       LedgerBodyLoading
@@ -129,9 +147,13 @@ deriveLedgerBodyState { hasActiveContext, remoteState } =
       LedgerBodyError message
     LedgerLoaded { transactions, accounts } ->
       if null transactions then
-        if hasActiveContext then LedgerBodyNoResults else LedgerBodyEmpty
+        if hasActiveContext context then LedgerBodyNoResults else LedgerBodyEmpty
       else
         LedgerBodyRows (buildLedgerRows accounts transactions)
+
+hasActiveContext :: LedgerContext -> Boolean
+hasActiveContext context =
+  isJust context.accountId || isJust context.from || isJust context.to
 
 buildLedgerRows :: Array FinanceAccount -> Array FinanceTransaction -> Array FinanceLedgerRow
 buildLedgerRows accounts transactions =
@@ -177,12 +199,13 @@ amountLabel direction amount =
 render :: State -> H.ComponentHTML Action () Aff
 render state =
   div [ class_ "finance-ledger-workspace" ]
-    [ case deriveLedgerBodyState state of
+    [ renderFilterBar state
+    , case deriveLedgerBodyState state of
         LedgerBodyLoading ->
           div [ class_ "text-muted finance-ledger-loading" ] [ text "Loading transactions..." ]
         LedgerBodyError message ->
           div [ class_ "alert alert-danger d-flex flex-column align-items-start gap-2 finance-ledger-error" ]
-            [ div_ [ text message ]
+            [ div [] [ text message ]
             , button [ class_ "btn btn-outline-danger btn-sm finance-ledger-retry", onClick (const RetryLoad) ] [ text "Retry" ]
             ]
         LedgerBodyEmpty ->
@@ -193,21 +216,75 @@ render state =
           renderRows rows
     ]
 
+renderFilterBar :: State -> H.ComponentHTML Action () Aff
+renderFilterBar { context, draftContext, remoteState } =
+  div [ class_ "finance-ledger-filters card shadow-sm border-0 mb-3" ]
+    [ div [ class_ "card-body d-flex flex-column gap-2" ]
+        [ div [ class_ "d-flex flex-wrap align-items-end gap-2" ]
+            [ div [ class_ "d-flex flex-column" ]
+                [ span [ class_ "small text-muted" ] [ text "Account" ]
+                , renderAccountSelect remoteState draftContext.accountId
+                ]
+            , div [ class_ "d-flex flex-column" ]
+                [ span [ class_ "small text-muted" ] [ text "From" ]
+                , input [ class_ "form-control form-control-sm finance-ledger-filter-from", value (fromMaybe "" draftContext.from), onValueChange UpdateFrom ]
+                ]
+            , div [ class_ "d-flex flex-column" ]
+                [ span [ class_ "small text-muted" ] [ text "To" ]
+                , input [ class_ "form-control form-control-sm finance-ledger-filter-to", value (fromMaybe "" draftContext.to), onValueChange UpdateTo ]
+                ]
+            ]
+        , div [ class_ "d-flex flex-wrap gap-2" ]
+            [ button [ class_ "btn btn-primary btn-sm finance-ledger-apply", onClick (const ApplyFilters) ] [ text "Apply" ]
+            , button [ class_ "btn btn-outline-secondary btn-sm finance-ledger-reset", onClick (const ResetFilters) ] [ text "Reset" ]
+            ]
+        , div [ class_ "d-flex flex-wrap gap-2" ]
+            [ activeContextPill "accountId" context.accountId ClearAccountId
+            , activeContextPill "from" context.from ClearFrom
+            , activeContextPill "to" context.to ClearTo
+            ]
+        ]
+    ]
+
+renderAccountSelect :: LedgerRemoteState -> Maybe String -> H.ComponentHTML Action () Aff
+renderAccountSelect remoteState selectedId =
+  let
+    options =
+      case remoteState of
+        LedgerLoaded { accounts } ->
+          map (\(FinanceAccount account) -> { id: account.id, name: account.name }) accounts
+        _ ->
+          []
+  in
+    select [ class_ "form-select form-select-sm finance-ledger-filter-account", value (fromMaybe "" selectedId), onValueChange UpdateAccountId ]
+      ( [ option [ value "" ] [ text "All accounts" ] ]
+          <> map (\account -> option [ value account.id ] [ text account.name ]) options
+      )
+
+activeContextPill :: String -> Maybe String -> Action -> H.ComponentHTML Action () Aff
+activeContextPill label maybeValue clearAction =
+  case maybeValue of
+    Nothing ->
+      text ""
+    Just valueText ->
+      button [ class_ "btn btn-outline-secondary btn-sm finance-ledger-active-filter", onClick (const clearAction) ]
+        [ text (label <> "=" <> valueText <> " ×") ]
+
 renderRows :: Array FinanceLedgerRow -> H.ComponentHTML Action () Aff
 renderRows rows =
   div [ class_ "table-responsive finance-ledger-table-wrap" ]
     [ table [ class_ "table align-middle finance-ledger-table" ]
-        [ thead_
-            [ tr_
-                [ th_ [ text "Amount" ]
-                , th_ [ text "Direction" ]
-                , th_ [ text "Account" ]
-                , th_ [ text "Occurred At" ]
-                , th_ [ text "Category" ]
-                , th_ [ text "Facts" ]
+        [ thead []
+            [ tr []
+                [ th [] [ text "Amount" ]
+                , th [] [ text "Direction" ]
+                , th [] [ text "Account" ]
+                , th [] [ text "Occurred At" ]
+                , th [] [ text "Category" ]
+                , th [] [ text "Facts" ]
                 ]
             ]
-        , tbody_ (map renderRow rows)
+        , tbody [] (map renderRow rows)
         ]
     ]
 
@@ -241,7 +318,7 @@ renderEmptyState title subtitle =
     , div [ class_ "entity-empty-subtitle" ] [ text subtitle ]
     ]
 
-handleAction :: Action -> H.HalogenM State Action () Void Aff Unit
+handleAction :: Action -> H.HalogenM State Action () Output Aff Unit
 handleAction = case _ of
   Initialize -> do
     state <- get
@@ -256,15 +333,53 @@ handleAction = case _ of
         modify_ (applyLedgerLoadFailure message)
       Right { transactions, accounts } ->
         modify_ (applyLedgerLoadSuccess transactions accounts)
+  UpdateAccountId raw ->
+    modify_ \state ->
+      state { draftContext = state.draftContext { accountId = toOptional raw } }
+  UpdateFrom raw ->
+    modify_ \state ->
+      state { draftContext = state.draftContext { from = toOptional raw } }
+  UpdateTo raw ->
+    modify_ \state ->
+      state { draftContext = state.draftContext { to = toOptional raw } }
+  ApplyFilters -> do
+    state <- get
+    let nextContext = normalizeContext state.draftContext
+    modify_ _ { context = nextContext, draftContext = nextContext }
+    raise (RouteSyncRequested nextContext)
+    modify_ beginLedgerLoad
+    loadLedger
+  ClearAccountId ->
+    clearOne (_ { accountId = Nothing })
+  ClearFrom ->
+    clearOne (_ { from = Nothing })
+  ClearTo ->
+    clearOne (_ { to = Nothing })
+  ResetFilters -> do
+    let cleared = { accountId: Nothing, from: Nothing, to: Nothing }
+    modify_ _ { context = cleared, draftContext = cleared }
+    raise (RouteSyncRequested cleared)
+    modify_ beginLedgerLoad
+    loadLedger
 
-loadLedger :: H.HalogenM State Action () Void Aff Unit
+clearOne :: (LedgerContext -> LedgerContext) -> H.HalogenM State Action () Output Aff Unit
+clearOne updateContext = do
+  state <- get
+  let nextContext = updateContext state.context
+  modify_ _ { context = nextContext, draftContext = nextContext }
+  raise (RouteSyncRequested nextContext)
+  modify_ beginLedgerLoad
+  loadLedger
+
+loadLedger :: H.HalogenM State Action () Output Aff Unit
 loadLedger = do
-  result <- liftAff fetchLedgerData
+  state <- get
+  result <- liftAff (fetchLedgerData state.context)
   handleAction (LedgerLoadedResult result)
 
-fetchLedgerData :: Aff (Either String { transactions :: Array FinanceTransaction, accounts :: Array FinanceAccount })
-fetchLedgerData = do
-  transactionResponse <- getTransactions (FinanceTransactionsQuery { accountId: Nothing, from: Nothing, to: Nothing })
+fetchLedgerData :: LedgerContext -> Aff (Either String { transactions :: Array FinanceTransaction, accounts :: Array FinanceAccount })
+fetchLedgerData context = do
+  transactionResponse <- getTransactions (FinanceTransactionsQuery context)
   case transactionResponse of
     Left err ->
       pure (Left ("Unable to load transactions: " <> printError err))
@@ -276,40 +391,45 @@ fetchLedgerData = do
           Left decodeError ->
             pure (Left ("Unable to decode transactions: " <> decodeError))
           Right transactions ->
-            map (\accounts -> Right { transactions, accounts }) fetchAccounts
+            map
+              ( \accountsResult ->
+                  case accountsResult of
+                    Left message -> Left message
+                    Right accounts -> Right { transactions, accounts }
+              )
+              fetchAccounts
 
-fetchAccounts :: Aff (Array FinanceAccount)
+fetchAccounts :: Aff (Either String (Array FinanceAccount))
 fetchAccounts = do
-  accountsResponse <- getAccounts (FinanceAccountsQuery { status: Just AccountsAll })
+  accountsResponse <- getAccounts (FinanceAccountsQuery { status: Nothing })
   case accountsResponse of
-    Left _ ->
-      pure []
+    Left err ->
+      pure (Left ("Unable to load accounts: " <> printError err))
     Right response ->
       if not (isSuccessStatus response) then
-        pure []
+        pure (Left ("Unable to load accounts: status " <> show (unwrap response.status)))
       else
-        case lmap show (decodeJson response.body :: Either _ (Array FinanceAccount)) of
-          Left _ -> pure []
-          Right accounts -> pure accounts
+        pure (lmap show (decodeJson response.body :: Either _ (Array FinanceAccount)))
 
-isSuccessStatus :: Response Json -> Boolean
+isSuccessStatus :: forall body. Response body -> Boolean
 isSuccessStatus response =
   let
-    statusCode = unwrap response.status
+    status = unwrap response.status
   in
-    statusCode >= 200 && statusCode < 300
+    status >= 200 && status < 300
 
-div_ :: forall i. Array (H.ComponentHTML i () Aff) -> H.ComponentHTML i () Aff
-div_ = div []
+normalizeContext :: LedgerContext -> LedgerContext
+normalizeContext context =
+  { accountId: context.accountId >>= toOptional
+  , from: context.from >>= toOptional
+  , to: context.to >>= toOptional
+  }
 
-thead_ :: forall i. Array (H.ComponentHTML i () Aff) -> H.ComponentHTML i () Aff
-thead_ = thead []
+toOptional :: String -> Maybe String
+toOptional raw =
+  if raw == "" then Nothing else Just raw
 
-tbody_ :: forall i. Array (H.ComponentHTML i () Aff) -> H.ComponentHTML i () Aff
-tbody_ = tbody []
-
-tr_ :: forall i. Array (H.ComponentHTML i () Aff) -> H.ComponentHTML i () Aff
-tr_ = tr []
-
-th_ :: forall i. Array (H.ComponentHTML i () Aff) -> H.ComponentHTML i () Aff
-th_ = th []
+fromMaybe :: forall a. a -> Maybe a -> a
+fromMaybe fallback = case _ of
+  Just value -> value
+  Nothing -> fallback

@@ -16,13 +16,17 @@ spec :: Spec Unit
 spec =
   describe "App routing and auth gating" do
     it "parses finance and admin routes" do
-      parseRouteString "/finance" `shouldEqual` Right (Route FinanceTransactions)
-      parseRouteString "/finance/transactions" `shouldEqual` Right (Route FinanceTransactions)
+      parseRouteString "/finance" `shouldEqual` Right (Route defaultTransactionsRoute)
+      parseRouteString "/finance/transactions" `shouldEqual` Right (Route defaultTransactionsRoute)
+      parseRouteString "/finance/transactions?accountId=acc-1&from=2026-05-01T00:00:00Z&to=2026-05-31T23:59:59Z"
+        `shouldEqual` Right (Route (FinanceTransactions { accountId: Just "acc-1", from: Just "2026-05-01T00:00:00Z", to: Just "2026-05-31T23:59:59Z" }))
       parseRouteString "/finance/reports" `shouldEqual` Right (Route FinanceReports)
       parseRouteString "/admin" `shouldEqual` Right (Route Admin)
 
     it "prints canonical finance routes" do
-      printRoute (Route FinanceTransactions) `shouldEqual` "/finance/transactions"
+      printRoute (Route defaultTransactionsRoute) `shouldEqual` "/finance/transactions"
+      printRoute (Route (FinanceTransactions { accountId: Just "acc-1", from: Just "2026-05-01T00:00:00Z", to: Just "2026-05-31T23:59:59Z" }))
+        `shouldEqual` "/finance/transactions?accountId=acc-1&from=2026-05-01T00:00:00Z&to=2026-05-31T23:59:59Z"
       printRoute (Route FinanceReports) `shouldEqual` "/finance/reports"
 
     it "parses calendar routes with and without a valid day query" do
@@ -35,40 +39,40 @@ spec =
     it "shows finance for authenticated users and admin only for admin profiles" do
       visibleTabs AuthUnknown `shouldEqual` [ Note, Checklist, Calendar { day: Nothing, item: Nothing } ]
       visibleTabs Unauthenticated `shouldEqual` [ Note, Checklist, Calendar { day: Nothing, item: Nothing } ]
-      visibleTabs (Authenticated memberProfile) `shouldEqual` [ Note, Checklist, Calendar { day: Nothing, item: Nothing }, FinanceTransactions ]
-      visibleTabs (Authenticated adminProfile) `shouldEqual` [ Note, Checklist, Calendar { day: Nothing, item: Nothing }, FinanceTransactions, Admin ]
+      visibleTabs (Authenticated memberProfile) `shouldEqual` [ Note, Checklist, Calendar { day: Nothing, item: Nothing }, defaultTransactionsRoute ]
+      visibleTabs (Authenticated adminProfile) `shouldEqual` [ Note, Checklist, Calendar { day: Nothing, item: Nothing }, defaultTransactionsRoute, Admin ]
 
     it "keeps finance routes unresolved while auth status is unknown" do
-      resolveGuardedRoute AuthUnknown (Route FinanceTransactions) `shouldEqual` Nothing
+      resolveGuardedRoute AuthUnknown (Route defaultTransactionsRoute) `shouldEqual` Nothing
       resolveGuardedRoute AuthUnknown (Route FinanceReports) `shouldEqual` Nothing
 
     it "keeps admin route unresolved while auth status is unknown" do
       resolveGuardedRoute AuthUnknown (Route Admin) `shouldEqual` Nothing
 
     it "gates finance routes to not-found for unauthenticated users" do
-      resolveGuardedRoute Unauthenticated (Route FinanceTransactions) `shouldEqual` Just NotFound
+      resolveGuardedRoute Unauthenticated (Route defaultTransactionsRoute) `shouldEqual` Just NotFound
       resolveGuardedRoute Unauthenticated (Route FinanceReports) `shouldEqual` Just NotFound
 
     it "allows authenticated users to access finance routes" do
-      resolveGuardedRoute (Authenticated memberProfile) (Route FinanceTransactions) `shouldEqual` Just (Route FinanceTransactions)
+      resolveGuardedRoute (Authenticated memberProfile) (Route defaultTransactionsRoute) `shouldEqual` Just (Route defaultTransactionsRoute)
       resolveGuardedRoute (Authenticated memberProfile) (Route FinanceReports) `shouldEqual` Just (Route FinanceReports)
 
     it "identifies finance shell routes and create-button visibility" do
-      isFinanceRoute FinanceTransactions `shouldEqual` true
+      isFinanceRoute defaultTransactionsRoute `shouldEqual` true
       isFinanceRoute FinanceReports `shouldEqual` true
       isFinanceRoute Note `shouldEqual` false
-      financeLocalPrimaryRoute FinanceTransactions `shouldEqual` Just FinanceTransactions
+      financeLocalPrimaryRoute defaultTransactionsRoute `shouldEqual` Just defaultTransactionsRoute
       financeLocalPrimaryRoute FinanceReports `shouldEqual` Just FinanceReports
       financeLocalPrimaryRoute Note `shouldEqual` Nothing
-      shouldShowFinanceCreateButton FinanceTransactions `shouldEqual` true
+      shouldShowFinanceCreateButton defaultTransactionsRoute `shouldEqual` true
       shouldShowFinanceCreateButton FinanceReports `shouldEqual` false
       shouldShowFinanceCreateButton Note `shouldEqual` false
 
     it "tracks finance overlay visibility only on finance routes" do
       isFinanceOverlayOpen Nothing `shouldEqual` false
       isFinanceOverlayOpen (Just FinanceCreateOverlay) `shouldEqual` true
-      shouldRenderFinanceOverlay FinanceTransactions Nothing `shouldEqual` false
-      shouldRenderFinanceOverlay FinanceTransactions (Just FinanceCreateOverlay) `shouldEqual` true
+      shouldRenderFinanceOverlay defaultTransactionsRoute Nothing `shouldEqual` false
+      shouldRenderFinanceOverlay defaultTransactionsRoute (Just FinanceCreateOverlay) `shouldEqual` true
       shouldRenderFinanceOverlay FinanceReports (Just FinanceCreateOverlay) `shouldEqual` true
       shouldRenderFinanceOverlay Note (Just FinanceCreateOverlay) `shouldEqual` false
 
@@ -121,6 +125,10 @@ spec =
       activeFailure.loadError `shouldEqual` Just "active error"
       activeFailure.isLoading `shouldEqual` false
       activeFailure.activeRequestId `shouldEqual` Nothing
+
+defaultTransactionsRoute :: DefinedRoute
+defaultTransactionsRoute =
+  FinanceTransactions { accountId: Nothing, from: Nothing, to: Nothing }
 
 memberProfile :: AuthenticatedProfile
 memberProfile =

@@ -215,6 +215,25 @@ authTest("finance local navigation switches between transactions and reports", a
   await authExpect(financeCreateButton(page)).toBeVisible();
 });
 
+authTest("finance transactions filters update URL and survive reload/back-forward", async ({ authenticatedPage: page }) => {
+  await page.goto("/finance/transactions");
+
+  await page.locator(".finance-ledger-filter-from").fill("2026-05-01T00:00:00Z");
+  await page.locator(".finance-ledger-filter-to").fill("2026-05-31T23:59:59Z");
+  await page.locator(".finance-ledger-apply").click();
+  await authExpect(page).toHaveURL(/\/finance\/transactions\?from=2026-05-01T00:00:00Z&to=2026-05-31T23:59:59Z$/);
+
+  await page.reload();
+  await authExpect(page).toHaveURL(/\/finance\/transactions\?from=2026-05-01T00:00:00Z&to=2026-05-31T23:59:59Z$/);
+
+  await page.locator(".finance-ledger-filter-from").fill("");
+  await page.locator(".finance-ledger-apply").click();
+  await authExpect(page).toHaveURL(/\/finance\/transactions\?to=2026-05-31T23:59:59Z$/);
+
+  await page.goBack();
+  await authExpect(page).toHaveURL(/\/finance\/transactions\?from=2026-05-01T00:00:00Z&to=2026-05-31T23:59:59Z$/);
+});
+
 authTest("finance create overlay preserves route and browser back closes it", async ({ authenticatedPage: page }) => {
   await page.goto("/notes");
   await financeTab(page).click();

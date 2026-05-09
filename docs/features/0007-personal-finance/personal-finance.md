@@ -70,9 +70,9 @@ Help users manage financial operations as explicit, explainable facts: capture t
 - [003 Finance Nested Flow Context And Return Semantics](done/003-finance-nested-flow-context-and-return-semantics.md) - Establish finance overlay open/close/back semantics through the create flow first, so later create and detail stories reuse one route-preserving modal-history contract.
 - [004 Finance Backend Contract Adoption](done/004-finance-backend-contract-adoption.md) - Establish the initial `Api.Finance*` contract layer and shared finance types aligned to the existing `/api/v1/finance` backend.
 - [006 Transaction Ledger Workspace](done/006-transaction-ledger-workspace.md) - Establish the base `Transactions` workspace with backend-backed newest-first ledger loading, core row facts, and explicit loading, empty, no-results, and error states.
+- [007 Ledger Filtering And Active-Context Persistence](done/007-ledger-filtering-and-active-context-persistence.md) - Add account/date filtering with URL-backed finance context, visible active state, reset actions, and browser-history restoration.
 
 ### Ready
-- [007 Ledger Filtering And Active-Context Persistence](ready/007-ledger-filtering-and-active-context-persistence.md) - Add account/date filtering with URL-backed finance context, visible active state, reset actions, and browser-history restoration.
 - [008 Ledger Indicators And Navigation To Transaction Detail](ready/008-ledger-indicators-and-navigation-to-transaction-detail.md) - Add structural ledger indicators and whole-row detail opening while preserving filters, ordering, and scroll position.
 - [009 Contextual Record-Transaction Entrypoints](ready/009-contextual-record-transaction-entrypoints.md) - Add a desktop-dropdown/mobile-sheet create chooser for `Expense` and `Income`, with supported ledger context forwarded into create.
 - [010 Record-Transaction Form Validation And Submission UX](ready/010-record-transaction-form-validation-and-submission-ux.md) - Define the backend-compatible create form, idempotent submit lifecycle, desktop repeat-entry behavior, and mobile success toast confirmation.

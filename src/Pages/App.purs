@@ -2,6 +2,7 @@ module Pages.App
   ( component
   , AuthStatus(..)
   , CalendarRouteState
+  , TransactionsRouteState
   , DefinedRoute(..)
   , FinanceOverlay(..)
   , Route(..)
@@ -35,7 +36,7 @@ import Api.Calendar (getItemsResponse, updateItemResponse)
 import Pages.Admin (component) as Admin
 import Pages.Calendar (CalendarRouteOutput(..), CalendarView(..), CalendarItem(..), component, decodeCalendarItemsResponse) as Calendar
 import Pages.Checklists (component) as Checklists
-import Pages.FinanceTransactions (component) as FinanceTransactions
+import Pages.FinanceTransactions (Output(..), component) as FinanceTransactions
 import Control.Monad.RWS (get, modify_)
 import Data.Array (find, head, length, mapMaybe)
 import DOM.HTML.Indexed.ButtonType (ButtonType(..))
@@ -86,11 +87,12 @@ import Web.HTML.Window as Window
 
 type OpaqueSlot slot = forall query. H.Slot query Void slot
 type CalendarSlot slot = forall query. H.Slot query Calendar.CalendarRouteOutput slot
+type TransactionsSlot slot = forall query. H.Slot query FinanceTransactions.Output slot
 type ChildSlots =
   ( notes :: OpaqueSlot Unit
   , checklists :: OpaqueSlot Unit
   , calendar :: CalendarSlot Unit
-  , financeTransactions :: OpaqueSlot Unit
+  , financeTransactions :: TransactionsSlot Unit
   , admin :: OpaqueSlot Unit
   , signup :: AuthSlot Unit
   , signin :: AuthSlot Unit
@@ -101,7 +103,13 @@ type CalendarRouteState =
   , item :: Maybe String
   }
 
-data DefinedRoute = Note | Checklist | Calendar CalendarRouteState | FinanceTransactions | FinanceReports | Admin | Signup | Signin
+type TransactionsRouteState =
+  { accountId :: Maybe String
+  , from :: Maybe String
+  , to :: Maybe String
+  }
+
+data DefinedRoute = Note | Checklist | Calendar CalendarRouteState | FinanceTransactions TransactionsRouteState | FinanceReports | Admin | Signup | Signin
 
 derive instance definedRouteGeneric :: Generic DefinedRoute _
 derive instance definedRouteEq :: Eq DefinedRoute
@@ -134,6 +142,16 @@ parseRouteString rawPath =
     else case parseDefinedRoutePath path of
       Just (Calendar _) ->
         Route (Calendar { day: parseCalendarDay query, item: parseCalendarItem query })
+      Just (FinanceTransactions _) ->
+        Route
+          ( FinanceTransactions
+              ( normalizeTransactionsRouteState
+                  { accountId: parseTransactionsAccountId query
+                  , from: parseTransactionsFrom query
+                  , to: parseTransactionsTo query
+                  }
+              )
+          )
       Just route ->
         Route route
       Nothing ->
@@ -149,10 +167,20 @@ parseRouteString rawPath =
 defaultCalendarRoute :: DefinedRoute
 defaultCalendarRoute = Calendar { day: Nothing, item: Nothing }
 
+defaultTransactionsRoute :: DefinedRoute
+defaultTransactionsRoute = FinanceTransactions { accountId: Nothing, from: Nothing, to: Nothing }
+
 normalizeCalendarRouteState :: CalendarRouteState -> CalendarRouteState
 normalizeCalendarRouteState { day, item } =
   { day: day >>= \raw -> if DateTime.isLocalDate raw then Just raw else Nothing
   , item: item >>= nonEmptyStringMaybe
+  }
+
+normalizeTransactionsRouteState :: TransactionsRouteState -> TransactionsRouteState
+normalizeTransactionsRouteState { accountId, from, to } =
+  { accountId: accountId >>= nonEmptyStringMaybe
+  , from: from >>= nonEmptyStringMaybe
+  , to: to >>= nonEmptyStringMaybe
   }
 
 routeFromDefined :: DefinedRoute -> Route
@@ -163,7 +191,7 @@ printDefinedRoutePath = case _ of
   Note -> "/notes"
   Checklist -> "/checklists"
   Calendar _ -> "/calendar"
-  FinanceTransactions -> "/finance/transactions"
+  FinanceTransactions _ -> "/finance/transactions"
   FinanceReports -> "/finance/reports"
   Admin -> "/admin"
   Signup -> "/signup"
@@ -177,10 +205,10 @@ parseDefinedRoutePath = case _ of
   "checklists" -> Just Checklist
   "/calendar" -> Just defaultCalendarRoute
   "calendar" -> Just defaultCalendarRoute
-  "/finance" -> Just FinanceTransactions
-  "finance" -> Just FinanceTransactions
-  "/finance/transactions" -> Just FinanceTransactions
-  "finance/transactions" -> Just FinanceTransactions
+  "/finance" -> Just defaultTransactionsRoute
+  "finance" -> Just defaultTransactionsRoute
+  "/finance/transactions" -> Just defaultTransactionsRoute
+  "finance/transactions" -> Just defaultTransactionsRoute
   "/finance/reports" -> Just FinanceReports
   "finance/reports" -> Just FinanceReports
   "/admin" -> Just Admin
@@ -206,6 +234,19 @@ printRoute = case _ of
           "?" <> StringCommon.joinWith "&" queryParts
     in
       printDefinedRoutePath defaultCalendarRoute <> querySuffix
+  Route (FinanceTransactions transactionsRoute) ->
+    let
+      accountIdQuery = map (\accountId -> "accountId=" <> accountId) transactionsRoute.accountId
+      fromQuery = map (\fromValue -> "from=" <> fromValue) transactionsRoute.from
+      toQuery = map (\toValue -> "to=" <> toValue) transactionsRoute.to
+      queryParts = mapMaybe identity [ accountIdQuery, fromQuery, toQuery ]
+      querySuffix =
+        if length queryParts == 0 then
+          ""
+        else
+          "?" <> StringCommon.joinWith "&" queryParts
+    in
+      printDefinedRoutePath defaultTransactionsRoute <> querySuffix
   Route route ->
     printDefinedRoutePath route
   NotFound -> "/not-found"
@@ -218,6 +259,18 @@ parseCalendarDay rawQuery =
 parseCalendarItem :: String -> Maybe String
 parseCalendarItem rawQuery =
   findMapQueryValue "item" rawQuery >>= nonEmptyStringMaybe
+
+parseTransactionsAccountId :: String -> Maybe String
+parseTransactionsAccountId rawQuery =
+  findMapQueryValue "accountId" rawQuery >>= nonEmptyStringMaybe
+
+parseTransactionsFrom :: String -> Maybe String
+parseTransactionsFrom rawQuery =
+  findMapQueryValue "from" rawQuery >>= nonEmptyStringMaybe
+
+parseTransactionsTo :: String -> Maybe String
+parseTransactionsTo rawQuery =
+  findMapQueryValue "to" rawQuery >>= nonEmptyStringMaybe
 
 nonEmptyStringMaybe :: String -> Maybe String
 nonEmptyStringMaybe raw =
@@ -252,7 +305,7 @@ subscribeToRouting nav = do
 
 shouldCanonicalizeFinanceRoute :: Route -> Effect Boolean
 shouldCanonicalizeFinanceRoute = case _ of
-  Route FinanceTransactions -> do
+  Route (FinanceTransactions _) -> do
     win <- window
     location <- Window.location win
     pathname <- Location.pathname location
@@ -273,6 +326,7 @@ data Action
   | ConfirmLateItemQuickComplete
   | CancelLateItemQuickComplete
   | HandleCalendarOutput Calendar.CalendarRouteOutput
+  | HandleTransactionsOutput FinanceTransactions.Output
   | LoadLateItems
   | LateItemsLoaded Int (Array LateItems.LateItem)
   | LateItemsLoadFailed Int String
@@ -398,7 +452,7 @@ shouldRefreshLateItemsForRoute authStatus route =
 
 isFinanceRoute :: DefinedRoute -> Boolean
 isFinanceRoute = case _ of
-  FinanceTransactions -> true
+  FinanceTransactions _ -> true
   FinanceReports -> true
   _ -> false
 
@@ -409,7 +463,7 @@ financeLocalPrimaryRoute route
 
 shouldShowFinanceCreateButton :: DefinedRoute -> Boolean
 shouldShowFinanceCreateButton = case _ of
-  FinanceTransactions -> true
+  FinanceTransactions _ -> true
   _ -> false
 
 isFinanceOverlayOpen :: Maybe FinanceOverlay -> Boolean
@@ -436,7 +490,7 @@ statusOk r = unwrap r.status >= 200 && unwrap r.status < 300
 
 resolveGuardedRoute :: AuthStatus -> Route -> Maybe Route
 resolveGuardedRoute authStatus route = case route of
-  Route FinanceTransactions ->
+  Route (FinanceTransactions _) ->
     case authStatus of
       AuthUnknown -> Nothing
       Authenticated _ -> Just route
@@ -456,7 +510,7 @@ resolveGuardedRoute authStatus route = case route of
 visibleTabs :: AuthStatus -> Array DefinedRoute
 visibleTabs authStatus =
   [ Note, Checklist, defaultCalendarRoute ]
-    <> guard (canViewFinanceNav authStatus) [ FinanceTransactions ]
+    <> guard (canViewFinanceNav authStatus) [ defaultTransactionsRoute ]
     <> guard (canViewAdminNav authStatus) [ Admin ]
   where
   canViewFinanceNav (Authenticated _) = true
@@ -721,6 +775,17 @@ handleAction (HandleCalendarOutput (Calendar.RouteSyncRequested { viewMode, focu
   when (st.currentRoute /= nextRoute) do
     modify_ _ { currentRoute = nextRoute }
     navigateWith _.pushState st.nav nextRoute
+handleAction (HandleTransactionsOutput (FinanceTransactions.RouteSyncRequested transactionsRoute)) = do
+  st <- get
+  case st.currentRoute of
+    Route (FinanceTransactions currentTransactionsRoute) -> do
+      let nextTransactionsRoute = normalizeTransactionsRouteState transactionsRoute
+      when (currentTransactionsRoute /= nextTransactionsRoute) do
+        let nextRoute = Route (FinanceTransactions nextTransactionsRoute)
+        modify_ _ { currentRoute = nextRoute }
+        navigateWith _.pushState st.nav nextRoute
+    _ ->
+      pure unit
 handleAction (HandleAuthOutput (SignupSucceeded username)) = do
   st <- get
   liftEffect $ AuthSession.storeAuthenticatedUsername username
@@ -997,7 +1062,7 @@ currentComponent _ (Calendar calendarRoute) =
     , initialItemId: calendarRoute.item
     }
     HandleCalendarOutput
-currentComponent _ FinanceTransactions = renderFinanceShell FinanceTransactions
+currentComponent _ (FinanceTransactions transactionsRoute) = renderFinanceShell (FinanceTransactions transactionsRoute)
 currentComponent _ FinanceReports = renderFinanceShell FinanceReports
 currentComponent (Authenticated (AuthenticatedProfile { username })) Admin =
   slot_ (Proxy :: _ "admin") unit Admin.component { currentUsername: username }
@@ -1010,35 +1075,47 @@ renderFinanceShell route =
   div [ class_ "finance-shell py-3" ]
     [ div [ class_ "finance-shell__header d-flex justify-content-between align-items-center gap-3 mb-3 flex-wrap" ]
         [ nav [ class_ "finance-shell__nav nav nav-pills gap-2" ]
-            (map (\tabRoute -> financeLocalTab tabRoute route) [ FinanceTransactions, FinanceReports ])
+            (map (\tabRoute -> financeLocalTab tabRoute route) [ FinanceTransactions transactionsRoute, FinanceReports ])
         , if shouldShowFinanceCreateButton route then
             div [ class_ "finance-shell__actions" ]
               [ CreateButton.renderIconCreateButton "btn btn-primary finance-shell__create-btn" "Nouvelle transaction" FinanceCreateClicked ]
           else
             text ""
         ]
-    , if route == FinanceTransactions then
-        slot_
+    , if routeKey route == routeKey (FinanceTransactions transactionsRoute) then
+        slot
           (Proxy :: _ "financeTransactions")
           unit
           FinanceTransactions.component
-          { hasActiveContext: false }
+          transactionsRoute
+          HandleTransactionsOutput
       else
         renderFinancePlaceholderBody route
     ]
+  where
+  transactionsRoute =
+    case route of
+      FinanceTransactions currentRoute -> currentRoute
+      _ -> { accountId: Nothing, from: Nothing, to: Nothing }
 
 financeLocalTab :: forall w. DefinedRoute -> DefinedRoute -> HTML w Action
 financeLocalTab tabRoute activeRoute =
   a
-    [ class_ $ "nav-link finance-shell__nav-link" <> guard (tabRoute == activeRoute) " active"
+    [ class_ $ "nav-link finance-shell__nav-link" <> guard (routeKey tabRoute == routeKey activeRoute) " active"
     , onClick (const $ NavigateTo tabRoute)
     ]
     [ text (financeLocalTabLabel tabRoute) ]
 
 financeLocalTabLabel :: DefinedRoute -> String
-financeLocalTabLabel FinanceTransactions = "Transactions"
+financeLocalTabLabel (FinanceTransactions _) = "Transactions"
 financeLocalTabLabel FinanceReports = "Reports"
 financeLocalTabLabel _ = ""
+
+routeKey :: DefinedRoute -> String
+routeKey = case _ of
+  FinanceTransactions _ -> "finance-transactions"
+  FinanceReports -> "finance-reports"
+  _ -> ""
 
 renderFinancePlaceholderBody :: DefinedRoute -> H.ComponentHTML Action ChildSlots Aff
 renderFinancePlaceholderBody route =
@@ -1090,9 +1167,9 @@ sameTab :: DefinedRoute -> DefinedRoute -> Boolean
 sameTab left right =
   case left, right of
     Calendar _, Calendar _ -> true
-    FinanceTransactions, FinanceTransactions -> true
-    FinanceTransactions, FinanceReports -> true
-    FinanceReports, FinanceTransactions -> true
+    FinanceTransactions _, FinanceTransactions _ -> true
+    FinanceTransactions _, FinanceReports -> true
+    FinanceReports, FinanceTransactions _ -> true
     FinanceReports, FinanceReports -> true
     _, _ -> left == right
 
@@ -1137,7 +1214,7 @@ tabLabel :: DefinedRoute -> String
 tabLabel Note = "Notes"
 tabLabel Checklist = "Checklists"
 tabLabel (Calendar _) = "Calendar"
-tabLabel FinanceTransactions = "Finance"
+tabLabel (FinanceTransactions _) = "Finance"
 tabLabel FinanceReports = "Finance"
 tabLabel Admin = "Admin"
 tabLabel Signup = "Signup"
