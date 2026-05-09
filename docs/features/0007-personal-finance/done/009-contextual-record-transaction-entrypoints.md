@@ -109,3 +109,10 @@ Do not introduce:
   - open create from `Transactions` on mobile and choose `Income`
   - verify account-prefill behavior when ledger account filter is active
   - verify contextual date forwarding when ledger is scoped to a single day
+
+## Implementation Notes
+- `+` on `Transactions` now opens a two-action chooser instead of opening create directly.
+- Desktop chooser is rendered as an anchored inline menu near the finance `+`; mobile chooser uses a bottom sheet.
+- Choosing `New Expense` maps to `sent`; `New Income` maps to `received`.
+- Create overlay now receives and displays a launch payload with direction, optional `accountId`, and optional date seed.
+- Date seed policy in this implementation follows from-only fallback: when `from` exists, its date part is forwarded as the occurred-at day seed.

@@ -3,6 +3,7 @@ module Pages.App
   , AuthStatus(..)
   , CalendarRouteState
   , TransactionsRouteState
+  , FinanceCreateLaunch
   , DefinedRoute(..)
   , FinanceOverlay(..)
   , Route(..)
@@ -127,7 +128,8 @@ instance showRoute :: Show Route where
   show = genericShow
 
 data FinanceOverlay
-  = FinanceCreateOverlay
+  = FinanceCreateChooserOverlay
+  | FinanceCreateOverlay FinanceCreateLaunch
   | FinanceDetailOverlay String
 
 derive instance financeOverlayEq :: Eq FinanceOverlay
@@ -135,6 +137,22 @@ derive instance financeOverlayGeneric :: Generic FinanceOverlay _
 
 instance showFinanceOverlay :: Show FinanceOverlay where
   show = genericShow
+
+data FinanceCreateIntent
+  = FinanceCreateExpense
+  | FinanceCreateIncome
+
+derive instance financeCreateIntentEq :: Eq FinanceCreateIntent
+derive instance financeCreateIntentGeneric :: Generic FinanceCreateIntent _
+
+instance showFinanceCreateIntent :: Show FinanceCreateIntent where
+  show = genericShow
+
+type FinanceCreateLaunch =
+  { direction :: String
+  , accountId :: Maybe String
+  , occurredAtDaySeed :: Maybe String
+  }
 
 parseRouteString :: String -> Either Unit Route
 parseRouteString rawPath =
@@ -319,6 +337,8 @@ data Action
   | NavigateTo DefinedRoute
   | GlobalPopState
   | FinanceCreateClicked
+  | FinanceCreateExpenseSelected
+  | FinanceCreateIncomeSelected
   | CloseFinanceOverlay
   | CompleteFinanceOverlayPlaceholder
   | NavigateToLateItem String String
@@ -364,6 +384,7 @@ type State =
   , authStatus :: AuthStatus
   , financeOverlay :: Maybe FinanceOverlay
   , financeOverlayScrollY :: Maybe Int
+  , financeIsMobile :: Boolean
   , lateItems :: LateItemsState
   }
 
@@ -390,6 +411,7 @@ initialState = const
   , authStatus: AuthUnknown
   , financeOverlay: Nothing
   , financeOverlayScrollY: Nothing
+  , financeIsMobile: false
   , lateItems: initialLateItemsState
   }
 
@@ -563,6 +585,10 @@ handleAction GlobalPopState =
   closeFinanceOverlayFromBrowserBack
 handleAction FinanceCreateClicked =
   openFinanceCreateOverlay
+handleAction FinanceCreateExpenseSelected =
+  openFinanceCreateFromIntent FinanceCreateExpense
+handleAction FinanceCreateIncomeSelected =
+  openFinanceCreateFromIntent FinanceCreateIncome
 handleAction CloseFinanceOverlay = do
   consumeFinanceOverlayBackNavigation
   closeFinanceOverlayAndRestoreScroll
@@ -816,7 +842,9 @@ handleAction SignOut = do
   navigateWith _.pushState st.nav route
 handleAction InitializeRouting = do
   nav <- liftEffect makeInterface
+  isMobile <- liftEffect isMobileViewport
   modify_ _ { nav = Just nav }
+  modify_ _ { financeIsMobile = isMobile }
   subscribeToRouting nav
   subscribeToGlobalPopState
   handleAction RefreshAuthStatus
@@ -860,7 +888,7 @@ handleAction LoadMoreLateItems =
     st { lateItems = st.lateItems { visibleLimit = st.lateItems.visibleLimit + 50 } }
 
 render :: State -> H.ComponentHTML Action ChildSlots Aff
-render { currentRoute, authStatus, financeOverlay, lateItems } =
+render { currentRoute, authStatus, financeOverlay, lateItems, financeIsMobile } =
   case resolveGuardedRoute authStatus currentRoute of
     Nothing -> renderLoading authStatus
     Just (Route route) ->
@@ -871,9 +899,9 @@ render { currentRoute, authStatus, financeOverlay, lateItems } =
               , renderLateItemsChip authStatus route lateItems
               ]
             , if route /= Signup && route /= Signin then [ nav [ class_ "row nav nav-tabs" ] (map (\tabRoute -> tab tabRoute route) (visibleTabs authStatus)) ] else []
-            , [ currentComponent authStatus route ]
+            , [ currentComponent authStatus financeOverlay route ]
             , [ renderLateItemsSheet authStatus route lateItems ]
-            , [ renderFinanceOverlay route financeOverlay ]
+            , [ renderFinanceOverlay route financeOverlay financeIsMobile ]
             ]
         )
     Just Root -> text ""
@@ -1059,10 +1087,10 @@ renderLateItemsQuickCompletePrompt quickCompletePrompt =
             ]
         ]
 
-currentComponent :: AuthStatus -> DefinedRoute -> H.ComponentHTML Action ChildSlots Aff
-currentComponent _ Note = slot_ (Proxy :: _ "notes") unit Notes.component unit
-currentComponent _ Checklist = slot_ (Proxy :: _ "checklists") unit Checklists.component unit
-currentComponent _ (Calendar calendarRoute) =
+currentComponent :: AuthStatus -> Maybe FinanceOverlay -> DefinedRoute -> H.ComponentHTML Action ChildSlots Aff
+currentComponent _ _ Note = slot_ (Proxy :: _ "notes") unit Notes.component unit
+currentComponent _ _ Checklist = slot_ (Proxy :: _ "checklists") unit Checklists.component unit
+currentComponent _ _ (Calendar calendarRoute) =
   slot
     (Proxy :: _ "calendar")
     unit
@@ -1071,23 +1099,25 @@ currentComponent _ (Calendar calendarRoute) =
     , initialItemId: calendarRoute.item
     }
     HandleCalendarOutput
-currentComponent _ (FinanceTransactions transactionsRoute) = renderFinanceShell (FinanceTransactions transactionsRoute)
-currentComponent _ FinanceReports = renderFinanceShell FinanceReports
-currentComponent (Authenticated (AuthenticatedProfile { username })) Admin =
+currentComponent _ financeOverlay (FinanceTransactions transactionsRoute) = renderFinanceShell (FinanceTransactions transactionsRoute) financeOverlay
+currentComponent _ financeOverlay FinanceReports = renderFinanceShell FinanceReports financeOverlay
+currentComponent (Authenticated (AuthenticatedProfile { username })) _ Admin =
   slot_ (Proxy :: _ "admin") unit Admin.component { currentUsername: username }
-currentComponent _ Admin = text ""
-currentComponent _ Signup = slot (Proxy :: _ "signup") unit signupComponent unit HandleAuthOutput
-currentComponent _ Signin = slot (Proxy :: _ "signin") unit signinComponent unit HandleAuthOutput
+currentComponent _ _ Admin = text ""
+currentComponent _ _ Signup = slot (Proxy :: _ "signup") unit signupComponent unit HandleAuthOutput
+currentComponent _ _ Signin = slot (Proxy :: _ "signin") unit signinComponent unit HandleAuthOutput
 
-renderFinanceShell :: DefinedRoute -> H.ComponentHTML Action ChildSlots Aff
-renderFinanceShell route =
+renderFinanceShell :: DefinedRoute -> Maybe FinanceOverlay -> H.ComponentHTML Action ChildSlots Aff
+renderFinanceShell route financeOverlay =
   div [ class_ "finance-shell py-3" ]
     [ div [ class_ "finance-shell__header d-flex justify-content-between align-items-center gap-3 mb-3 flex-wrap" ]
         [ nav [ class_ "finance-shell__nav nav nav-pills gap-2" ]
             (map (\tabRoute -> financeLocalTab tabRoute route) [ FinanceTransactions transactionsRoute, FinanceReports ])
         , if shouldShowFinanceCreateButton route then
             div [ class_ "finance-shell__actions" ]
-              [ CreateButton.renderIconCreateButton "btn btn-primary finance-shell__create-btn" "Nouvelle transaction" FinanceCreateClicked ]
+              [ CreateButton.renderIconCreateButton "btn btn-primary finance-shell__create-btn" "Nouvelle transaction" FinanceCreateClicked
+              , renderInlineCreateChooser route financeOverlay
+              ]
           else
             text ""
         ]
@@ -1106,6 +1136,20 @@ renderFinanceShell route =
     case route of
       FinanceTransactions currentRoute -> currentRoute
       _ -> { accountId: Nothing, from: Nothing, to: Nothing }
+
+renderInlineCreateChooser :: forall w. DefinedRoute -> Maybe FinanceOverlay -> HTML w Action
+renderInlineCreateChooser route financeOverlay =
+  if routeKey route /= "finance-transactions" then
+    text ""
+  else
+    case financeOverlay of
+      Just FinanceCreateChooserOverlay ->
+        div [ class_ "finance-create-chooser finance-create-chooser--desktop d-grid gap-2 mt-2" ]
+          [ button [ class_ "btn btn-outline-danger finance-create-chooser__expense", onClick (const FinanceCreateExpenseSelected) ] [ text "New Expense" ]
+          , button [ class_ "btn btn-outline-success finance-create-chooser__income", onClick (const FinanceCreateIncomeSelected) ] [ text "New Income" ]
+          ]
+      _ ->
+        text ""
 
 financeLocalTab :: forall w. DefinedRoute -> DefinedRoute -> HTML w Action
 financeLocalTab tabRoute activeRoute =
@@ -1139,15 +1183,28 @@ renderFinancePlaceholderBody route =
         ]
     ]
 
-renderFinanceOverlay :: forall w. DefinedRoute -> Maybe FinanceOverlay -> HTML w Action
-renderFinanceOverlay route financeOverlay =
+renderFinanceOverlay :: forall w. DefinedRoute -> Maybe FinanceOverlay -> Boolean -> HTML w Action
+renderFinanceOverlay route financeOverlay financeIsMobile =
   if shouldRenderFinanceOverlay route financeOverlay then
     case financeOverlay of
-      Just FinanceCreateOverlay ->
+      Just FinanceCreateChooserOverlay ->
+        if financeIsMobile then
+          Modal.renderBottomSheet "Nouvelle transaction"
+            [ div [ class_ "finance-create-chooser d-grid gap-2" ]
+                [ button [ class_ "btn btn-outline-danger finance-create-chooser__expense", onClick (const FinanceCreateExpenseSelected) ] [ text "New Expense" ]
+                , button [ class_ "btn btn-outline-success finance-create-chooser__income", onClick (const FinanceCreateIncomeSelected) ] [ text "New Income" ]
+                ]
+            ]
+            CloseFinanceOverlay
+        else
+          text ""
+      Just (FinanceCreateOverlay launch) ->
         Modal.renderModalWithActionState "Nouvelle transaction"
           [ div [ class_ "finance-create-overlay text-center" ]
-              [ div [ class_ "fw-semibold mb-2" ] [ text "Flux de creation finance pret pour les prochaines stories." ]
-              , div [ class_ "text-muted" ] [ text "Cette surcouche temporaire valide les regles d'ouverture, fermeture et retour navigateur sans changer la route finance active." ]
+              [ div [ class_ "fw-semibold mb-2" ] [ text "Create transaction entrypoint ready for story 010." ]
+              , div [ class_ "text-muted finance-create-overlay__direction" ] [ text ("Direction: " <> launch.direction) ]
+              , div [ class_ "text-muted finance-create-overlay__account" ] [ text ("AccountId: " <> fromMaybe "-" launch.accountId) ]
+              , div [ class_ "text-muted finance-create-overlay__occurred-at-day-seed" ] [ text ("OccurredAtDaySeed: " <> fromMaybe "-" launch.occurredAtDaySeed) ]
               ]
           ]
           CloseFinanceOverlay
@@ -1211,7 +1268,8 @@ openFinanceCreateOverlay = do
   state <- get
   when (routeCanOpenFinanceOverlay state.currentRoute) do
     armFinanceOverlayBackNavigation
-    modify_ _ { financeOverlay = Just FinanceCreateOverlay, financeOverlayScrollY = Nothing }
+    isMobile <- liftEffect isMobileViewport
+    modify_ _ { financeOverlay = Just FinanceCreateChooserOverlay, financeOverlayScrollY = Nothing, financeIsMobile = isMobile }
 
 closeFinanceOverlayFromBrowserBack :: H.HalogenM State Action ChildSlots Void Aff Unit
 closeFinanceOverlayFromBrowserBack = do
@@ -1246,6 +1304,38 @@ closeFinanceOverlayAndRestoreScroll = do
           modify_ _ { financeOverlay = Nothing, financeOverlayScrollY = Nothing }
     _ ->
       modify_ _ { financeOverlay = Nothing, financeOverlayScrollY = Nothing }
+
+openFinanceCreateFromIntent :: FinanceCreateIntent -> H.HalogenM State Action ChildSlots Void Aff Unit
+openFinanceCreateFromIntent intent = do
+  state <- get
+  case state.currentRoute of
+    Route (FinanceTransactions transactionsRoute) -> do
+      let launch = buildFinanceCreateLaunch intent transactionsRoute
+      modify_ _ { financeOverlay = Just (FinanceCreateOverlay launch), financeOverlayScrollY = Nothing }
+    _ ->
+      pure unit
+
+buildFinanceCreateLaunch :: FinanceCreateIntent -> TransactionsRouteState -> FinanceCreateLaunch
+buildFinanceCreateLaunch intent transactionsRoute =
+  { direction:
+      case intent of
+        FinanceCreateExpense -> "sent"
+        FinanceCreateIncome -> "received"
+  , accountId: transactionsRoute.accountId
+  , occurredAtDaySeed: transactionsRoute.from >>= fromToDaySeed
+  }
+
+fromToDaySeed :: String -> Maybe String
+fromToDaySeed fromValue =
+  case head (StringCommon.split (Pattern "T") fromValue) of
+    Just datePart ->
+      if DateTime.isLocalDate datePart then Just datePart else Nothing
+    Nothing ->
+      Nothing
+
+isMobileViewport :: Effect Boolean
+isMobileViewport =
+  map (_ <= 768) (window >>= Window.innerWidth)
 
 tabLabel :: DefinedRoute -> String
 tabLabel Note = "Notes"

@@ -70,13 +70,15 @@ spec =
 
     it "tracks finance overlay visibility only on finance routes" do
       isFinanceOverlayOpen Nothing `shouldEqual` false
-      isFinanceOverlayOpen (Just FinanceCreateOverlay) `shouldEqual` true
+      isFinanceOverlayOpen (Just FinanceCreateChooserOverlay) `shouldEqual` true
+      isFinanceOverlayOpen (Just (FinanceCreateOverlay { direction: "sent", accountId: Just "acc-1", occurredAtDaySeed: Just "2026-05-20" })) `shouldEqual` true
       isFinanceOverlayOpen (Just (FinanceDetailOverlay "tx-1")) `shouldEqual` true
       shouldRenderFinanceOverlay defaultTransactionsRoute Nothing `shouldEqual` false
-      shouldRenderFinanceOverlay defaultTransactionsRoute (Just FinanceCreateOverlay) `shouldEqual` true
+      shouldRenderFinanceOverlay defaultTransactionsRoute (Just FinanceCreateChooserOverlay) `shouldEqual` true
+      shouldRenderFinanceOverlay defaultTransactionsRoute (Just (FinanceCreateOverlay { direction: "sent", accountId: Nothing, occurredAtDaySeed: Nothing })) `shouldEqual` true
       shouldRenderFinanceOverlay defaultTransactionsRoute (Just (FinanceDetailOverlay "tx-1")) `shouldEqual` true
-      shouldRenderFinanceOverlay FinanceReports (Just FinanceCreateOverlay) `shouldEqual` true
-      shouldRenderFinanceOverlay Note (Just FinanceCreateOverlay) `shouldEqual` false
+      shouldRenderFinanceOverlay FinanceReports (Just FinanceCreateChooserOverlay) `shouldEqual` true
+      shouldRenderFinanceOverlay Note (Just FinanceCreateChooserOverlay) `shouldEqual` false
 
     it "gates admin route to not-found for non-admin users" do
       resolveGuardedRoute Unauthenticated (Route Admin) `shouldEqual` Just NotFound

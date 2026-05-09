@@ -72,9 +72,9 @@ Help users manage financial operations as explicit, explainable facts: capture t
 - [006 Transaction Ledger Workspace](done/006-transaction-ledger-workspace.md) - Establish the base `Transactions` workspace with backend-backed newest-first ledger loading, core row facts, and explicit loading, empty, no-results, and error states.
 - [007 Ledger Filtering And Active-Context Persistence](done/007-ledger-filtering-and-active-context-persistence.md) - Add account/date filtering with URL-backed finance context, visible active state, reset actions, and browser-history restoration.
 - [008 Ledger Indicators And Navigation To Transaction Detail](done/008-ledger-indicators-and-navigation-to-transaction-detail.md) - Add structural ledger indicators and whole-row detail opening while preserving filters, ordering, and scroll position.
+- [009 Contextual Record-Transaction Entrypoints](done/009-contextual-record-transaction-entrypoints.md) - Add a desktop-dropdown/mobile-sheet create chooser for `Expense` and `Income`, with supported ledger context forwarded into create.
 
 ### Ready
-- [009 Contextual Record-Transaction Entrypoints](ready/009-contextual-record-transaction-entrypoints.md) - Add a desktop-dropdown/mobile-sheet create chooser for `Expense` and `Income`, with supported ledger context forwarded into create.
 - [010 Record-Transaction Form Validation And Submission UX](ready/010-record-transaction-form-validation-and-submission-ux.md) - Define the backend-compatible create form, idempotent submit lifecycle, desktop repeat-entry behavior, and mobile success toast confirmation.
 - [011 Transaction Detail Inspection Surface](ready/011-transaction-detail-inspection-surface.md) - Expose a focused read-only detail surface for inspecting backend-supported transaction facts, categorization state, transfers, splits, notes, and adjustments.
 - [012 Transaction Categorization And Notes Management](ready/012-transaction-categorization-and-notes-management.md) - Allow category refinement and mutable note management from transaction detail while matching current backend capabilities.

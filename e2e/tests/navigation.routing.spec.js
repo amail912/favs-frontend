@@ -5,6 +5,9 @@ const {
   calendarTab,
   checklistsTab,
   connectedIdentity,
+  financeCreateChooser,
+  financeCreateExpenseAction,
+  financeCreateIncomeAction,
   financeCreateOverlay,
   financeCreateButton,
   financeDetailOverlay,
@@ -286,6 +289,8 @@ authTest("finance create overlay preserves route and browser back closes it", as
   await authExpect(page).toHaveURL(/\/finance\/transactions$/);
 
   await financeCreateButton(page).click();
+  await authExpect(financeCreateChooser(page)).toBeVisible();
+  await financeCreateExpenseAction(page).click();
   await authExpect(financeCreateOverlay(page)).toBeVisible();
   await authExpect(page).toHaveURL(/\/finance\/transactions$/);
 
@@ -294,6 +299,8 @@ authTest("finance create overlay preserves route and browser back closes it", as
   await authExpect(page).toHaveURL(/\/finance\/transactions$/);
 
   await financeCreateButton(page).click();
+  await authExpect(financeCreateChooser(page)).toBeVisible();
+  await financeCreateExpenseAction(page).click();
   await authExpect(financeCreateOverlay(page)).toBeVisible();
   await page.getByRole("button", { name: "Fermer" }).click();
   await authExpect(financeCreateOverlay(page)).toHaveCount(0);
@@ -305,12 +312,24 @@ authTest("finance create overlay preserves route and browser back closes it", as
 authTest("finance create overlay success closes without changing route", async ({ authenticatedPage: page }) => {
   await page.goto("/finance/transactions");
   await financeCreateButton(page).click();
+  await authExpect(financeCreateChooser(page)).toBeVisible();
+  await financeCreateIncomeAction(page).click();
   await authExpect(financeCreateOverlay(page)).toBeVisible();
 
   await page.getByRole("button", { name: "Simuler l'enregistrement" }).click();
   await authExpect(financeCreateOverlay(page)).toHaveCount(0);
   await authExpect(page).toHaveURL(/\/finance\/transactions$/);
   await authExpect(financeTransactionsTab(page)).toHaveClass(/active/);
+});
+
+authTest("finance create chooser forwards direction and ledger context", async ({ authenticatedPage: page }) => {
+  await page.goto("/finance/transactions?accountId=acc-1&from=2026-05-20T09:30:00Z");
+  await financeCreateButton(page).click();
+  await authExpect(financeCreateChooser(page)).toBeVisible();
+  await financeCreateExpenseAction(page).click();
+  await authExpect(financeCreateOverlay(page)).toContainText("Direction: sent");
+  await authExpect(financeCreateOverlay(page)).toContainText("AccountId: acc-1");
+  await authExpect(financeCreateOverlay(page)).toContainText("OccurredAtDaySeed: 2026-05-20");
 });
 
 authTest("finance ledger row opens detail overlay and preserves route and scroll on close", async ({ authenticatedPage: page }) => {

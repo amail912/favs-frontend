@@ -38,6 +38,18 @@ function financeCreateOverlay(page) {
   return page.locator(".finance-create-overlay");
 }
 
+function financeCreateChooser(page) {
+  return page.locator(".finance-create-chooser");
+}
+
+function financeCreateExpenseAction(page) {
+  return page.locator(".finance-create-chooser__expense");
+}
+
+function financeCreateIncomeAction(page) {
+  return page.locator(".finance-create-chooser__income");
+}
+
 function financeDetailOverlay(page) {
   return page.locator(".finance-detail-overlay");
 }
@@ -109,6 +121,9 @@ module.exports = {
   checklistsTab,
   connectedIdentity,
   financeCreateOverlay,
+  financeCreateChooser,
+  financeCreateExpenseAction,
+  financeCreateIncomeAction,
   financeDetailOverlay,
   financeCreateButton,
   financeReportsTab,
