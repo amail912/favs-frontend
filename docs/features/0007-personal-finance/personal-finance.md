@@ -67,9 +67,9 @@ Help users manage financial operations as explicit, explainable facts: capture t
 ### Done
 - [001 Finance Route Entry And Guarded Navigation](done/001-finance-route-entry-and-guarded-navigation.md) - Introduce `/finance`, `/finance/transactions`, and `/finance/reports`, expose one authenticated `Finance` tab, and normalize `/finance` to the transactions landing route.
 - [002 Finance Workspace Shell And Primary Navigation](done/002-finance-workspace-shell-and-primary-navigation.md) - Add a dedicated finance-local subnav row for `Transactions` and `Reports`, with the finance `+` visible on `Transactions` only.
+- [003 Finance Nested Flow Context And Return Semantics](done/003-finance-nested-flow-context-and-return-semantics.md) - Establish finance overlay open/close/back semantics through the create flow first, so later create and detail stories reuse one route-preserving modal-history contract.
 
 ### Ready
-- [003 Finance Nested Flow Context And Return Semantics](ready/003-finance-nested-flow-context-and-return-semantics.md) - Define create and detail as local modal or sheet overlays that preserve finance context and use shared modal-history back behavior.
 - [004 Finance Backend Contract Adoption](ready/004-finance-backend-contract-adoption.md) - Establish the initial `Api.Finance*` contract layer and shared finance types aligned to the existing `/api/v1/finance` backend.
 - [006 Transaction Ledger Workspace](ready/006-transaction-ledger-workspace.md) - Establish the base `Transactions` workspace with backend-backed newest-first ledger loading, core row facts, and explicit loading, empty, no-results, and error states.
 - [007 Ledger Filtering And Active-Context Persistence](ready/007-ledger-filtering-and-active-context-persistence.md) - Add account/date filtering with URL-backed finance context, visible active state, reset actions, and browser-history restoration.

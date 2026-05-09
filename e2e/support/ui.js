@@ -34,6 +34,10 @@ function financeCreateButton(page) {
   return page.getByRole("button", { name: "Nouvelle transaction" });
 }
 
+function financeCreateOverlay(page) {
+  return page.locator(".finance-create-overlay");
+}
+
 function signupMenuButton(page) {
   return page.getByRole("button", { name: "Signup" });
 }
@@ -100,6 +104,7 @@ module.exports = {
   appTitle,
   checklistsTab,
   connectedIdentity,
+  financeCreateOverlay,
   financeCreateButton,
   financeReportsTab,
   financeShell,

@@ -31,7 +31,7 @@ Ledger rows expose explicit structural indicators for split, transfer, notes, an
 - Depends on `006` ledger workspace.
 - Depends on `007` active-context persistence.
 - Depends on `011` for the detail surface itself.
-- Depends on `003` because detail-open and detail-close must preserve finance workspace context.
+- Depends on `003` because detail-open and detail-close must preserve finance workspace context using the overlay contract established there.
 - Interacts with `014` because transfer-linked state shown in the ledger must reflect the backend’s transfer model.
 
 ## Important Changes To Public Interfaces And Types
@@ -69,7 +69,7 @@ Do not introduce:
   - scroll restoration is required, not optional, for the supported UI model
 - Navigation policy:
   - detail opening should feel like drilling into the current workspace, not leaving it
-  - row-open behavior reuses the detail overlay contract already established by `003`
+  - row-open behavior becomes the first visible detail entrypoint that reuses the detail overlay contract already established by `003`
 - Scope boundary:
   - this story owns navigation into detail from the ledger, but not what the detail surface contains once opened
 

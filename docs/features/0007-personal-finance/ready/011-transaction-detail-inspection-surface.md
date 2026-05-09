@@ -31,7 +31,7 @@ Opening a transaction exposes a focused read-only detail surface that presents t
 - Story-owned saving or mutation-busy states.
 
 ## Dependencies
-- Depends on `003` because detail presentation must preserve finance return semantics.
+- Depends on `003` because detail presentation must preserve finance return semantics defined by the shared overlay contract.
 - Depends on `004` because the active inspection surface must match the adopted `FinanceTransaction` read model.
 - Interacts with `008`, which later makes ledger rows open this detail surface.
 - Interacts with `012`, `013`, and `014`, which separately introduce mutation affordances from inside the detail surface.
@@ -57,6 +57,7 @@ The inspection surface covers these existing read-model facts:
 
 ## Implementation Decisions
 - The detail surface should open over the ledger workspace rather than replace it conceptually.
+- `011` becomes the first visible detail-content consumer of the overlay contract introduced in `003`.
 - Desktop may use modal behavior with ESC and outside-click close semantics.
 - Mobile may use a device-appropriate close affordance while keeping the same underlying transaction scope.
 - The active detail view must reflect only the facts the backend currently returns.

@@ -3,6 +3,7 @@ module Pages.App
   , AuthStatus(..)
   , CalendarRouteState
   , DefinedRoute(..)
+  , FinanceOverlay(..)
   , Route(..)
   , LateItemsState
   , LateItemsQuickCompleteState
@@ -13,8 +14,10 @@ module Pages.App
   , connectedIdentityLabel
   , parseRouteString
   , printRoute
+  , isFinanceOverlayOpen
   , isFinanceRoute
   , financeLocalPrimaryRoute
+  , shouldRenderFinanceOverlay
   , shouldShowFinanceCreateButton
   , resolveGuardedRoute
   , shouldRefreshLateItemsForRoute
@@ -73,6 +76,7 @@ import Type.Prelude (Proxy(..))
 import Ui.AuthSession as AuthSession
 import Ui.CreateButton as CreateButton
 import Ui.Modal as Modal
+import Ui.ModalHistory as ModalHistory
 import Ui.Utils (class_)
 import Web.Event.Event (Event, preventDefault)
 import Web.HTML (window)
@@ -109,6 +113,16 @@ derive instance routeGeneric :: Generic Route _
 derive instance routeEq :: Eq Route
 derive instance ordRoute :: Ord Route
 instance showRoute :: Show Route where
+  show = genericShow
+
+data FinanceOverlay
+  = FinanceCreateOverlay
+  | FinanceDetailOverlay String
+
+derive instance financeOverlayEq :: Eq FinanceOverlay
+derive instance financeOverlayGeneric :: Generic FinanceOverlay _
+
+instance showFinanceOverlay :: Show FinanceOverlay where
   show = genericShow
 
 parseRouteString :: String -> Either Unit Route
@@ -247,7 +261,10 @@ shouldCanonicalizeFinanceRoute = case _ of
 data Action
   = RouteChanged Route
   | NavigateTo DefinedRoute
+  | GlobalPopState
   | FinanceCreateClicked
+  | CloseFinanceOverlay
+  | CompleteFinanceOverlayPlaceholder
   | NavigateToLateItem String String
   | OpenLateItemQuickComplete LateItems.LateItem
   | UpdateLateItemQuickCompleteMinutes String
@@ -288,6 +305,7 @@ type State =
   { currentRoute :: Route
   , nav :: Maybe PushStateInterface
   , authStatus :: AuthStatus
+  , financeOverlay :: Maybe FinanceOverlay
   , lateItems :: LateItemsState
   }
 
@@ -312,6 +330,7 @@ initialState = const
   { currentRoute: Route Note
   , nav: Nothing
   , authStatus: AuthUnknown
+  , financeOverlay: Nothing
   , lateItems: initialLateItemsState
   }
 
@@ -391,6 +410,15 @@ shouldShowFinanceCreateButton = case _ of
   FinanceTransactions -> true
   _ -> false
 
+isFinanceOverlayOpen :: Maybe FinanceOverlay -> Boolean
+isFinanceOverlayOpen = case _ of
+  Nothing -> false
+  Just _ -> true
+
+shouldRenderFinanceOverlay :: DefinedRoute -> Maybe FinanceOverlay -> Boolean
+shouldRenderFinanceOverlay route financeOverlay =
+  isFinanceRoute route && isFinanceOverlayOpen financeOverlay
+
 historyState :: Foreign
 historyState = unsafeToForeign unit
 
@@ -457,12 +485,12 @@ handleAction :: Action -> H.HalogenM State Action ChildSlots Void Aff Unit
 handleAction (RouteChanged Root) = do
   st <- get
   let route = routeFromDefined Note
-  modify_ _ { currentRoute = route }
+  modify_ _ { currentRoute = route, financeOverlay = Nothing }
   navigateWith _.replaceState st.nav route
   when (shouldRefreshLateItemsForRoute st.authStatus route) (handleAction LoadLateItems)
 handleAction (RouteChanged route) = do
   st <- get
-  modify_ _ { currentRoute = route }
+  modify_ _ { currentRoute = route, financeOverlay = financeOverlayAfterRouteChange route st.financeOverlay }
   shouldNormalize <- liftEffect (shouldCanonicalizeFinanceRoute route)
   when shouldNormalize $
     navigateWith _.replaceState st.nav route
@@ -470,10 +498,18 @@ handleAction (RouteChanged route) = do
 handleAction (NavigateTo route) = do
   st <- get
   let nextRoute = routeFromDefined route
-  modify_ _ { currentRoute = nextRoute }
+  modify_ _ { currentRoute = nextRoute, financeOverlay = Nothing }
   navigateWith _.pushState st.nav nextRoute
+handleAction GlobalPopState =
+  closeFinanceOverlayFromBrowserBack
 handleAction FinanceCreateClicked =
-  pure unit
+  openFinanceCreateOverlay
+handleAction CloseFinanceOverlay = do
+  consumeFinanceOverlayBackNavigation
+  modify_ _ { financeOverlay = Nothing }
+handleAction CompleteFinanceOverlayPlaceholder = do
+  consumeFinanceOverlayBackNavigation
+  modify_ _ { financeOverlay = Nothing }
 handleAction (NavigateToLateItem day itemId) = do
   st <- get
   let
@@ -687,25 +723,26 @@ handleAction (HandleAuthOutput (SignupSucceeded username)) = do
   st <- get
   liftEffect $ AuthSession.storeAuthenticatedUsername username
   let route = routeFromDefined Signin
-  modify_ _ { currentRoute = route, authStatus = Unauthenticated }
+  modify_ _ { currentRoute = route, authStatus = Unauthenticated, financeOverlay = Nothing }
   navigateWith _.pushState st.nav route
 handleAction (HandleAuthOutput (SigninSucceeded profile@(AuthenticatedProfile { username }))) = do
   st <- get
   liftEffect $ AuthSession.storeAuthenticatedUsername username
   let route = routeFromDefined Note
-  modify_ _ { currentRoute = route, authStatus = Authenticated profile }
+  modify_ _ { currentRoute = route, authStatus = Authenticated profile, financeOverlay = Nothing }
   navigateWith _.pushState st.nav route
 handleAction SignOut = do
   st <- get
   _ <- liftAff $ post string "/api/signout" Nothing
   liftEffect AuthSession.clearAuthenticatedUsername
   let route = routeFromDefined Signin
-  modify_ _ { authStatus = Unauthenticated, currentRoute = route }
+  modify_ _ { authStatus = Unauthenticated, currentRoute = route, financeOverlay = Nothing }
   navigateWith _.pushState st.nav route
 handleAction InitializeRouting = do
   nav <- liftEffect makeInterface
   modify_ _ { nav = Just nav }
   subscribeToRouting nav
+  subscribeToGlobalPopState
   handleAction RefreshAuthStatus
   handleAction LoadLateItems
 handleAction RefreshAuthStatus = do
@@ -747,7 +784,7 @@ handleAction LoadMoreLateItems =
     st { lateItems = st.lateItems { visibleLimit = st.lateItems.visibleLimit + 50 } }
 
 render :: State -> H.ComponentHTML Action ChildSlots Aff
-render { currentRoute, authStatus, lateItems } =
+render { currentRoute, authStatus, financeOverlay, lateItems } =
   case resolveGuardedRoute authStatus currentRoute of
     Nothing -> renderLoading authStatus
     Just (Route route) ->
@@ -760,6 +797,7 @@ render { currentRoute, authStatus, lateItems } =
             , if route /= Signup && route /= Signin then [ nav [ class_ "row nav nav-tabs" ] (map (\tabRoute -> tab tabRoute route) (visibleTabs authStatus)) ] else []
             , [ currentComponent authStatus route ]
             , [ renderLateItemsSheet authStatus route lateItems ]
+            , [ renderFinanceOverlay route financeOverlay ]
             ]
         )
     Just Root -> text ""
@@ -1006,6 +1044,29 @@ renderFinancePlaceholderBody route =
         ]
     ]
 
+renderFinanceOverlay :: forall w. DefinedRoute -> Maybe FinanceOverlay -> HTML w Action
+renderFinanceOverlay route financeOverlay =
+  if shouldRenderFinanceOverlay route financeOverlay then
+    case financeOverlay of
+      Just FinanceCreateOverlay ->
+        Modal.renderModalWithActionState "Nouvelle transaction"
+          [ div [ class_ "finance-create-overlay text-center" ]
+              [ div [ class_ "fw-semibold mb-2" ] [ text "Flux de creation finance pret pour les prochaines stories." ]
+              , div [ class_ "text-muted" ] [ text "Cette surcouche temporaire valide les regles d'ouverture, fermeture et retour navigateur sans changer la route finance active." ]
+              ]
+          ]
+          CloseFinanceOverlay
+          { action: CompleteFinanceOverlayPlaceholder
+          , disabled: false
+          , label: "Simuler l'enregistrement"
+          }
+      Just (FinanceDetailOverlay _) ->
+        text ""
+      Nothing ->
+        text ""
+  else
+    text ""
+
 tab :: forall w. DefinedRoute -> DefinedRoute -> HTML w Action
 tab tabRoute activeRoute =
   div [ class_ "col text-center nav-item px-0" ]
@@ -1025,6 +1086,43 @@ sameTab left right =
     FinanceReports, FinanceTransactions -> true
     FinanceReports, FinanceReports -> true
     _, _ -> left == right
+
+subscribeToGlobalPopState :: forall slots output m. MonadEffect m => H.HalogenM State Action slots output m Unit
+subscribeToGlobalPopState =
+  ModalHistory.subscribeToGlobalPopState GlobalPopState
+
+armFinanceOverlayBackNavigation :: H.HalogenM State Action ChildSlots Void Aff Unit
+armFinanceOverlayBackNavigation =
+  ModalHistory.armModalBackNavigation (isFinanceOverlayOpen <<< _.financeOverlay)
+
+consumeFinanceOverlayBackNavigation :: H.HalogenM State Action ChildSlots Void Aff Unit
+consumeFinanceOverlayBackNavigation =
+  ModalHistory.consumeModalBackNavigation (isFinanceOverlayOpen <<< _.financeOverlay)
+
+openFinanceCreateOverlay :: H.HalogenM State Action ChildSlots Void Aff Unit
+openFinanceCreateOverlay = do
+  state <- get
+  when (routeCanOpenFinanceOverlay state.currentRoute) do
+    armFinanceOverlayBackNavigation
+    modify_ _ { financeOverlay = Just FinanceCreateOverlay }
+
+closeFinanceOverlayFromBrowserBack :: H.HalogenM State Action ChildSlots Void Aff Unit
+closeFinanceOverlayFromBrowserBack = do
+  state <- get
+  when (isFinanceOverlayOpen state.financeOverlay)
+    (modify_ _ { financeOverlay = Nothing })
+
+routeCanOpenFinanceOverlay :: Route -> Boolean
+routeCanOpenFinanceOverlay = case _ of
+  Route route -> isFinanceRoute route
+  _ -> false
+
+financeOverlayAfterRouteChange :: Route -> Maybe FinanceOverlay -> Maybe FinanceOverlay
+financeOverlayAfterRouteChange route financeOverlay =
+  if routeCanOpenFinanceOverlay route then
+    financeOverlay
+  else
+    Nothing
 
 tabLabel :: DefinedRoute -> String
 tabLabel Note = "Notes"

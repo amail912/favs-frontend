@@ -5,6 +5,7 @@ const {
   calendarTab,
   checklistsTab,
   connectedIdentity,
+  financeCreateOverlay,
   financeCreateButton,
   financeReportsTab,
   financeShell,
@@ -212,6 +213,39 @@ authTest("finance local navigation switches between transactions and reports", a
   await authExpect(page).toHaveURL(/\/finance\/transactions$/);
   await authExpect(financeTransactionsTab(page)).toHaveClass(/active/);
   await authExpect(financeCreateButton(page)).toBeVisible();
+});
+
+authTest("finance create overlay preserves route and browser back closes it", async ({ authenticatedPage: page }) => {
+  await page.goto("/notes");
+  await financeTab(page).click();
+  await authExpect(page).toHaveURL(/\/finance\/transactions$/);
+
+  await financeCreateButton(page).click();
+  await authExpect(financeCreateOverlay(page)).toBeVisible();
+  await authExpect(page).toHaveURL(/\/finance\/transactions$/);
+
+  await page.goBack();
+  await authExpect(financeCreateOverlay(page)).toHaveCount(0);
+  await authExpect(page).toHaveURL(/\/finance\/transactions$/);
+
+  await financeCreateButton(page).click();
+  await authExpect(financeCreateOverlay(page)).toBeVisible();
+  await page.getByRole("button", { name: "Fermer" }).click();
+  await authExpect(financeCreateOverlay(page)).toHaveCount(0);
+
+  await page.goBack();
+  await authExpect(page).toHaveURL(/\/notes$/);
+});
+
+authTest("finance create overlay success closes without changing route", async ({ authenticatedPage: page }) => {
+  await page.goto("/finance/transactions");
+  await financeCreateButton(page).click();
+  await authExpect(financeCreateOverlay(page)).toBeVisible();
+
+  await page.getByRole("button", { name: "Simuler l'enregistrement" }).click();
+  await authExpect(financeCreateOverlay(page)).toHaveCount(0);
+  await authExpect(page).toHaveURL(/\/finance\/transactions$/);
+  await authExpect(financeTransactionsTab(page)).toHaveClass(/active/);
 });
 
 test("admin user sees admin navigation and can open admin page", async ({ context, page, baseURL }) => {

@@ -6,7 +6,7 @@ import Api.Auth (AuthenticatedProfile(..))
 import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
 import Notifications.LateItems as LateItems
-import Pages.App (AuthStatus(..), DefinedRoute(..), Route(..), applyLateItemsLoadFailed, applyLateItemsLoaded, beginLateItemsRequest, connectedIdentityLabel, financeLocalPrimaryRoute, initialLateItemsState, isFinanceRoute, parseRouteString, printRoute, resolveGuardedRoute, shouldRefreshLateItemsForRoute, shouldShowFinanceCreateButton, visibleTabs)
+import Pages.App (AuthStatus(..), DefinedRoute(..), FinanceOverlay(..), Route(..), applyLateItemsLoadFailed, applyLateItemsLoaded, beginLateItemsRequest, connectedIdentityLabel, financeLocalPrimaryRoute, initialLateItemsState, isFinanceOverlayOpen, isFinanceRoute, parseRouteString, printRoute, resolveGuardedRoute, shouldRefreshLateItemsForRoute, shouldRenderFinanceOverlay, shouldShowFinanceCreateButton, visibleTabs)
 import Pages.Calendar (ItemType(..))
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
@@ -63,6 +63,14 @@ spec =
       shouldShowFinanceCreateButton FinanceTransactions `shouldEqual` true
       shouldShowFinanceCreateButton FinanceReports `shouldEqual` false
       shouldShowFinanceCreateButton Note `shouldEqual` false
+
+    it "tracks finance overlay visibility only on finance routes" do
+      isFinanceOverlayOpen Nothing `shouldEqual` false
+      isFinanceOverlayOpen (Just FinanceCreateOverlay) `shouldEqual` true
+      shouldRenderFinanceOverlay FinanceTransactions Nothing `shouldEqual` false
+      shouldRenderFinanceOverlay FinanceTransactions (Just FinanceCreateOverlay) `shouldEqual` true
+      shouldRenderFinanceOverlay FinanceReports (Just FinanceCreateOverlay) `shouldEqual` true
+      shouldRenderFinanceOverlay Note (Just FinanceCreateOverlay) `shouldEqual` false
 
     it "gates admin route to not-found for non-admin users" do
       resolveGuardedRoute Unauthenticated (Route Admin) `shouldEqual` Just NotFound
