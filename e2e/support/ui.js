@@ -18,6 +18,22 @@ function financeTab(page) {
   return page.locator("a.nav-link", { hasText: "Finance" });
 }
 
+function financeShell(page) {
+  return page.locator(".finance-shell");
+}
+
+function financeTransactionsTab(page) {
+  return page.locator(".finance-shell__nav a.nav-link", { hasText: "Transactions" });
+}
+
+function financeReportsTab(page) {
+  return page.locator(".finance-shell__nav a.nav-link", { hasText: "Reports" });
+}
+
+function financeCreateButton(page) {
+  return page.getByRole("button", { name: "Nouvelle transaction" });
+}
+
 function signupMenuButton(page) {
   return page.getByRole("button", { name: "Signup" });
 }
@@ -84,7 +100,11 @@ module.exports = {
   appTitle,
   checklistsTab,
   connectedIdentity,
+  financeCreateButton,
+  financeReportsTab,
+  financeShell,
   financeTab,
+  financeTransactionsTab,
   lateItemsChip,
   lateItemsSheet,
   lateItemsRows,

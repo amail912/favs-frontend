@@ -13,6 +13,9 @@ module Pages.App
   , connectedIdentityLabel
   , parseRouteString
   , printRoute
+  , isFinanceRoute
+  , financeLocalPrimaryRoute
+  , shouldShowFinanceCreateButton
   , resolveGuardedRoute
   , shouldRefreshLateItemsForRoute
   , visibleTabs
@@ -68,6 +71,7 @@ import Pages.Notes (component) as Notes
 import Routing.PushState (PushStateInterface, makeInterface, matchesWith)
 import Type.Prelude (Proxy(..))
 import Ui.AuthSession as AuthSession
+import Ui.CreateButton as CreateButton
 import Ui.Modal as Modal
 import Ui.Utils (class_)
 import Web.Event.Event (Event, preventDefault)
@@ -243,6 +247,7 @@ shouldCanonicalizeFinanceRoute = case _ of
 data Action
   = RouteChanged Route
   | NavigateTo DefinedRoute
+  | FinanceCreateClicked
   | NavigateToLateItem String String
   | OpenLateItemQuickComplete LateItems.LateItem
   | UpdateLateItemQuickCompleteMinutes String
@@ -370,6 +375,22 @@ shouldRefreshLateItemsForRoute authStatus route =
     Just (Route definedRoute) -> canRenderLateItemsReminder authStatus definedRoute
     _ -> false
 
+isFinanceRoute :: DefinedRoute -> Boolean
+isFinanceRoute = case _ of
+  FinanceTransactions -> true
+  FinanceReports -> true
+  _ -> false
+
+financeLocalPrimaryRoute :: DefinedRoute -> Maybe DefinedRoute
+financeLocalPrimaryRoute route
+  | isFinanceRoute route = Just route
+  | otherwise = Nothing
+
+shouldShowFinanceCreateButton :: DefinedRoute -> Boolean
+shouldShowFinanceCreateButton = case _ of
+  FinanceTransactions -> true
+  _ -> false
+
 historyState :: Foreign
 historyState = unsafeToForeign unit
 
@@ -451,6 +472,8 @@ handleAction (NavigateTo route) = do
   let nextRoute = routeFromDefined route
   modify_ _ { currentRoute = nextRoute }
   navigateWith _.pushState st.nav nextRoute
+handleAction FinanceCreateClicked =
+  pure unit
 handleAction (NavigateToLateItem day itemId) = do
   st <- get
   let
@@ -934,22 +957,50 @@ currentComponent _ (Calendar calendarRoute) =
     , initialItemId: calendarRoute.item
     }
     HandleCalendarOutput
-currentComponent _ FinanceTransactions = renderFinancePlaceholder "Transactions"
-currentComponent _ FinanceReports = renderFinancePlaceholder "Reports"
+currentComponent _ FinanceTransactions = renderFinanceShell FinanceTransactions
+currentComponent _ FinanceReports = renderFinanceShell FinanceReports
 currentComponent (Authenticated (AuthenticatedProfile { username })) Admin =
   slot_ (Proxy :: _ "admin") unit Admin.component { currentUsername: username }
 currentComponent _ Admin = text ""
 currentComponent _ Signup = slot (Proxy :: _ "signup") unit signupComponent unit HandleAuthOutput
 currentComponent _ Signin = slot (Proxy :: _ "signin") unit signinComponent unit HandleAuthOutput
 
-renderFinancePlaceholder :: String -> H.ComponentHTML Action ChildSlots Aff
-renderFinancePlaceholder sectionLabel =
-  div [ class_ "row justify-content-center py-4" ]
+renderFinanceShell :: DefinedRoute -> H.ComponentHTML Action ChildSlots Aff
+renderFinanceShell route =
+  div [ class_ "finance-shell py-3" ]
+    [ div [ class_ "finance-shell__header d-flex justify-content-between align-items-center gap-3 mb-3 flex-wrap" ]
+        [ nav [ class_ "finance-shell__nav nav nav-pills gap-2" ]
+            (map (\tabRoute -> financeLocalTab tabRoute route) [ FinanceTransactions, FinanceReports ])
+        , if shouldShowFinanceCreateButton route then
+            div [ class_ "finance-shell__actions" ]
+              [ CreateButton.renderIconCreateButton "btn btn-primary finance-shell__create-btn" "Nouvelle transaction" FinanceCreateClicked ]
+          else
+            text ""
+        ]
+    , renderFinancePlaceholderBody route
+    ]
+
+financeLocalTab :: forall w. DefinedRoute -> DefinedRoute -> HTML w Action
+financeLocalTab tabRoute activeRoute =
+  a
+    [ class_ $ "nav-link finance-shell__nav-link" <> guard (tabRoute == activeRoute) " active"
+    , onClick (const $ NavigateTo tabRoute)
+    ]
+    [ text (financeLocalTabLabel tabRoute) ]
+
+financeLocalTabLabel :: DefinedRoute -> String
+financeLocalTabLabel FinanceTransactions = "Transactions"
+financeLocalTabLabel FinanceReports = "Reports"
+financeLocalTabLabel _ = ""
+
+renderFinancePlaceholderBody :: DefinedRoute -> H.ComponentHTML Action ChildSlots Aff
+renderFinancePlaceholderBody route =
+  div [ class_ "row justify-content-center" ]
     [ div [ class_ "col-12 col-md-10 col-lg-7" ]
         [ div [ class_ "card shadow-sm border-0 finance-route-placeholder" ]
             [ div [ class_ "card-body p-4 text-center" ]
-                [ h1 [ class_ "h4 mb-2" ] [ text "Finance" ]
-                , div [ class_ "text-muted" ] [ text ("Surface " <> sectionLabel <> " prête pour les prochaines stories.") ]
+                [ h1 [ class_ "h4 mb-2" ] [ text ("Finance " <> financeLocalTabLabel route) ]
+                , div [ class_ "text-muted" ] [ text ("Surface " <> financeLocalTabLabel route <> " prête pour les prochaines stories.") ]
                 ]
             ]
         ]

@@ -5,7 +5,11 @@ const {
   calendarTab,
   checklistsTab,
   connectedIdentity,
+  financeCreateButton,
+  financeReportsTab,
+  financeShell,
   financeTab,
+  financeTransactionsTab,
   lateItemsChip,
   lateItemsLoadMore,
   lateItemsRows,
@@ -103,6 +107,7 @@ test("unauthenticated user can navigate to signup from auth menu", async ({ page
 authTest("navigation tabs update browser URL", async ({ authenticatedPage: page }) => {
   await page.goto("/notes");
   await authExpect(connectedIdentity(page)).toHaveText(/Connecté: /);
+  await authExpect(financeShell(page)).toHaveCount(0);
   await checklistsTab(page).click();
   await authExpect(page).toHaveURL(/\/checklists$/);
   await authExpect(connectedIdentity(page)).toHaveText(/Connecté: /);
@@ -117,7 +122,11 @@ authTest("authenticated user sees finance navigation and lands on transactions",
   await authExpect(financeTab(page)).toBeVisible();
   await financeTab(page).click();
   await authExpect(page).toHaveURL(/\/finance\/transactions$/);
-  await authExpect(page.locator(".finance-route-placeholder")).toContainText("Finance");
+  await authExpect(financeShell(page)).toBeVisible();
+  await authExpect(financeTransactionsTab(page)).toHaveClass(/active/);
+  await authExpect(financeReportsTab(page)).toBeVisible();
+  await authExpect(financeCreateButton(page)).toBeVisible();
+  await authExpect(page.locator(".finance-route-placeholder")).toContainText("Finance Transactions");
 });
 
 authTest("authenticated user can sign out from auth menu", async ({ authenticatedPage: page }) => {
@@ -167,20 +176,42 @@ test("unauthenticated user cannot open finance routes", async ({ page }) => {
   await page.goto("/finance/transactions");
   await expect(page.getByText("404")).toBeVisible();
   await expect(page.getByText("Page introuvable")).toBeVisible();
+  await expect(financeShell(page)).toHaveCount(0);
 });
 
 authTest("authenticated direct /finance entry canonicalizes to /finance/transactions", async ({ authenticatedPage: page }) => {
   await page.goto("/finance");
   await authExpect(page).toHaveURL(/\/finance\/transactions$/);
+  await authExpect(financeShell(page)).toBeVisible();
+  await authExpect(financeTransactionsTab(page)).toHaveClass(/active/);
+  await authExpect(financeCreateButton(page)).toBeVisible();
   await authExpect(page.locator(".finance-route-placeholder")).toContainText("Transactions");
 });
 
 authTest("authenticated finance route stays accessible after reload", async ({ authenticatedPage: page }) => {
   await page.goto("/finance/reports");
+  await authExpect(financeShell(page)).toBeVisible();
+  await authExpect(financeReportsTab(page)).toHaveClass(/active/);
+  await authExpect(financeCreateButton(page)).toHaveCount(0);
   await authExpect(page.locator(".finance-route-placeholder")).toContainText("Reports");
   await page.reload();
   await authExpect(page).toHaveURL(/\/finance\/reports$/);
+  await authExpect(financeReportsTab(page)).toHaveClass(/active/);
+  await authExpect(financeCreateButton(page)).toHaveCount(0);
   await authExpect(page.locator(".finance-route-placeholder")).toContainText("Reports");
+});
+
+authTest("finance local navigation switches between transactions and reports", async ({ authenticatedPage: page }) => {
+  await page.goto("/finance/transactions");
+  await authExpect(financeTransactionsTab(page)).toHaveClass(/active/);
+  await financeReportsTab(page).click();
+  await authExpect(page).toHaveURL(/\/finance\/reports$/);
+  await authExpect(financeReportsTab(page)).toHaveClass(/active/);
+  await authExpect(financeCreateButton(page)).toHaveCount(0);
+  await financeTransactionsTab(page).click();
+  await authExpect(page).toHaveURL(/\/finance\/transactions$/);
+  await authExpect(financeTransactionsTab(page)).toHaveClass(/active/);
+  await authExpect(financeCreateButton(page)).toBeVisible();
 });
 
 test("admin user sees admin navigation and can open admin page", async ({ context, page, baseURL }) => {

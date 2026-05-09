@@ -6,7 +6,7 @@ import Api.Auth (AuthenticatedProfile(..))
 import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
 import Notifications.LateItems as LateItems
-import Pages.App (AuthStatus(..), DefinedRoute(..), Route(..), applyLateItemsLoadFailed, applyLateItemsLoaded, beginLateItemsRequest, connectedIdentityLabel, initialLateItemsState, parseRouteString, printRoute, resolveGuardedRoute, shouldRefreshLateItemsForRoute, visibleTabs)
+import Pages.App (AuthStatus(..), DefinedRoute(..), Route(..), applyLateItemsLoadFailed, applyLateItemsLoaded, beginLateItemsRequest, connectedIdentityLabel, financeLocalPrimaryRoute, initialLateItemsState, isFinanceRoute, parseRouteString, printRoute, resolveGuardedRoute, shouldRefreshLateItemsForRoute, shouldShowFinanceCreateButton, visibleTabs)
 import Pages.Calendar (ItemType(..))
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
@@ -52,6 +52,17 @@ spec =
     it "allows authenticated users to access finance routes" do
       resolveGuardedRoute (Authenticated memberProfile) (Route FinanceTransactions) `shouldEqual` Just (Route FinanceTransactions)
       resolveGuardedRoute (Authenticated memberProfile) (Route FinanceReports) `shouldEqual` Just (Route FinanceReports)
+
+    it "identifies finance shell routes and create-button visibility" do
+      isFinanceRoute FinanceTransactions `shouldEqual` true
+      isFinanceRoute FinanceReports `shouldEqual` true
+      isFinanceRoute Note `shouldEqual` false
+      financeLocalPrimaryRoute FinanceTransactions `shouldEqual` Just FinanceTransactions
+      financeLocalPrimaryRoute FinanceReports `shouldEqual` Just FinanceReports
+      financeLocalPrimaryRoute Note `shouldEqual` Nothing
+      shouldShowFinanceCreateButton FinanceTransactions `shouldEqual` true
+      shouldShowFinanceCreateButton FinanceReports `shouldEqual` false
+      shouldShowFinanceCreateButton Note `shouldEqual` false
 
     it "gates admin route to not-found for non-admin users" do
       resolveGuardedRoute Unauthenticated (Route Admin) `shouldEqual` Just NotFound

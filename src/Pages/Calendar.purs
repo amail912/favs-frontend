@@ -128,6 +128,7 @@ import Type.Proxy (Proxy(..))
 import Ui.Errors (FatalError, handleError, toFatalError)
 import Ui.Focus (focusElement, openDateInputPicker)
 import Ui.AuthSession as AuthSession
+import Ui.CreateButton as CreateButton
 import Ui.DateTimePicker as DateTimePicker
 import Ui.LocalStorage as LocalStorage
 import Ui.Modal (renderBottomSheet, renderModal, renderModalWithActionState, renderModalWithValidateState) as Modal
@@ -335,12 +336,7 @@ renderAgendaView viewMode focusDate todayDate items sharedPresence presenceCuePr
 
 renderCreateFab :: forall w. HTML w Action
 renderCreateFab =
-  button
-    [ class_ "calendar-fab"
-    , attr (AttrName "aria-label") "Nouvel item"
-    , onClick (const (ViewAction ViewOpenCreate))
-    ]
-    [ i [ class_ "bi bi-plus" ] [] ]
+  CreateButton.renderIconCreateButton "calendar-fab" "Nouvel item" (ViewAction ViewOpenCreate)
 
 renderRecurrenceSlot :: RecurrenceSlot -> RecurrenceDraft -> (Recurrence.RecurrenceCommand -> Action) -> H.ComponentHTML Action Slots Aff
 renderRecurrenceSlot slotId draft onOutput =
