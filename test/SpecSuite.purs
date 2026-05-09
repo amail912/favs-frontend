@@ -3,6 +3,7 @@ module Test.SpecSuite (runSpecSuite) where
 import Prelude
 
 import Effect.Aff (Aff)
+import Test.Api.FinanceSpec as FinanceSpec
 import Test.Calendar.DragSpec as DragSpec
 import Test.Domain.Calendar.Spec as CalendarSpec
 import Test.Helpers.DateTimeSpec as DateTimeSpec
@@ -21,6 +22,7 @@ import Test.Spec.Runner (runSpec)
 runSpecSuite :: Aff Unit
 runSpecSuite = runSpec [ consoleReporter ] do
   DragSpec.spec
+  FinanceSpec.spec
   AdminSpec.spec
   AppSpec.spec
   DateTimeSpec.spec

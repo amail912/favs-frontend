@@ -144,3 +144,10 @@ Do not introduce helpers yet for unsupported or inactive surfaces such as:
 - Documentation review:
   - `api-contract.md` and story `004` stay consistent
   - downstream active stories rely on the adopted contract, not unsupported assumptions
+
+## Implementation Notes (2026-05-09)
+- Added `Api.FinanceContract` for active `/api/v1/finance` read/write/query types and JSON codecs.
+- Added `Api.Finance` technical request helpers with action-oriented names (`getAccounts`, `createSentTransaction`, `linkTransfer`, etc.).
+- Enforced explicit `Idempotency-Key` helper input for sent/received transaction creation.
+- Constrained transaction query encoding to `accountId`, `from`, and `to`.
+- Added `Test.Api.FinanceSpec` and wired it into `test/SpecSuite.purs`.
