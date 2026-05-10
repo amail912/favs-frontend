@@ -5,12 +5,14 @@ module Pages.FinanceTransactions
   , LedgerBodyState(..)
   , LedgerContext
   , FinanceLedgerRow
+  , FinanceDetailSnapshot
   , beginLedgerLoad
   , applyLedgerLoadSuccess
   , applyLedgerLoadFailure
   , deriveLedgerBodyState
   , resolveAccountLabel
   , buildLedgerRows
+  , buildDetailSnapshot
   ) where
 
 import Prelude hiding (div)
@@ -60,7 +62,7 @@ type State =
 
 data Output
   = RouteSyncRequested LedgerContext
-  | OpenTransactionDetail String
+  | OpenTransactionDetail FinanceDetailSnapshot
 
 data LedgerRemoteState
   = LedgerLoading
@@ -82,6 +84,12 @@ type FinanceLedgerRow =
   , hasTransfer :: Boolean
   , hasNote :: Boolean
   , hasAdjustment :: Boolean
+  }
+
+type FinanceDetailSnapshot =
+  { transactionId :: String
+  , accountLabel :: String
+  , transaction :: FinanceTransaction
   }
 
 data LedgerBodyState
@@ -160,6 +168,17 @@ hasActiveContext context =
 buildLedgerRows :: Array FinanceAccount -> Array FinanceTransaction -> Array FinanceLedgerRow
 buildLedgerRows accounts transactions =
   map (buildLedgerRow accounts) transactions
+
+buildDetailSnapshot :: Array FinanceAccount -> Array FinanceTransaction -> String -> Maybe FinanceDetailSnapshot
+buildDetailSnapshot accounts transactions transactionId =
+  map
+    ( \(FinanceTransaction tx) ->
+        { transactionId: tx.id
+        , accountLabel: resolveAccountLabel accounts tx.accountId
+        , transaction: FinanceTransaction tx
+        }
+    )
+    (find (\(FinanceTransaction tx) -> tx.id == transactionId) transactions)
 
 buildLedgerRow :: Array FinanceAccount -> FinanceTransaction -> FinanceLedgerRow
 buildLedgerRow accounts (FinanceTransaction tx) =
@@ -367,8 +386,17 @@ handleAction = case _ of
     raise (RouteSyncRequested cleared)
     modify_ beginLedgerLoad
     loadLedger
-  OpenRow transactionId ->
-    raise (OpenTransactionDetail transactionId)
+  OpenRow transactionId -> do
+    state <- get
+    case state.remoteState of
+      LedgerLoaded { transactions, accounts } ->
+        case buildDetailSnapshot accounts transactions transactionId of
+          Just snapshot ->
+            raise (OpenTransactionDetail snapshot)
+          Nothing ->
+            pure unit
+      _ ->
+        pure unit
 
 clearOne :: (LedgerContext -> LedgerContext) -> H.HalogenM State Action () Output Aff Unit
 clearOne updateContext = do

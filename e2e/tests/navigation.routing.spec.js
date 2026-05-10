@@ -364,7 +364,12 @@ authTest("finance ledger row opens detail overlay and preserves route and scroll
 
   await page.locator(".finance-ledger-row").first().click();
   await authExpect(financeDetailOverlay(page)).toBeVisible();
-  await authExpect(financeDetailOverlay(page)).toContainText("Transaction: tx-1");
+  await authExpect(financeDetailOverlay(page)).toContainText("Core facts");
+  await authExpect(financeDetailOverlay(page)).toContainText("Id: tx-1");
+  await authExpect(financeDetailOverlay(page)).toContainText("Direction: sent");
+  await authExpect(financeDetailOverlay(page)).toContainText("Account: Primary account");
+  await authExpect(financeDetailOverlay(page)).toContainText("Categorization");
+  await authExpect(financeDetailOverlay(page)).toContainText("cat-1: 3");
   await authExpect(page).toHaveURL(/\/finance\/transactions\?from=2026-05-01T00:00:00Z&to=2026-05-31T23:59:59Z$/);
 
   await page.getByRole("button", { name: "Fermer" }).click();

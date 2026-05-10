@@ -20,6 +20,7 @@ import Pages.FinanceTransactions
   , applyLedgerLoadFailure
   , applyLedgerLoadSuccess
   , beginLedgerLoad
+  , buildDetailSnapshot
   , buildLedgerRows
   , deriveLedgerBodyState
   , resolveAccountLabel
@@ -99,6 +100,24 @@ spec =
           row.hasNote `shouldEqual` true
           row.hasAdjustment `shouldEqual` true
         _ -> fail "Expected at least one ledger row"
+
+    it "builds detail snapshot from selected transaction and resolved account label" do
+      case buildDetailSnapshot [ sampleAccount ] [ sampleTransaction ] "tx-1" of
+        Just snapshot -> do
+          snapshot.transactionId `shouldEqual` "tx-1"
+          snapshot.accountLabel `shouldEqual` "Primary account"
+          case snapshot.transaction of
+            FinanceTransaction tx ->
+              tx.id `shouldEqual` "tx-1"
+        Nothing ->
+          fail "Expected detail snapshot"
+
+    it "returns Nothing when detail transaction id cannot be resolved" do
+      case buildDetailSnapshot [ sampleAccount ] [ sampleTransaction ] "missing" of
+        Nothing ->
+          pure unit
+        Just _ ->
+          fail "Expected missing detail snapshot"
 
 sampleAccount :: FinanceAccount
 sampleAccount =

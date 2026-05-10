@@ -2311,3 +2311,8 @@ a.nav-link:hover {
   background: #198754;
   color: #fff;
 }
+
+.finance-detail-overlay {
+  max-height: min(70vh, 640px);
+  overflow-y: auto;
+}

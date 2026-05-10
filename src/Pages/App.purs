@@ -35,13 +35,25 @@ import Affjax.ResponseFormat (string)
 import Api.Auth (AuthenticatedProfile(..), getAuthProfileResponse, isAdminProfile)
 import Api.Calendar (getItemsResponse, updateItemResponse)
 import Api.Finance (createReceivedTransaction, createSentTransaction, getAccounts)
-import Api.FinanceContract (CreateFinanceTransaction(..), FinanceAccount(..), FinanceAccountsQuery(..), FinanceAccountsStatus(..))
+import Api.FinanceContract
+  ( CreateFinanceTransaction(..)
+  , FinanceAccount(..)
+  , FinanceAccountsQuery(..)
+  , FinanceAccountsStatus(..)
+  , FinanceTransaction(..)
+  , FinanceTransactionAdjustment(..)
+  , FinanceTransactionCategory(..)
+  , FinanceTransactionDirection(..)
+  , FinanceTransactionNote(..)
+  , FinanceTransactionSplitRow(..)
+  , FinanceTransferLink(..)
+  )
 import Pages.Admin (component) as Admin
 import Pages.Calendar (CalendarRouteOutput(..), CalendarView(..), CalendarItem(..), component, decodeCalendarItemsResponse) as Calendar
 import Pages.Checklists (component) as Checklists
-import Pages.FinanceTransactions (Output(..), component) as FinanceTransactions
+import Pages.FinanceTransactions (FinanceDetailSnapshot, Output(..), component) as FinanceTransactions
 import Control.Monad.RWS (get, modify_)
-import Data.Array (find, head, length, mapMaybe)
+import Data.Array (find, head, length, mapMaybe, null)
 import DOM.HTML.Indexed.ButtonType (ButtonType(..))
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Data.Argonaut.Core (Json, jsonEmptyObject)
@@ -395,6 +407,7 @@ type State =
   , financeOverlay :: Maybe FinanceOverlay
   , financeOverlayScrollY :: Maybe Int
   , financeCreateState :: Maybe FinanceCreateState
+  , financeDetailSnapshot :: Maybe FinanceTransactions.FinanceDetailSnapshot
   , financeToastMessage :: Maybe String
   , financeToastToken :: Int
   , financeIsMobile :: Boolean
@@ -440,6 +453,7 @@ initialState = const
   , financeOverlay: Nothing
   , financeOverlayScrollY: Nothing
   , financeCreateState: Nothing
+  , financeDetailSnapshot: Nothing
   , financeToastMessage: Nothing
   , financeToastToken: 0
   , financeIsMobile: false
@@ -597,7 +611,7 @@ handleAction :: Action -> H.HalogenM State Action ChildSlots Void Aff Unit
 handleAction (RouteChanged Root) = do
   st <- get
   let route = routeFromDefined Note
-  modify_ _ { currentRoute = route, financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing }
+  modify_ _ { currentRoute = route, financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing, financeDetailSnapshot = Nothing }
   navigateWith _.replaceState st.nav route
   when (shouldRefreshLateItemsForRoute st.authStatus route) (handleAction LoadLateItems)
 handleAction (RouteChanged route) = do
@@ -607,6 +621,7 @@ handleAction (RouteChanged route) = do
     , financeOverlay = financeOverlayAfterRouteChange route st.financeOverlay
     , financeOverlayScrollY = financeOverlayScrollYAfterRouteChange route st.financeOverlay
     , financeCreateState = financeCreateStateAfterRouteChange route st.financeOverlay st.financeCreateState
+    , financeDetailSnapshot = financeDetailSnapshotAfterRouteChange route st.financeOverlay st.financeDetailSnapshot
     }
   shouldNormalize <- liftEffect (shouldCanonicalizeFinanceRoute route)
   when shouldNormalize $
@@ -615,7 +630,7 @@ handleAction (RouteChanged route) = do
 handleAction (NavigateTo route) = do
   st <- get
   let nextRoute = routeFromDefined route
-  modify_ _ { currentRoute = nextRoute, financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing }
+  modify_ _ { currentRoute = nextRoute, financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing, financeDetailSnapshot = Nothing }
   navigateWith _.pushState st.nav nextRoute
 handleAction GlobalPopState =
   closeFinanceOverlayFromBrowserBack
@@ -725,6 +740,7 @@ handleAction (FinanceCreateSubmitted result) = do
               next
                 { financeOverlay = Nothing
                 , financeCreateState = Nothing
+                , financeDetailSnapshot = Nothing
                 , financeToastMessage = Just "Transaction saved."
                 , financeToastToken = next.financeToastToken + 1
                 }
@@ -975,30 +991,34 @@ handleAction (HandleTransactionsOutput (FinanceTransactions.RouteSyncRequested t
         navigateWith _.pushState st.nav nextRoute
     _ ->
       pure unit
-handleAction (HandleTransactionsOutput (FinanceTransactions.OpenTransactionDetail transactionId)) = do
+handleAction (HandleTransactionsOutput (FinanceTransactions.OpenTransactionDetail detailSnapshot)) = do
   state <- get
   when (routeCanOpenFinanceOverlay state.currentRoute) do
     scrollY <- liftEffect WindowScroll.getWindowScrollY
     armFinanceOverlayBackNavigation
-    modify_ _ { financeOverlay = Just (FinanceDetailOverlay transactionId), financeOverlayScrollY = Just scrollY }
+    modify_ _
+      { financeOverlay = Just (FinanceDetailOverlay detailSnapshot.transactionId)
+      , financeOverlayScrollY = Just scrollY
+      , financeDetailSnapshot = Just detailSnapshot
+      }
 handleAction (HandleAuthOutput (SignupSucceeded username)) = do
   st <- get
   liftEffect $ AuthSession.storeAuthenticatedUsername username
   let route = routeFromDefined Signin
-  modify_ _ { currentRoute = route, authStatus = Unauthenticated, financeOverlay = Nothing, financeCreateState = Nothing }
+  modify_ _ { currentRoute = route, authStatus = Unauthenticated, financeOverlay = Nothing, financeCreateState = Nothing, financeDetailSnapshot = Nothing }
   navigateWith _.pushState st.nav route
 handleAction (HandleAuthOutput (SigninSucceeded profile@(AuthenticatedProfile { username }))) = do
   st <- get
   liftEffect $ AuthSession.storeAuthenticatedUsername username
   let route = routeFromDefined Note
-  modify_ _ { currentRoute = route, authStatus = Authenticated profile, financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing }
+  modify_ _ { currentRoute = route, authStatus = Authenticated profile, financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing, financeDetailSnapshot = Nothing }
   navigateWith _.pushState st.nav route
 handleAction SignOut = do
   st <- get
   _ <- liftAff $ post string "/api/signout" Nothing
   liftEffect AuthSession.clearAuthenticatedUsername
   let route = routeFromDefined Signin
-  modify_ _ { authStatus = Unauthenticated, currentRoute = route, financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing }
+  modify_ _ { authStatus = Unauthenticated, currentRoute = route, financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing, financeDetailSnapshot = Nothing }
   navigateWith _.pushState st.nav route
 handleAction InitializeRouting = do
   nav <- liftEffect makeInterface
@@ -1048,7 +1068,7 @@ handleAction LoadMoreLateItems =
     st { lateItems = st.lateItems { visibleLimit = st.lateItems.visibleLimit + 50 } }
 
 render :: State -> H.ComponentHTML Action ChildSlots Aff
-render { currentRoute, authStatus, financeOverlay, lateItems, financeIsMobile, financeCreateState, financeToastMessage } =
+render { currentRoute, authStatus, financeOverlay, lateItems, financeIsMobile, financeCreateState, financeDetailSnapshot, financeToastMessage } =
   case resolveGuardedRoute authStatus currentRoute of
     Nothing -> renderLoading authStatus
     Just (Route route) ->
@@ -1062,7 +1082,7 @@ render { currentRoute, authStatus, financeOverlay, lateItems, financeIsMobile, f
             , if route /= Signup && route /= Signin then [ nav [ class_ "row nav nav-tabs" ] (map (\tabRoute -> tab tabRoute route) (visibleTabs authStatus)) ] else []
             , [ currentComponent authStatus financeOverlay route ]
             , [ renderLateItemsSheet authStatus route lateItems ]
-            , [ renderFinanceOverlay route financeOverlay financeIsMobile financeCreateState ]
+            , [ renderFinanceOverlay route financeOverlay financeIsMobile financeCreateState financeDetailSnapshot ]
             ]
         )
     Just Root -> text ""
@@ -1344,8 +1364,8 @@ renderFinancePlaceholderBody route =
         ]
     ]
 
-renderFinanceOverlay :: forall w. DefinedRoute -> Maybe FinanceOverlay -> Boolean -> Maybe FinanceCreateState -> HTML w Action
-renderFinanceOverlay route financeOverlay financeIsMobile financeCreateState =
+renderFinanceOverlay :: forall w. DefinedRoute -> Maybe FinanceOverlay -> Boolean -> Maybe FinanceCreateState -> Maybe FinanceTransactions.FinanceDetailSnapshot -> HTML w Action
+renderFinanceOverlay route financeOverlay financeIsMobile financeCreateState financeDetailSnapshot =
   if shouldRenderFinanceOverlay route financeOverlay then
     case financeOverlay of
       Just FinanceCreateChooserOverlay ->
@@ -1367,18 +1387,9 @@ renderFinanceOverlay route financeOverlay financeIsMobile financeCreateState =
           , disabled: fromMaybe true (map _.isSubmitting financeCreateState)
           , label: if fromMaybe false (map _.isSubmitting financeCreateState) then "Saving..." else "Save transaction"
           }
-      Just (FinanceDetailOverlay _) ->
+      Just (FinanceDetailOverlay transactionId) ->
         Modal.renderModal "Détail transaction"
-          [ div [ class_ "finance-detail-overlay text-center" ]
-              [ div [ class_ "fw-semibold mb-2" ] [ text "Ouverture detail transaction prête pour la story 011." ]
-              , div [ class_ "text-muted" ]
-                  [ text
-                      case financeOverlay of
-                        Just (FinanceDetailOverlay transactionId) -> "Transaction: " <> transactionId
-                        _ -> ""
-                  ]
-              ]
-          ]
+          [ renderFinanceDetailOverlayBody transactionId financeDetailSnapshot ]
           CloseFinanceOverlay
           CloseFinanceOverlay
       Nothing ->
@@ -1424,7 +1435,7 @@ openFinanceCreateOverlay = do
   when (routeCanOpenFinanceOverlay state.currentRoute) do
     armFinanceOverlayBackNavigation
     isMobile <- liftEffect isMobileViewport
-    modify_ _ { financeOverlay = Just FinanceCreateChooserOverlay, financeOverlayScrollY = Nothing, financeCreateState = Nothing, financeIsMobile = isMobile }
+    modify_ _ { financeOverlay = Just FinanceCreateChooserOverlay, financeOverlayScrollY = Nothing, financeCreateState = Nothing, financeDetailSnapshot = Nothing, financeIsMobile = isMobile }
 
 closeFinanceOverlayFromBrowserBack :: H.HalogenM State Action ChildSlots Void Aff Unit
 closeFinanceOverlayFromBrowserBack = do
@@ -1454,11 +1465,11 @@ closeFinanceOverlayAndRestoreScroll = do
       case state.financeOverlayScrollY of
         Just scrollY -> do
           liftEffect (WindowScroll.setWindowScrollY scrollY)
-          modify_ _ { financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing }
+          modify_ _ { financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing, financeDetailSnapshot = Nothing }
         Nothing ->
-          modify_ _ { financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing }
+          modify_ _ { financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing, financeDetailSnapshot = Nothing }
     _ ->
-      modify_ _ { financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing }
+      modify_ _ { financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing, financeDetailSnapshot = Nothing }
 
 openFinanceCreateFromIntent :: FinanceCreateIntent -> H.HalogenM State Action ChildSlots Void Aff Unit
 openFinanceCreateFromIntent intent = do
@@ -1469,7 +1480,7 @@ openFinanceCreateFromIntent intent = do
       now <- liftEffect nowDateTime
       let nowLocalDateTime = DateTime.formatLocalDateTime now
       let occurredAtInput = defaultOccurredAtInput launch nowLocalDateTime
-      modify_ _ { financeOverlay = Just (FinanceCreateOverlay launch), financeOverlayScrollY = Nothing, financeCreateState = Just (initialFinanceCreateState launch occurredAtInput) }
+      modify_ _ { financeOverlay = Just (FinanceCreateOverlay launch), financeOverlayScrollY = Nothing, financeCreateState = Just (initialFinanceCreateState launch occurredAtInput), financeDetailSnapshot = Nothing }
       result <- liftAff fetchFinanceCreateAccounts
       handleAction (FinanceCreateAccountsLoaded result)
     _ ->
@@ -1620,6 +1631,80 @@ renderFinanceCreateForm launch maybeCreateState =
   renderAccountOption (FinanceAccount account) =
     option [ value account.id ] [ text account.name ]
 
+renderFinanceDetailOverlayBody :: forall w. String -> Maybe FinanceTransactions.FinanceDetailSnapshot -> HTML w Action
+renderFinanceDetailOverlayBody transactionId maybeSnapshot =
+  case maybeSnapshot of
+    Nothing ->
+      div [ class_ "finance-detail-overlay d-flex flex-column gap-2" ]
+        [ div [ class_ "alert alert-warning mb-0" ] [ text "Transaction unavailable in current snapshot." ]
+        , div [ class_ "small text-muted" ] [ text ("Requested transaction: " <> transactionId) ]
+        ]
+    Just { transaction: FinanceTransaction tx, accountLabel } ->
+      div [ class_ "finance-detail-overlay d-flex flex-column gap-3" ]
+        [ div [ class_ "d-flex flex-column gap-1" ]
+            [ div [ class_ "fw-semibold" ] [ text "Core facts" ]
+            , div [] [ text ("Id: " <> tx.id) ]
+            , div [] [ text ("Amount: " <> show tx.amount) ]
+            , div [] [ text ("Direction: " <> financeDirectionLabel tx.direction) ]
+            , div [] [ text ("Account: " <> accountLabel) ]
+            , div [] [ text ("Occurred at: " <> tx.occurredAt) ]
+            , div [] [ text ("Recorded at: " <> tx.recordedAt) ]
+            ]
+        , div [ class_ "d-flex flex-column gap-1" ]
+            [ div [ class_ "fw-semibold" ] [ text "Categorization" ]
+            , renderCategorization tx.splits tx.category
+            ]
+        , div [ class_ "d-flex flex-column gap-1" ]
+            [ div [ class_ "fw-semibold" ] [ text "Transfer" ]
+            , renderTransfer tx.transfer
+            ]
+        , div [ class_ "d-flex flex-column gap-1" ]
+            [ div [ class_ "fw-semibold" ] [ text "Notes" ]
+            , renderNotes tx.notes
+            ]
+        , div [ class_ "d-flex flex-column gap-1" ]
+            [ div [ class_ "fw-semibold" ] [ text "Adjustment" ]
+            , renderAdjustment tx.adjustment
+            ]
+        ]
+  where
+  renderCategorization splits category =
+    if not (null splits) then
+      ul [ class_ "mb-0 ps-3" ] (map renderSplit splits)
+    else
+      div [] [ text (maybe "Uncategorized" (\(FinanceTransactionCategory entry) -> entry.id) category) ]
+
+  renderSplit (FinanceTransactionSplitRow split) =
+    li [] [ text (split.category <> ": " <> show split.amount) ]
+
+  renderTransfer maybeTransfer =
+    case maybeTransfer of
+      Nothing ->
+        div [] [ text "No transfer link." ]
+      Just (FinanceTransferLink transfer) ->
+        div [] [ text ("Linked transaction: " <> transfer.linkedTransactionId <> " (" <> transfer.linkType <> ")") ]
+
+  renderNotes notes =
+    if null notes then
+      div [] [ text "No notes." ]
+    else
+      ul [ class_ "mb-0 ps-3" ] (map renderNote notes)
+
+  renderNote (FinanceTransactionNote note) =
+    li [] [ text ("#" <> note.id <> ": " <> note.text) ]
+
+  renderAdjustment maybeAdjustment =
+    case maybeAdjustment of
+      Nothing ->
+        div [] [ text "No adjustment context." ]
+      Just (FinanceTransactionAdjustment adjustment) ->
+        div [] [ text ("Adjustment kind: " <> adjustment.kind) ]
+
+financeDirectionLabel :: FinanceTransactionDirection -> String
+financeDirectionLabel = case _ of
+  TransactionSent -> "sent"
+  TransactionReceived -> "received"
+
 renderFinanceToast :: forall w. Maybe String -> HTML w Action
 renderFinanceToast maybeMessage =
   case maybeMessage of
@@ -1632,6 +1717,15 @@ financeCreateStateAfterRouteChange route financeOverlay financeCreateState =
   if routeCanOpenFinanceOverlay route then
     case financeOverlay of
       Just (FinanceCreateOverlay _) -> financeCreateState
+      _ -> Nothing
+  else
+    Nothing
+
+financeDetailSnapshotAfterRouteChange :: Route -> Maybe FinanceOverlay -> Maybe FinanceTransactions.FinanceDetailSnapshot -> Maybe FinanceTransactions.FinanceDetailSnapshot
+financeDetailSnapshotAfterRouteChange route financeOverlay financeDetailSnapshot =
+  if routeCanOpenFinanceOverlay route then
+    case financeOverlay of
+      Just (FinanceDetailOverlay _) -> financeDetailSnapshot
       _ -> Nothing
   else
     Nothing

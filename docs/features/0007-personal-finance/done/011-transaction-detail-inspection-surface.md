@@ -79,3 +79,17 @@ The inspection surface covers these existing read-model facts:
 - Integration tests covering recoverable fallback behavior when the targeted transaction snapshot is unavailable.
 - Integration tests ensuring unsupported fields such as counterparty and description are not assumed by the active detail model.
 - E2E tests verifying that a user can open transaction detail from the ledger, inspect its structure, and close it without losing context.
+
+## Implementation Notes
+- Replaced the detail-overlay placeholder in `Pages.App` with a read-only transaction inspection surface showing:
+  - core facts (`id`, amount, direction, account, occurred-at, recorded-at)
+  - categorization (split breakdown preferred over single category)
+  - transfer link information
+  - note list
+  - adjustment context
+- Kept detail rendering strictly aligned with the current `FinanceTransaction` read model from `004` and intentionally omitted unsupported fields such as counterparty/description.
+- Updated `Pages.FinanceTransactions` to emit a captured `FinanceDetailSnapshot` (selected transaction + resolved account label) when opening detail.
+- Added app-level `financeDetailSnapshot` state so the detail overlay keeps the captured transaction snapshot even if ledger filters or list data change after opening.
+- Added defensive fallback rendering when a detail overlay is open without an available snapshot.
+- Updated E2E detail assertions to validate real detail content instead of story placeholder text.
+- Added unit coverage for detail snapshot construction and unresolved-id behavior in `Test.Pages.FinanceTransactionsSpec`.

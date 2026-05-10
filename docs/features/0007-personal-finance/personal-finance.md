@@ -74,9 +74,9 @@ Help users manage financial operations as explicit, explainable facts: capture t
 - [008 Ledger Indicators And Navigation To Transaction Detail](done/008-ledger-indicators-and-navigation-to-transaction-detail.md) - Add structural ledger indicators and whole-row detail opening while preserving filters, ordering, and scroll position.
 - [009 Contextual Record-Transaction Entrypoints](done/009-contextual-record-transaction-entrypoints.md) - Add a desktop-dropdown/mobile-sheet create chooser for `Expense` and `Income`, with supported ledger context forwarded into create.
 - [010 Record-Transaction Form Validation And Submission UX](done/010-record-transaction-form-validation-and-submission-ux.md) - Add backend-compatible create form validation, idempotent submit lifecycle, desktop repeat-entry behavior, and mobile success toast confirmation.
+- [011 Transaction Detail Inspection Surface](done/011-transaction-detail-inspection-surface.md) - Expose a focused read-only detail surface for inspecting backend-supported transaction facts, categorization state, transfers, splits, notes, and adjustments.
 
 ### Ready
-- [011 Transaction Detail Inspection Surface](ready/011-transaction-detail-inspection-surface.md) - Expose a focused read-only detail surface for inspecting backend-supported transaction facts, categorization state, transfers, splits, notes, and adjustments.
 - [012 Transaction Categorization And Notes Management](ready/012-transaction-categorization-and-notes-management.md) - Allow category refinement and mutable note management from transaction detail while matching current backend capabilities.
 - [013 Transaction Split Editor With Explicit Remainder](ready/013-transaction-split-editor-with-explicit-remainder.md) - Add a split editor with empty unsplit start, live remainder feedback, and save-back-to-detail behavior using the current backend split write shape.
 - [014 Transaction Transfer Linking](ready/014-transaction-transfer-linking.md) - Add in-flow target selection for explicit pairwise transfer linking, with backend-validated linking and linked-state reflection in detail and ledger.
