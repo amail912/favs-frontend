@@ -42,6 +42,7 @@ import Api.Finance
   , deleteTransactionNote
   , getAccounts
   , getCategories
+  , splitTransaction
   , updateTransactionNote
   )
 import Api.FinanceContract
@@ -59,6 +60,7 @@ import Api.FinanceContract
   , FinanceTransactionNote(..)
   , FinanceTransactionSplitRow(..)
   , FinanceTransferLink(..)
+  , SplitFinanceTransaction(..)
   , UpdateFinanceTransactionNote(..)
   )
 import Pages.Admin (component) as Admin
@@ -67,7 +69,7 @@ import Pages.Checklists (component) as Checklists
 import Pages.FinanceTransactions (FinanceDetailSnapshot, Output(..), component) as FinanceTransactions
 import Control.Monad.RWS (get, modify_)
 import Control.Alt ((<|>))
-import Data.Array (any, filter, find, head, length, mapMaybe, null, snoc)
+import Data.Array (any, filter, find, head, length, mapMaybe, mapWithIndex, null, snoc)
 import DOM.HTML.Indexed.ButtonType (ButtonType(..))
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Data.Argonaut.Core (Json, jsonEmptyObject)
@@ -77,15 +79,17 @@ import Data.Argonaut.Encode (class EncodeJson, encodeJson, (:=), (~>))
 import Data.Bifunctor (lmap)
 import Data.Char (toCharCode)
 import Data.Either (Either(..), either)
-import Data.Foldable (all, fold, foldMap)
+import Data.Foldable (all, fold, foldMap, foldl)
 import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.Monoid (guard)
 import Data.Number as Number
+import Data.Ord (abs)
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits as String
 import Data.String.Common as StringCommon
 import Data.String.Pattern (Pattern(..))
+import Data.Traversable (traverse)
 import Helpers.DateTime as DateTime
 import Notifications.LateItems as LateItems
 import Effect (Effect)
@@ -389,6 +393,14 @@ data Action
   | FinanceDetailNoteEditSubmitted String (Either String FinanceTransactionNote)
   | SubmitFinanceDetailNoteDelete String
   | FinanceDetailNoteDeleteSubmitted String (Either String Unit)
+  | OpenFinanceSplitEditor
+  | FinanceSplitRowAmountChanged Int String
+  | FinanceSplitRowCategoryChanged Int String
+  | AddFinanceSplitRow
+  | RemoveFinanceSplitRow Int
+  | SaveFinanceSplit
+  | FinanceSplitSaved (Either String Unit)
+  | CancelFinanceSplitEditor
   | DismissFinanceToast
   | CloseFinanceOverlay
   | NavigateToLateItem String String
@@ -472,7 +484,20 @@ type FinanceDetailMutationState =
   , editingNoteInput :: String
   , isSubmittingNoteEdit :: Boolean
   , deletingNoteIds :: Array String
+  , splitEditor :: Maybe FinanceSplitEditorState
   , hasSuccessfulMutations :: Boolean
+  }
+
+type FinanceSplitEditorState =
+  { transactionTotal :: Number
+  , rows :: Array FinanceSplitEditorRow
+  , submitError :: Maybe String
+  , isSaving :: Boolean
+  }
+
+type FinanceSplitEditorRow =
+  { amountInput :: String
+  , category :: String
   }
 
 data AuthStatus
@@ -1086,6 +1111,197 @@ handleAction (FinanceDetailNoteDeleteSubmitted noteId result) =
                 )
                 st.financeDetailMutationState
           }
+handleAction OpenFinanceSplitEditor = do
+  st <- get
+  case st.financeDetailSnapshot, st.financeDetailMutationState of
+    Just { transaction: FinanceTransaction tx }, Just _ ->
+      modify_ \next ->
+        next
+          { financeDetailMutationState =
+              map
+                ( _
+                    { splitEditor = Just (initialFinanceSplitEditorState tx)
+                    , categoryError = Nothing
+                    , noteError = Nothing
+                    }
+                )
+                next.financeDetailMutationState
+          }
+    _, _ ->
+      pure unit
+handleAction (FinanceSplitRowAmountChanged rowIndex raw) =
+  modify_ \st ->
+    st
+      { financeDetailMutationState =
+          map
+            ( \mutationState ->
+                mutationState
+                  { splitEditor =
+                      map
+                        ( \editor ->
+                            editor { rows = updateSplitRows rowIndex (_ { amountInput = raw }) editor.rows }
+                        )
+                        mutationState.splitEditor
+                  }
+            )
+            st.financeDetailMutationState
+      }
+handleAction (FinanceSplitRowCategoryChanged rowIndex categoryId) =
+  modify_ \st ->
+    st
+      { financeDetailMutationState =
+          map
+            ( \mutationState ->
+                mutationState
+                  { splitEditor =
+                      map
+                        ( \editor ->
+                            editor { rows = updateSplitRows rowIndex (_ { category = categoryId }) editor.rows }
+                        )
+                        mutationState.splitEditor
+                  }
+            )
+            st.financeDetailMutationState
+      }
+handleAction AddFinanceSplitRow =
+  modify_ \st ->
+    st
+      { financeDetailMutationState =
+          map
+            ( \mutationState ->
+                mutationState
+                  { splitEditor =
+                      map
+                        ( \editor ->
+                            let
+                              nextRow =
+                                if null editor.rows then
+                                  { amountInput: show editor.transactionTotal
+                                  , category: if mutationState.categoryDraft == "" then "uncategorized" else mutationState.categoryDraft
+                                  }
+                                else
+                                  { amountInput: "0", category: "uncategorized" }
+                            in
+                              editor { rows = snoc editor.rows nextRow }
+                        )
+                        mutationState.splitEditor
+                  }
+            )
+            st.financeDetailMutationState
+      }
+handleAction (RemoveFinanceSplitRow rowIndex) =
+  modify_ \st ->
+    st
+      { financeDetailMutationState =
+          map
+            ( \mutationState ->
+                mutationState
+                  { splitEditor =
+                      map
+                        ( \editor ->
+                            editor
+                              { rows =
+                                  mapMaybeWithIndex
+                                    ( \idx row ->
+                                        if idx == rowIndex then Nothing else Just row
+                                    )
+                                    editor.rows
+                              }
+                        )
+                        mutationState.splitEditor
+                  }
+            )
+            st.financeDetailMutationState
+      }
+handleAction SaveFinanceSplit = do
+  st <- get
+  case st.financeDetailSnapshot, st.financeDetailMutationState of
+    Just { transaction: FinanceTransaction tx }, Just mutationState ->
+      case mutationState.splitEditor of
+        Nothing -> pure unit
+        Just editor ->
+          if editor.isSaving then
+            pure unit
+          else
+            case buildValidSplitPayload editor of
+              Left validationError ->
+                modify_ \next ->
+                  next
+                    { financeDetailMutationState =
+                        map
+                          ( \current ->
+                              current
+                                { splitEditor =
+                                    map (_ { submitError = Just validationError }) current.splitEditor
+                                }
+                          )
+                          next.financeDetailMutationState
+                    }
+              Right splits -> do
+                modify_ \next ->
+                  next
+                    { financeDetailMutationState =
+                        map
+                          ( \current ->
+                              current
+                                { splitEditor =
+                                    map (_ { isSaving = true, submitError = Nothing }) current.splitEditor
+                                }
+                          )
+                          next.financeDetailMutationState
+                    }
+                result <- liftAff (submitFinanceSplit tx.id splits)
+                handleAction (FinanceSplitSaved result)
+    _, _ ->
+      pure unit
+handleAction (FinanceSplitSaved result) =
+  case result of
+    Left message ->
+      modify_ \st ->
+        st
+          { financeDetailMutationState =
+              map
+                ( \mutationState ->
+                    mutationState
+                      { splitEditor =
+                          map (_ { isSaving = false, submitError = Just message }) mutationState.splitEditor
+                      }
+                )
+                st.financeDetailMutationState
+          }
+    Right _ ->
+      modify_ \st ->
+        let
+          maybeSavedSplits =
+            case st.financeDetailMutationState >>= _.splitEditor of
+              Nothing -> Nothing
+              Just editor ->
+                case buildValidSplitPayload editor of
+                  Left _ -> Nothing
+                  Right splits -> Just splits
+        in
+        st
+          { financeDetailSnapshot =
+              map
+                ( \snapshot ->
+                    case maybeSavedSplits of
+                      Nothing -> snapshot
+                      Just splits -> mapDetailSnapshotTransaction (setTransactionSplits splits) snapshot
+                )
+                st.financeDetailSnapshot
+          , financeDetailMutationState =
+              map
+                (_ { splitEditor = Nothing, hasSuccessfulMutations = true, categoryError = Nothing })
+                st.financeDetailMutationState
+          }
+handleAction CancelFinanceSplitEditor =
+  modify_ \st ->
+    st
+      { financeDetailMutationState =
+          map
+            (_ { splitEditor = Nothing })
+            st.financeDetailMutationState
+      }
 handleAction DismissFinanceToast =
   modify_ _ { financeToastMessage = Nothing }
 handleAction CloseFinanceOverlay = do
@@ -1983,6 +2199,7 @@ renderFinanceDetailOverlayBody transactionId maybeSnapshot maybeMutationState =
             [ div [ class_ "fw-semibold" ] [ text "Categorization" ]
             , renderCategorization tx.splits tx.category
             , renderCategoryMutationControls tx.splits mutationState
+            , renderSplitEditor mutationState
             ]
         , div [ class_ "d-flex flex-column gap-1" ]
             [ div [ class_ "fw-semibold" ] [ text "Transfer" ]
@@ -2023,9 +2240,11 @@ renderFinanceDetailOverlayBody transactionId maybeSnapshot maybeMutationState =
         div [] [ text ("Adjustment kind: " <> adjustment.kind) ]
 
   renderCategoryMutationControls splits mutationState =
-    if not (null splits) then
+    if mutationState.splitEditor /= Nothing then
+      text ""
+    else if not (null splits) then
       div [ class_ "small text-muted finance-detail-overlay__category-disabled" ]
-        [ text "Single-category change is disabled for split transactions. Use split management." ]
+        [ text "Single-category change is disabled for split transactions while split state is active." ]
     else
       div [ class_ "d-flex flex-column gap-2" ]
         [ select
@@ -2043,6 +2262,75 @@ renderFinanceDetailOverlayBody transactionId maybeSnapshot maybeMutationState =
             ]
             [ text (if mutationState.isSubmittingCategory then "Saving..." else "Save category") ]
         ]
+
+  renderSplitEditor mutationState =
+    case mutationState.splitEditor of
+      Nothing ->
+        button
+          [ class_ "btn btn-sm btn-outline-secondary finance-detail-overlay__split-open"
+          , onClick (const OpenFinanceSplitEditor)
+          ]
+          [ text "Edit split" ]
+      Just editor ->
+        let
+          summary = splitSummary editor
+          saveDisabled = editor.isSaving || not summary.isValid
+        in
+          div [ class_ "finance-detail-overlay__split-editor d-flex flex-column gap-2" ]
+            [ div [ class_ "small text-muted" ] [ text ("Total: " <> show editor.transactionTotal) ]
+            , if null editor.rows then
+                div [ class_ "small text-muted finance-detail-overlay__split-empty" ] [ text "No split rows yet. Add a row to start splitting this transaction." ]
+              else
+                div [ class_ "d-flex flex-column gap-2" ] (mapWithIndex (renderSplitRow mutationState.categories editor.isSaving) editor.rows)
+            , div [ class_ "small finance-detail-overlay__split-remainder" ]
+                [ text ("Remainder: " <> show summary.remainder) ]
+            , maybe (text "") (\message -> div [ class_ "alert alert-danger mb-0 finance-detail-overlay__split-error" ] [ text message ]) editor.submitError
+            , div [ class_ "d-flex gap-2" ]
+                [ button
+                    [ class_ "btn btn-sm btn-outline-secondary finance-detail-overlay__split-add-row"
+                    , onClick (const AddFinanceSplitRow)
+                    , disabled editor.isSaving
+                    ]
+                    [ text "Add row" ]
+                , button
+                    [ class_ "btn btn-sm btn-outline-secondary finance-detail-overlay__split-cancel"
+                    , onClick (const CancelFinanceSplitEditor)
+                    , disabled editor.isSaving
+                    ]
+                    [ text "Cancel" ]
+                , button
+                    [ class_ "btn btn-sm btn-primary finance-detail-overlay__split-save"
+                    , onClick (const SaveFinanceSplit)
+                    , disabled saveDisabled
+                    ]
+                    [ text (if editor.isSaving then "Saving..." else "Save split") ]
+                ]
+            , if summary.isValid then text "" else div [ class_ "small text-danger" ] [ text "Split must have at least two rows, positive amounts, valid categories, and exact sum equality." ]
+            ]
+
+  renderSplitRow categories isSaving idx row =
+    div [ class_ "d-flex gap-2 align-items-center finance-detail-overlay__split-row" ]
+      [ input
+          [ class_ "form-control form-control-sm finance-detail-overlay__split-row-amount"
+          , value row.amountInput
+          , onValueChange (FinanceSplitRowAmountChanged idx)
+          , disabled isSaving
+          ]
+      , select
+          [ class_ "form-select form-select-sm finance-detail-overlay__split-row-category"
+          , value row.category
+          , onValueChange (FinanceSplitRowCategoryChanged idx)
+          , disabled isSaving
+          ]
+          ( [ option [ value "" ] [ text "Select category" ] ] <> map renderCategoryOption categories
+          )
+      , button
+          [ class_ "btn btn-sm btn-outline-danger finance-detail-overlay__split-row-remove"
+          , onClick (const (RemoveFinanceSplitRow idx))
+          , disabled isSaving
+          ]
+          [ text "Remove" ]
+      ]
 
   renderCategoryOption (FinanceCategory category) =
     option [ value category.id ] [ text category.id ]
@@ -2143,8 +2431,93 @@ initialFinanceDetailMutationState { transaction: FinanceTransaction tx } =
   , editingNoteInput: ""
   , isSubmittingNoteEdit: false
   , deletingNoteIds: []
+  , splitEditor: Nothing
   , hasSuccessfulMutations: false
   }
+
+initialFinanceSplitEditorState :: forall r. { amount :: Number, splits :: Array FinanceTransactionSplitRow, category :: Maybe FinanceTransactionCategory | r } -> FinanceSplitEditorState
+initialFinanceSplitEditorState tx =
+  { transactionTotal: tx.amount
+  , rows: map splitEditorRowFromTransactionSplit tx.splits
+  , submitError: Nothing
+  , isSaving: false
+  }
+
+splitEditorRowFromTransactionSplit :: FinanceTransactionSplitRow -> FinanceSplitEditorRow
+splitEditorRowFromTransactionSplit (FinanceTransactionSplitRow split) =
+  { amountInput: show split.amount
+  , category: split.category
+  }
+
+updateSplitRows :: Int -> (FinanceSplitEditorRow -> FinanceSplitEditorRow) -> Array FinanceSplitEditorRow -> Array FinanceSplitEditorRow
+updateSplitRows targetIndex updater =
+  mapWithIndex (\idx row -> if idx == targetIndex then updater row else row)
+
+mapMaybeWithIndex :: forall a b. (Int -> a -> Maybe b) -> Array a -> Array b
+mapMaybeWithIndex mapper rows =
+  mapMaybe identity (mapWithIndex mapper rows)
+
+type SplitSummary =
+  { remainder :: Number
+  , isValid :: Boolean
+  }
+
+splitSummary :: FinanceSplitEditorState -> SplitSummary
+splitSummary editor =
+  case buildValidSplitPayload editor of
+    Left _ ->
+      { remainder: editor.transactionTotal - sumSplitRows editor.rows
+      , isValid: false
+      }
+    Right _ ->
+      { remainder: editor.transactionTotal - sumSplitRows editor.rows
+      , isValid: true
+      }
+
+sumSplitRows :: Array FinanceSplitEditorRow -> Number
+sumSplitRows rows =
+  foldl (\acc row -> acc + fromMaybe 0.0 (Number.fromString row.amountInput)) 0.0 rows
+
+buildValidSplitPayload :: FinanceSplitEditorState -> Either String (Array FinanceTransactionSplitRow)
+buildValidSplitPayload editor =
+  if length editor.rows < 2 then
+    Left "At least two split rows are required."
+  else
+    case traverse parseSplitRow editor.rows of
+      Left message -> Left message
+      Right rows ->
+        let
+          total = foldl (\acc (FinanceTransactionSplitRow row) -> acc + row.amount) 0.0 rows
+          remainder = editor.transactionTotal - total
+        in
+          if abs remainder > 0.0 then
+            Left "Split rows must sum exactly to transaction total."
+          else
+            Right rows
+  where
+  parseSplitRow row =
+    if row.category == "" then
+      Left "Each split row requires a category."
+    else
+      case Number.fromString row.amountInput of
+        Nothing -> Left "Each split row requires a valid numeric amount."
+        Just amount ->
+          if amount <= 0.0 then
+            Left "Each split row amount must be strictly positive."
+          else
+            Right (FinanceTransactionSplitRow { amount, category: row.category })
+
+submitFinanceSplit :: String -> Array FinanceTransactionSplitRow -> Aff (Either String Unit)
+submitFinanceSplit transactionId splits = do
+  result <- splitTransaction transactionId (SplitFinanceTransaction { splits })
+  case result of
+    Left err ->
+      pure (Left ("Unable to save split: " <> printError err))
+    Right response ->
+      if statusOk response then
+        pure (Right unit)
+      else
+        pure (Left ("Unable to save split: status " <> show (unwrap response.status)))
 
 fetchFinanceDetailCategories :: Aff (Either String (Array FinanceCategory))
 fetchFinanceDetailCategories = do
@@ -2221,6 +2594,15 @@ setTransactionCategory categoryId (FinanceTransaction tx) =
               Nothing
             else
               Just (FinanceTransactionCategory { id: categoryId })
+        }
+    )
+
+setTransactionSplits :: Array FinanceTransactionSplitRow -> FinanceTransaction -> FinanceTransaction
+setTransactionSplits splits (FinanceTransaction tx) =
+  FinanceTransaction
+    ( tx
+        { splits = splits
+        , category = Nothing
         }
     )
 

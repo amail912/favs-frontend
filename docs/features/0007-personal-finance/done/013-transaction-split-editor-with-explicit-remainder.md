@@ -119,3 +119,22 @@ Do not introduce:
   - create a new split from an unsplit transaction
   - edit an existing split
   - save and verify updated split appears in detail and ledger indicators
+
+## Implementation Notes
+- Added a split editor inside finance transaction detail in `Pages.App`, with:
+  - explicit fixed transaction total
+  - editable split rows (`amount`, `category`)
+  - add/remove row actions
+  - live remainder display (`total - sum(rows)`)
+- Split editor initialization behavior:
+  - already split transactions load existing split rows into the editor
+  - unsplit transactions open with empty rows and guidance text
+  - first added row defaults to full transaction amount and category `uncategorized` when no prior category exists
+- Save validation uses strict raw-number equality for sum consistency:
+  - at least two rows
+  - non-empty categories
+  - strictly positive numeric row amounts
+  - exact `sum == transactionTotal`
+- Successful save posts a full replacement split payload via `/api/v1/finance/transactions/:id/split`, closes the editor back to detail, and updates visible split breakdown in detail state.
+- Split save success marks detail as mutated so ledger reload still happens on detail close under the existing `012` policy.
+- Updated E2E mocks and scenarios to include split API handling and verify unsplit creation plus existing split editing flows.

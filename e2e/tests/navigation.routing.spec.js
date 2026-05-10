@@ -189,6 +189,18 @@ async function mockFinanceLedgerRoutes(page, transactions) {
     }
     await route.continue();
   });
+
+  await page.route("**/api/v1/finance/transactions/*/split", async route => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json; charset=utf-8",
+        body: JSON.stringify({})
+      });
+      return;
+    }
+    await route.continue();
+  });
 }
 
 test("root route redirects to /notes", async ({ page }) => {
@@ -468,6 +480,34 @@ authTest("finance detail supports category and note management", async ({ authen
 
   await page.locator(".finance-detail-overlay__note-delete").first().click();
   await authExpect(financeDetailOverlay(page)).not.toContainText("edited note");
+});
+
+authTest("finance detail split editor supports create and update flow", async ({ authenticatedPage: page }) => {
+  const transactions = buildFinanceTransactions(8);
+  await mockFinanceLedgerRoutes(page, transactions);
+  await page.goto("/finance/transactions");
+
+  await page.locator(".finance-ledger-row").nth(1).click();
+  await page.locator(".finance-detail-overlay__split-open").click();
+  await authExpect(financeDetailOverlay(page)).toContainText("No split rows yet");
+  await page.locator(".finance-detail-overlay__split-add-row").click();
+  await authExpect(page.locator(".finance-detail-overlay__split-row-amount").first()).toHaveValue("11");
+  await authExpect(page.locator(".finance-detail-overlay__split-row-category").first()).toHaveValue("uncategorized");
+
+  await page.locator(".finance-detail-overlay__split-add-row").click();
+  await page.locator(".finance-detail-overlay__split-row-amount").nth(0).fill("5");
+  await page.locator(".finance-detail-overlay__split-row-amount").nth(1).fill("6");
+  await page.locator(".finance-detail-overlay__split-row-category").nth(1).selectOption("personal.clothing");
+  await page.locator(".finance-detail-overlay__split-save").click();
+  await authExpect(financeDetailOverlay(page)).toContainText("uncategorized: 5");
+  await authExpect(financeDetailOverlay(page)).toContainText("personal.clothing: 6");
+
+  await page.locator(".finance-detail-overlay__split-open").click();
+  await page.locator(".finance-detail-overlay__split-row-amount").nth(0).fill("4");
+  await page.locator(".finance-detail-overlay__split-row-amount").nth(1).fill("7");
+  await page.locator(".finance-detail-overlay__split-save").click();
+  await authExpect(financeDetailOverlay(page)).toContainText("uncategorized: 4");
+  await authExpect(financeDetailOverlay(page)).toContainText("personal.clothing: 7");
 });
 
 test("admin user sees admin navigation and can open admin page", async ({ context, page, baseURL }) => {
