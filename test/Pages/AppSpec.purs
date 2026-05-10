@@ -3,10 +3,16 @@ module Test.Pages.AppSpec (spec) where
 import Prelude
 
 import Api.Auth (AuthenticatedProfile(..))
+import Api.FinanceContract
+  ( FinanceTransaction(..)
+  , FinanceTransactionDirection(..)
+  , FinanceTransactionSplitRow
+  , FinanceTransferLink(..)
+  )
 import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
 import Notifications.LateItems as LateItems
-import Pages.App (AuthStatus(..), DefinedRoute(..), FinanceOverlay(..), Route(..), applyLateItemsLoadFailed, applyLateItemsLoaded, beginLateItemsRequest, connectedIdentityLabel, financeLocalPrimaryRoute, initialLateItemsState, isFinanceOverlayOpen, isFinanceRoute, parseRouteString, printRoute, resolveGuardedRoute, shouldRefreshLateItemsForRoute, shouldRenderFinanceOverlay, shouldShowFinanceCreateButton, visibleTabs)
+import Pages.App (AuthStatus(..), DefinedRoute(..), FinanceOverlay(..), Route(..), applyLateItemsLoadFailed, applyLateItemsLoaded, beginLateItemsRequest, connectedIdentityLabel, filterTransferCandidates, financeLocalPrimaryRoute, initialLateItemsState, isFinanceOverlayOpen, isFinanceRoute, parseRouteString, printRoute, resolveGuardedRoute, shouldRefreshLateItemsForRoute, shouldRenderFinanceOverlay, shouldShowFinanceCreateButton, visibleTabs)
 import Pages.Calendar (ItemType(..))
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
@@ -130,6 +136,14 @@ spec =
       activeFailure.isLoading `shouldEqual` false
       activeFailure.activeRequestId `shouldEqual` Nothing
 
+    it "filters transfer candidates by excluding source and already linked transactions" do
+      let
+        source = sampleFinanceTransaction "tx-1" Nothing
+        eligible = sampleFinanceTransaction "tx-2" Nothing
+        linked = sampleFinanceTransaction "tx-3" (Just "tx-99")
+        filtered = filterTransferCandidates "tx-1" [ source, eligible, linked ]
+      map (\(FinanceTransaction tx) -> tx.id) filtered `shouldEqual` [ "tx-2" ]
+
 defaultTransactionsRoute :: DefinedRoute
 defaultTransactionsRoute =
   FinanceTransactions { accountId: Nothing, from: Nothing, to: Nothing }
@@ -160,3 +174,19 @@ mockLateItem id title =
   , endDisplay: "10/04/2026 09:00"
   , plannedDurationMinutes: 60
   }
+
+sampleFinanceTransaction :: String -> Maybe String -> FinanceTransaction
+sampleFinanceTransaction id linkedTransactionId =
+  FinanceTransaction
+    { id
+    , direction: TransactionSent
+    , accountId: "acc-1"
+    , amount: 12.0
+    , occurredAt: "2026-05-01T10:00:00Z"
+    , recordedAt: "2026-05-01T10:05:00Z"
+    , transfer: map (\linkedId -> FinanceTransferLink { linkedTransactionId: linkedId, linkType: "transfer" }) linkedTransactionId
+    , category: Nothing
+    , splits: [] :: Array FinanceTransactionSplitRow
+    , notes: []
+    , adjustment: Nothing
+    }

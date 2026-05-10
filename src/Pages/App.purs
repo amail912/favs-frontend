@@ -13,6 +13,7 @@ module Pages.App
   , beginLateItemsRequest
   , applyLateItemsLoaded
   , applyLateItemsLoadFailed
+  , filterTransferCandidates
   , connectedIdentityLabel
   , parseRouteString
   , printRoute
@@ -42,6 +43,8 @@ import Api.Finance
   , deleteTransactionNote
   , getAccounts
   , getCategories
+  , getTransactions
+  , linkTransfer
   , splitTransaction
   , updateTransactionNote
   )
@@ -59,7 +62,9 @@ import Api.FinanceContract
   , FinanceTransactionDirection(..)
   , FinanceTransactionNote(..)
   , FinanceTransactionSplitRow(..)
+  , FinanceTransactionsQuery(..)
   , FinanceTransferLink(..)
+  , LinkFinanceTransfer(..)
   , SplitFinanceTransaction(..)
   , UpdateFinanceTransactionNote(..)
   )
@@ -401,6 +406,12 @@ data Action
   | SaveFinanceSplit
   | FinanceSplitSaved (Either String Unit)
   | CancelFinanceSplitEditor
+  | OpenFinanceTransferSelector
+  | FinanceTransferCandidatesLoaded (Either String (Array FinanceTransaction))
+  | FinanceTransferTargetChanged String
+  | SubmitFinanceTransferLink
+  | FinanceTransferLinked String (Either String Unit)
+  | CancelFinanceTransferSelector
   | DismissFinanceToast
   | CloseFinanceOverlay
   | NavigateToLateItem String String
@@ -485,6 +496,7 @@ type FinanceDetailMutationState =
   , isSubmittingNoteEdit :: Boolean
   , deletingNoteIds :: Array String
   , splitEditor :: Maybe FinanceSplitEditorState
+  , transferSelector :: Maybe FinanceTransferSelectorState
   , hasSuccessfulMutations :: Boolean
   }
 
@@ -498,6 +510,14 @@ type FinanceSplitEditorState =
 type FinanceSplitEditorRow =
   { amountInput :: String
   , category :: String
+  }
+
+type FinanceTransferSelectorState =
+  { isLoading :: Boolean
+  , candidates :: Array FinanceTransaction
+  , selectedTargetId :: String
+  , submitError :: Maybe String
+  , isSubmitting :: Boolean
   }
 
 data AuthStatus
@@ -1121,6 +1141,7 @@ handleAction OpenFinanceSplitEditor = do
               map
                 ( _
                     { splitEditor = Just (initialFinanceSplitEditorState tx)
+                    , transferSelector = Nothing
                     , categoryError = Nothing
                     , noteError = Nothing
                     }
@@ -1280,26 +1301,167 @@ handleAction (FinanceSplitSaved result) =
                   Left _ -> Nothing
                   Right splits -> Just splits
         in
-        st
-          { financeDetailSnapshot =
-              map
-                ( \snapshot ->
-                    case maybeSavedSplits of
-                      Nothing -> snapshot
-                      Just splits -> mapDetailSnapshotTransaction (setTransactionSplits splits) snapshot
-                )
-                st.financeDetailSnapshot
-          , financeDetailMutationState =
-              map
-                (_ { splitEditor = Nothing, hasSuccessfulMutations = true, categoryError = Nothing })
-                st.financeDetailMutationState
-          }
+          st
+            { financeDetailSnapshot =
+                map
+                  ( \snapshot ->
+                      case maybeSavedSplits of
+                        Nothing -> snapshot
+                        Just splits -> mapDetailSnapshotTransaction (setTransactionSplits splits) snapshot
+                  )
+                  st.financeDetailSnapshot
+            , financeDetailMutationState =
+                map
+                  (_ { splitEditor = Nothing, hasSuccessfulMutations = true, categoryError = Nothing })
+                  st.financeDetailMutationState
+            }
 handleAction CancelFinanceSplitEditor =
   modify_ \st ->
     st
       { financeDetailMutationState =
           map
             (_ { splitEditor = Nothing })
+            st.financeDetailMutationState
+      }
+handleAction OpenFinanceTransferSelector = do
+  st <- get
+  case st.financeDetailSnapshot, st.financeDetailMutationState of
+    Just { transaction: FinanceTransaction tx }, Just _ -> do
+      let
+        query =
+          case st.currentRoute of
+            Route (FinanceTransactions routeState) ->
+              FinanceTransactionsQuery
+                { accountId: routeState.accountId
+                , from: routeState.from
+                , to: routeState.to
+                }
+            _ ->
+              FinanceTransactionsQuery { accountId: Nothing, from: Nothing, to: Nothing }
+      modify_ \next ->
+        next
+          { financeDetailMutationState =
+              map
+                (_ { transferSelector = Just { isLoading: true, candidates: [], selectedTargetId: "", submitError: Nothing, isSubmitting: false } })
+                next.financeDetailMutationState
+          }
+      result <- liftAff (fetchTransferCandidates tx.id query)
+      handleAction (FinanceTransferCandidatesLoaded result)
+    _, _ ->
+      pure unit
+handleAction (FinanceTransferCandidatesLoaded result) =
+  modify_ \st ->
+    st
+      { financeDetailMutationState =
+          map
+            ( \mutationState ->
+                mutationState
+                  { transferSelector =
+                      map
+                        ( \selector ->
+                            case result of
+                              Left message ->
+                                selector { isLoading = false, submitError = Just message }
+                              Right candidates ->
+                                let
+                                  firstTargetId = foldMap (\(FinanceTransaction candidate) -> candidate.id) (head candidates)
+                                in
+                                  selector { isLoading = false, candidates = candidates, selectedTargetId = firstTargetId }
+                        )
+                        mutationState.transferSelector
+                  }
+            )
+            st.financeDetailMutationState
+      }
+handleAction (FinanceTransferTargetChanged targetId) =
+  modify_ \st ->
+    st
+      { financeDetailMutationState =
+          map
+            ( \mutationState ->
+                mutationState
+                  { transferSelector =
+                      map
+                        (_ { selectedTargetId = targetId, submitError = Nothing })
+                        mutationState.transferSelector
+                  }
+            )
+            st.financeDetailMutationState
+      }
+handleAction SubmitFinanceTransferLink = do
+  st <- get
+  case st.financeDetailSnapshot, st.financeDetailMutationState >>= _.transferSelector of
+    Just { transaction: FinanceTransaction tx }, Just selector ->
+      if selector.isSubmitting then
+        pure unit
+      else if selector.selectedTargetId == "" then
+        modify_ \next ->
+          next
+            { financeDetailMutationState =
+                map
+                  ( \mutationState ->
+                      mutationState
+                        { transferSelector =
+                            map
+                              (_ { submitError = Just "Select a target transaction first." })
+                              mutationState.transferSelector
+                        }
+                  )
+                  next.financeDetailMutationState
+            }
+      else do
+        let targetId = selector.selectedTargetId
+        modify_ \next ->
+          next
+            { financeDetailMutationState =
+                map
+                  ( \mutationState ->
+                      mutationState
+                        { transferSelector =
+                            map
+                              (_ { isSubmitting = true, submitError = Nothing })
+                              mutationState.transferSelector
+                        }
+                  )
+                  next.financeDetailMutationState
+            }
+        result <- liftAff (submitFinanceTransferLink tx.id targetId)
+        handleAction (FinanceTransferLinked targetId result)
+    _, _ ->
+      pure unit
+handleAction (FinanceTransferLinked targetId result) =
+  case result of
+    Left message ->
+      modify_ \st ->
+        st
+          { financeDetailMutationState =
+              map
+                ( \mutationState ->
+                    mutationState
+                      { transferSelector =
+                          map
+                            (_ { isSubmitting = false, submitError = Just message })
+                            mutationState.transferSelector
+                      }
+                )
+                st.financeDetailMutationState
+          }
+    Right _ ->
+      modify_ \st ->
+        st
+          { financeDetailSnapshot =
+              map (mapDetailSnapshotTransaction (setTransactionTransfer targetId)) st.financeDetailSnapshot
+          , financeDetailMutationState =
+              map
+                (_ { transferSelector = Nothing, hasSuccessfulMutations = true })
+                st.financeDetailMutationState
+          }
+handleAction CancelFinanceTransferSelector =
+  modify_ \st ->
+    st
+      { financeDetailMutationState =
+          map
+            (_ { transferSelector = Nothing })
             st.financeDetailMutationState
       }
 handleAction DismissFinanceToast =
@@ -2203,7 +2365,7 @@ renderFinanceDetailOverlayBody transactionId maybeSnapshot maybeMutationState =
             ]
         , div [ class_ "d-flex flex-column gap-1" ]
             [ div [ class_ "fw-semibold" ] [ text "Transfer" ]
-            , renderTransfer tx.transfer
+            , renderTransfer tx mutationState
             ]
         , div [ class_ "d-flex flex-column gap-2 finance-detail-overlay__notes" ]
             [ div [ class_ "fw-semibold" ] [ text "Notes" ]
@@ -2225,12 +2387,63 @@ renderFinanceDetailOverlayBody transactionId maybeSnapshot maybeMutationState =
   renderSplit (FinanceTransactionSplitRow split) =
     li [] [ text (split.category <> ": " <> show split.amount) ]
 
-  renderTransfer maybeTransfer =
-    case maybeTransfer of
+  renderTransfer tx mutationState =
+    case tx.transfer of
       Nothing ->
-        div [] [ text "No transfer link." ]
+        div [ class_ "d-flex flex-column gap-2" ]
+          [ div [] [ text "No transfer link." ]
+          , renderTransferMutationControls mutationState
+          ]
       Just (FinanceTransferLink transfer) ->
-        div [] [ text ("Linked transaction: " <> transfer.linkedTransactionId <> " (" <> transfer.linkType <> ")") ]
+        div [ class_ "d-flex flex-column gap-2" ]
+          [ div [] [ text ("Linked transaction: " <> transfer.linkedTransactionId <> " (" <> transfer.linkType <> ")") ] ]
+
+  renderTransferMutationControls mutationState =
+    case mutationState.transferSelector of
+      Nothing ->
+        button
+          [ class_ "btn btn-sm btn-outline-secondary finance-detail-overlay__transfer-open"
+          , onClick (const OpenFinanceTransferSelector)
+          ]
+          [ text "Link transfer" ]
+      Just selector ->
+        let
+          submitDisabled = selector.isLoading || selector.isSubmitting || selector.selectedTargetId == ""
+        in
+          div [ class_ "finance-detail-overlay__transfer-selector d-flex flex-column gap-2" ]
+            [ if selector.isLoading then
+                div [ class_ "small text-muted" ] [ text "Loading transfer candidates..." ]
+              else if null selector.candidates then
+                div [ class_ "small text-muted finance-detail-overlay__transfer-empty" ] [ text "No eligible target transaction in current scope." ]
+              else
+                select
+                  [ class_ "form-select form-select-sm finance-detail-overlay__transfer-target"
+                  , value selector.selectedTargetId
+                  , onValueChange FinanceTransferTargetChanged
+                  , disabled selector.isSubmitting
+                  ]
+                  ( map renderTransferCandidate selector.candidates
+                  )
+            , maybe (text "") (\message -> div [ class_ "alert alert-danger mb-0 finance-detail-overlay__transfer-error" ] [ text message ]) selector.submitError
+            , div [ class_ "d-flex gap-2" ]
+                [ button
+                    [ class_ "btn btn-sm btn-outline-secondary finance-detail-overlay__transfer-cancel"
+                    , onClick (const CancelFinanceTransferSelector)
+                    , disabled selector.isSubmitting
+                    ]
+                    [ text "Cancel" ]
+                , button
+                    [ class_ "btn btn-sm btn-primary finance-detail-overlay__transfer-submit"
+                    , onClick (const SubmitFinanceTransferLink)
+                    , disabled submitDisabled
+                    ]
+                    [ text (if selector.isSubmitting then "Linking..." else "Link transfer") ]
+                ]
+            ]
+    where
+    renderTransferCandidate (FinanceTransaction candidate) =
+      option [ value candidate.id ]
+        [ text (StringCommon.joinWith " | " [ candidate.id, financeDirectionLabel candidate.direction, show candidate.amount, candidate.occurredAt ]) ]
 
   renderAdjustment maybeAdjustment =
     case maybeAdjustment of
@@ -2432,6 +2645,7 @@ initialFinanceDetailMutationState { transaction: FinanceTransaction tx } =
   , isSubmittingNoteEdit: false
   , deletingNoteIds: []
   , splitEditor: Nothing
+  , transferSelector: Nothing
   , hasSuccessfulMutations: false
   }
 
@@ -2519,6 +2733,48 @@ submitFinanceSplit transactionId splits = do
       else
         pure (Left ("Unable to save split: status " <> show (unwrap response.status)))
 
+fetchTransferCandidates :: String -> FinanceTransactionsQuery -> Aff (Either String (Array FinanceTransaction))
+fetchTransferCandidates sourceTransactionId query = do
+  result <- getTransactions query
+  case result of
+    Left err ->
+      pure (Left ("Unable to load transfer candidates: " <> printError err))
+    Right response ->
+      if statusOk response then
+        case (lmap show (decodeJson response.body :: Either _ (Array FinanceTransaction))) of
+          Left decodeError ->
+            pure (Left decodeError)
+          Right transactions ->
+            pure (Right (filterTransferCandidates sourceTransactionId transactions))
+      else
+        pure (Left ("Unable to load transfer candidates: status " <> show (unwrap response.status)))
+
+filterTransferCandidates :: String -> Array FinanceTransaction -> Array FinanceTransaction
+filterTransferCandidates sourceTransactionId =
+  filter
+    ( \(FinanceTransaction tx) ->
+        tx.id /= sourceTransactionId && tx.transfer == Nothing
+    )
+
+submitFinanceTransferLink :: String -> String -> Aff (Either String Unit)
+submitFinanceTransferLink sourceTransactionId targetTransactionId = do
+  result <-
+    linkTransfer
+      ( LinkFinanceTransfer
+          { sourceTransactionId
+          , targetTransactionId
+          , linkType: "transfer"
+          }
+      )
+  case result of
+    Left err ->
+      pure (Left ("Unable to link transfer: " <> printError err))
+    Right response ->
+      if statusOk response then
+        pure (Right unit)
+      else
+        pure (Left ("Unable to link transfer: status " <> show (unwrap response.status)))
+
 fetchFinanceDetailCategories :: Aff (Either String (Array FinanceCategory))
 fetchFinanceDetailCategories = do
   result <- getCategories
@@ -2603,6 +2859,14 @@ setTransactionSplits splits (FinanceTransaction tx) =
     ( tx
         { splits = splits
         , category = Nothing
+        }
+    )
+
+setTransactionTransfer :: String -> FinanceTransaction -> FinanceTransaction
+setTransactionTransfer targetTransactionId (FinanceTransaction tx) =
+  FinanceTransaction
+    ( tx
+        { transfer = Just (FinanceTransferLink { linkedTransactionId: targetTransactionId, linkType: "transfer" })
         }
     )
 

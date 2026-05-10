@@ -102,3 +102,13 @@ Do not introduce:
   - start from detail, choose a target through the selector, create a transfer link
   - attempt an invalid link and verify visible recoverable feedback
   - return to ledger and verify linked-state indicator is visible
+
+## Implementation Notes
+- Added transfer-link mutation state in `Pages.App` with a dedicated in-detail selector lifecycle (`open`, candidate loading, target selection, submit, cancel).
+- Candidate loading uses the current transactions route context and `getTransactions`, then applies light client-side filtering:
+  - excludes the source transaction
+  - excludes already-linked candidates
+- Submit uses backend contract `linkTransfer` with fixed `linkType = "transfer"` and surfaces recoverable error feedback when rejected.
+- Successful linking updates the active detail snapshot transfer state immediately and marks detail mutations as successful so existing reload-on-close behavior refreshes ledger indicators.
+- Added unit coverage for transfer-candidate filtering in `Test.Pages.AppSpec`.
+- Added E2E coverage for rejected and successful transfer-link flows from transaction detail.

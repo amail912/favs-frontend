@@ -201,6 +201,18 @@ async function mockFinanceLedgerRoutes(page, transactions) {
     }
     await route.continue();
   });
+
+  await page.route("**/api/v1/finance/transactions/link", async route => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json; charset=utf-8",
+        body: JSON.stringify({})
+      });
+      return;
+    }
+    await route.continue();
+  });
 }
 
 test("root route redirects to /notes", async ({ page }) => {
@@ -508,6 +520,50 @@ authTest("finance detail split editor supports create and update flow", async ({
   await page.locator(".finance-detail-overlay__split-save").click();
   await authExpect(financeDetailOverlay(page)).toContainText("uncategorized: 4");
   await authExpect(financeDetailOverlay(page)).toContainText("personal.clothing: 7");
+});
+
+authTest("finance detail transfer linking handles rejection and success", async ({ authenticatedPage: page }) => {
+  const transactions = buildFinanceTransactions(8);
+  await mockFinanceLedgerRoutes(page, transactions);
+
+  let firstAttempt = true;
+  await page.route("**/api/v1/finance/transactions/link", async route => {
+    if (route.request().method() === "POST") {
+      if (firstAttempt) {
+        firstAttempt = false;
+        await route.fulfill({
+          status: 409,
+          contentType: "application/json; charset=utf-8",
+          body: JSON.stringify({ error: "invalid transfer pair" })
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json; charset=utf-8",
+        body: JSON.stringify({})
+      });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.goto("/finance/transactions");
+  await page.locator(".finance-ledger-row").first().click();
+  await authExpect(financeDetailOverlay(page)).toContainText("No transfer link.");
+
+  await page.locator(".finance-detail-overlay__transfer-open").click();
+  await authExpect(page.locator(".finance-detail-overlay__transfer-target")).toBeVisible();
+  await authExpect(page.locator(".finance-detail-overlay__transfer-target option")).not.toContainText("tx-1");
+  await authExpect(page.locator(".finance-detail-overlay__transfer-target option")).not.toContainText("tx-2");
+
+  await page.locator(".finance-detail-overlay__transfer-submit").click();
+  await authExpect(financeDetailOverlay(page)).toContainText("Unable to link transfer: status 409");
+  await authExpect(page.locator(".finance-detail-overlay__transfer-target")).toBeVisible();
+
+  await page.locator(".finance-detail-overlay__transfer-submit").click();
+  await authExpect(financeDetailOverlay(page)).toContainText("Linked transaction:");
+  await authExpect(financeDetailOverlay(page)).toContainText("(transfer)");
 });
 
 test("admin user sees admin navigation and can open admin page", async ({ context, page, baseURL }) => {
