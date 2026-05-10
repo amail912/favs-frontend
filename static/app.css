@@ -2293,3 +2293,21 @@ a.nav-link:hover {
   padding: 0.65rem;
   z-index: 40;
 }
+
+.app-toast {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 95;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 12px;
+  padding: 0.65rem 0.8rem;
+  box-shadow: 0 14px 24px rgba(16, 24, 40, 0.22);
+}
+
+.toast-success {
+  background: #198754;
+  color: #fff;
+}

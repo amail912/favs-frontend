@@ -34,6 +34,8 @@ import Affjax.RequestBody (RequestBody(..))
 import Affjax.ResponseFormat (string)
 import Api.Auth (AuthenticatedProfile(..), getAuthProfileResponse, isAdminProfile)
 import Api.Calendar (getItemsResponse, updateItemResponse)
+import Api.Finance (createReceivedTransaction, createSentTransaction, getAccounts)
+import Api.FinanceContract (CreateFinanceTransaction(..), FinanceAccount(..), FinanceAccountsQuery(..), FinanceAccountsStatus(..))
 import Pages.Admin (component) as Admin
 import Pages.Calendar (CalendarRouteOutput(..), CalendarView(..), CalendarItem(..), component, decodeCalendarItemsResponse) as Calendar
 import Pages.Checklists (component) as Checklists
@@ -53,6 +55,7 @@ import Data.Foldable (all, fold, foldMap)
 import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.Monoid (guard)
+import Data.Number as Number
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits as String
 import Data.String.Common as StringCommon
@@ -60,7 +63,7 @@ import Data.String.Pattern (Pattern(..))
 import Helpers.DateTime as DateTime
 import Notifications.LateItems as LateItems
 import Effect (Effect)
-import Effect.Aff (Aff)
+import Effect.Aff (Aff, Milliseconds(..), delay)
 import Effect.Aff.Class (liftAff)
 import Effect.Class (class MonadEffect)
 import Effect.Console as Console
@@ -69,7 +72,7 @@ import Data.Newtype (unwrap)
 import Foreign (Foreign, unsafeToForeign)
 import Halogen (Component, HalogenM, Slot, ComponentHTML, defaultEval, mkComponent, mkEval) as H
 import Halogen (HalogenM, liftEffect, raise, subscribe)
-import Halogen.HTML (HTML, a, button, div, form, h1, input, label, li, nav, slot, slot_, span, text, ul)
+import Halogen.HTML (HTML, a, button, div, form, h1, input, label, li, nav, option, select, slot, slot_, span, text, ul)
 import Halogen.HTML.Events (onClick, onValueChange, onSubmit)
 import Halogen.HTML.Properties (for, type_, name, placeholder, id, value, disabled)
 import Halogen.Subscription as Sub
@@ -80,6 +83,7 @@ import Ui.AuthSession as AuthSession
 import Ui.CreateButton as CreateButton
 import Ui.Modal as Modal
 import Ui.ModalHistory as ModalHistory
+import Ui.Toast as Toast
 import Ui.Utils (class_)
 import Ui.WindowScroll as WindowScroll
 import Web.Event.Event (Event, preventDefault)
@@ -339,8 +343,14 @@ data Action
   | FinanceCreateClicked
   | FinanceCreateExpenseSelected
   | FinanceCreateIncomeSelected
+  | FinanceCreateAccountChanged String
+  | FinanceCreateAmountChanged String
+  | FinanceCreateOccurredAtChanged String
+  | SubmitFinanceCreate
+  | FinanceCreateAccountsLoaded (Either String (Array FinanceAccount))
+  | FinanceCreateSubmitted (Either String Unit)
+  | DismissFinanceToast
   | CloseFinanceOverlay
-  | CompleteFinanceOverlayPlaceholder
   | NavigateToLateItem String String
   | OpenLateItemQuickComplete LateItems.LateItem
   | UpdateLateItemQuickCompleteMinutes String
@@ -384,8 +394,26 @@ type State =
   , authStatus :: AuthStatus
   , financeOverlay :: Maybe FinanceOverlay
   , financeOverlayScrollY :: Maybe Int
+  , financeCreateState :: Maybe FinanceCreateState
+  , financeToastMessage :: Maybe String
+  , financeToastToken :: Int
   , financeIsMobile :: Boolean
   , lateItems :: LateItemsState
+  }
+
+type FinanceCreateState =
+  { launch :: FinanceCreateLaunch
+  , accounts :: Array FinanceAccount
+  , isLoadingAccounts :: Boolean
+  , accountId :: String
+  , amountInput :: String
+  , occurredAtInput :: String
+  , accountError :: Maybe String
+  , amountError :: Maybe String
+  , occurredAtError :: Maybe String
+  , submitError :: Maybe String
+  , isSubmitting :: Boolean
+  , submitKeyNonce :: Int
   }
 
 data AuthStatus
@@ -411,6 +439,9 @@ initialState = const
   , authStatus: AuthUnknown
   , financeOverlay: Nothing
   , financeOverlayScrollY: Nothing
+  , financeCreateState: Nothing
+  , financeToastMessage: Nothing
+  , financeToastToken: 0
   , financeIsMobile: false
   , lateItems: initialLateItemsState
   }
@@ -566,12 +597,17 @@ handleAction :: Action -> H.HalogenM State Action ChildSlots Void Aff Unit
 handleAction (RouteChanged Root) = do
   st <- get
   let route = routeFromDefined Note
-  modify_ _ { currentRoute = route, financeOverlay = Nothing, financeOverlayScrollY = Nothing }
+  modify_ _ { currentRoute = route, financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing }
   navigateWith _.replaceState st.nav route
   when (shouldRefreshLateItemsForRoute st.authStatus route) (handleAction LoadLateItems)
 handleAction (RouteChanged route) = do
   st <- get
-  modify_ _ { currentRoute = route, financeOverlay = financeOverlayAfterRouteChange route st.financeOverlay, financeOverlayScrollY = financeOverlayScrollYAfterRouteChange route st.financeOverlay }
+  modify_ _
+    { currentRoute = route
+    , financeOverlay = financeOverlayAfterRouteChange route st.financeOverlay
+    , financeOverlayScrollY = financeOverlayScrollYAfterRouteChange route st.financeOverlay
+    , financeCreateState = financeCreateStateAfterRouteChange route st.financeOverlay st.financeCreateState
+    }
   shouldNormalize <- liftEffect (shouldCanonicalizeFinanceRoute route)
   when shouldNormalize $
     navigateWith _.replaceState st.nav route
@@ -579,7 +615,7 @@ handleAction (RouteChanged route) = do
 handleAction (NavigateTo route) = do
   st <- get
   let nextRoute = routeFromDefined route
-  modify_ _ { currentRoute = nextRoute, financeOverlay = Nothing, financeOverlayScrollY = Nothing }
+  modify_ _ { currentRoute = nextRoute, financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing }
   navigateWith _.pushState st.nav nextRoute
 handleAction GlobalPopState =
   closeFinanceOverlayFromBrowserBack
@@ -589,10 +625,134 @@ handleAction FinanceCreateExpenseSelected =
   openFinanceCreateFromIntent FinanceCreateExpense
 handleAction FinanceCreateIncomeSelected =
   openFinanceCreateFromIntent FinanceCreateIncome
+handleAction (FinanceCreateAccountChanged raw) =
+  modify_ \st ->
+    st
+      { financeCreateState =
+          map
+            (_ { accountId = raw, accountError = Nothing, submitError = Nothing })
+            st.financeCreateState
+      }
+handleAction (FinanceCreateAmountChanged raw) =
+  modify_ \st ->
+    st
+      { financeCreateState =
+          map
+            (_ { amountInput = raw, amountError = Nothing, submitError = Nothing })
+            st.financeCreateState
+      }
+handleAction (FinanceCreateOccurredAtChanged raw) =
+  modify_ \st ->
+    st
+      { financeCreateState =
+          map
+            (_ { occurredAtInput = raw, occurredAtError = Nothing, submitError = Nothing })
+            st.financeCreateState
+      }
+handleAction SubmitFinanceCreate = do
+  st <- get
+  case st.financeCreateState of
+    Nothing -> pure unit
+    Just createState ->
+      if createState.isSubmitting then
+        pure unit
+      else do
+        let accountError = if createState.accountId == "" then Just "Account is required." else Nothing
+        let amountError = validateFinanceAmount createState.amountInput
+        let occurredAtError = if DateTime.isLocalDateTime createState.occurredAtInput then Nothing else Just "Occurred-at date/time is required."
+        modify_ \next ->
+          next
+            { financeCreateState =
+                map
+                  ( _
+                      { accountError = accountError
+                      , amountError = amountError
+                      , occurredAtError = occurredAtError
+                      , submitError = Nothing
+                      }
+                  )
+                  next.financeCreateState
+            }
+        if accountError /= Nothing || amountError /= Nothing || occurredAtError /= Nothing then
+          pure unit
+        else do
+          let idempotencyKey = buildFinanceIdempotencyKey createState
+          modify_ \next ->
+            next
+              { financeCreateState =
+                  map
+                    ( _
+                        { isSubmitting = true
+                        , submitError = Nothing
+                        , submitKeyNonce = createState.submitKeyNonce + 1
+                        }
+                    )
+                    next.financeCreateState
+              }
+          result <- liftAff (submitFinanceCreate idempotencyKey createState)
+          handleAction (FinanceCreateSubmitted result)
+handleAction (FinanceCreateAccountsLoaded result) =
+  modify_ \st ->
+    st
+      { financeCreateState =
+          map
+            ( \createState ->
+                case result of
+                  Left message ->
+                    createState { isLoadingAccounts = false, submitError = Just message }
+                  Right accounts ->
+                    createState { isLoadingAccounts = false, accounts = accounts }
+            )
+            st.financeCreateState
+      }
+handleAction (FinanceCreateSubmitted result) = do
+  st <- get
+  case st.financeCreateState of
+    Nothing -> pure unit
+    Just _ ->
+      case result of
+        Left message ->
+          modify_ \next ->
+            next
+              { financeCreateState =
+                  map
+                    (_ { isSubmitting = false, submitError = Just message })
+                    next.financeCreateState
+              }
+        Right _ ->
+          if st.financeIsMobile then do
+            modify_ \next ->
+              next
+                { financeOverlay = Nothing
+                , financeCreateState = Nothing
+                , financeToastMessage = Just "Transaction saved."
+                , financeToastToken = next.financeToastToken + 1
+                }
+            latestAfterToast <- get
+            let token = latestAfterToast.financeToastToken
+            liftAff $ delay (Milliseconds 2500.0)
+            latest <- get
+            when (latest.financeToastToken == token) $
+              handleAction DismissFinanceToast
+          else
+            modify_ \next ->
+              next
+                { financeCreateState =
+                    map
+                      ( _
+                          { isSubmitting = false
+                          , amountInput = ""
+                          , accountError = Nothing
+                          , amountError = Nothing
+                          , occurredAtError = Nothing
+                          , submitError = Nothing
+                          }
+                      )
+                      next.financeCreateState
+                }
+handleAction DismissFinanceToast =
+  modify_ _ { financeToastMessage = Nothing }
 handleAction CloseFinanceOverlay = do
-  consumeFinanceOverlayBackNavigation
-  closeFinanceOverlayAndRestoreScroll
-handleAction CompleteFinanceOverlayPlaceholder = do
   consumeFinanceOverlayBackNavigation
   closeFinanceOverlayAndRestoreScroll
 handleAction (NavigateToLateItem day itemId) = do
@@ -825,20 +985,20 @@ handleAction (HandleAuthOutput (SignupSucceeded username)) = do
   st <- get
   liftEffect $ AuthSession.storeAuthenticatedUsername username
   let route = routeFromDefined Signin
-  modify_ _ { currentRoute = route, authStatus = Unauthenticated, financeOverlay = Nothing }
+  modify_ _ { currentRoute = route, authStatus = Unauthenticated, financeOverlay = Nothing, financeCreateState = Nothing }
   navigateWith _.pushState st.nav route
 handleAction (HandleAuthOutput (SigninSucceeded profile@(AuthenticatedProfile { username }))) = do
   st <- get
   liftEffect $ AuthSession.storeAuthenticatedUsername username
   let route = routeFromDefined Note
-  modify_ _ { currentRoute = route, authStatus = Authenticated profile, financeOverlay = Nothing, financeOverlayScrollY = Nothing }
+  modify_ _ { currentRoute = route, authStatus = Authenticated profile, financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing }
   navigateWith _.pushState st.nav route
 handleAction SignOut = do
   st <- get
   _ <- liftAff $ post string "/api/signout" Nothing
   liftEffect AuthSession.clearAuthenticatedUsername
   let route = routeFromDefined Signin
-  modify_ _ { authStatus = Unauthenticated, currentRoute = route, financeOverlay = Nothing, financeOverlayScrollY = Nothing }
+  modify_ _ { authStatus = Unauthenticated, currentRoute = route, financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing }
   navigateWith _.pushState st.nav route
 handleAction InitializeRouting = do
   nav <- liftEffect makeInterface
@@ -888,7 +1048,7 @@ handleAction LoadMoreLateItems =
     st { lateItems = st.lateItems { visibleLimit = st.lateItems.visibleLimit + 50 } }
 
 render :: State -> H.ComponentHTML Action ChildSlots Aff
-render { currentRoute, authStatus, financeOverlay, lateItems, financeIsMobile } =
+render { currentRoute, authStatus, financeOverlay, lateItems, financeIsMobile, financeCreateState, financeToastMessage } =
   case resolveGuardedRoute authStatus currentRoute of
     Nothing -> renderLoading authStatus
     Just (Route route) ->
@@ -896,12 +1056,13 @@ render { currentRoute, authStatus, financeOverlay, lateItems, financeIsMobile } 
         ( fold
             [ [ h1 [ class_ "text-center" ] [ text "FAVS" ]
               , authMenu authStatus
+              , renderFinanceToast financeToastMessage
               , renderLateItemsChip authStatus route lateItems
               ]
             , if route /= Signup && route /= Signin then [ nav [ class_ "row nav nav-tabs" ] (map (\tabRoute -> tab tabRoute route) (visibleTabs authStatus)) ] else []
             , [ currentComponent authStatus financeOverlay route ]
             , [ renderLateItemsSheet authStatus route lateItems ]
-            , [ renderFinanceOverlay route financeOverlay financeIsMobile ]
+            , [ renderFinanceOverlay route financeOverlay financeIsMobile financeCreateState ]
             ]
         )
     Just Root -> text ""
@@ -1183,8 +1344,8 @@ renderFinancePlaceholderBody route =
         ]
     ]
 
-renderFinanceOverlay :: forall w. DefinedRoute -> Maybe FinanceOverlay -> Boolean -> HTML w Action
-renderFinanceOverlay route financeOverlay financeIsMobile =
+renderFinanceOverlay :: forall w. DefinedRoute -> Maybe FinanceOverlay -> Boolean -> Maybe FinanceCreateState -> HTML w Action
+renderFinanceOverlay route financeOverlay financeIsMobile financeCreateState =
   if shouldRenderFinanceOverlay route financeOverlay then
     case financeOverlay of
       Just FinanceCreateChooserOverlay ->
@@ -1200,17 +1361,11 @@ renderFinanceOverlay route financeOverlay financeIsMobile =
           text ""
       Just (FinanceCreateOverlay launch) ->
         Modal.renderModalWithActionState "Nouvelle transaction"
-          [ div [ class_ "finance-create-overlay text-center" ]
-              [ div [ class_ "fw-semibold mb-2" ] [ text "Create transaction entrypoint ready for story 010." ]
-              , div [ class_ "text-muted finance-create-overlay__direction" ] [ text ("Direction: " <> launch.direction) ]
-              , div [ class_ "text-muted finance-create-overlay__account" ] [ text ("AccountId: " <> fromMaybe "-" launch.accountId) ]
-              , div [ class_ "text-muted finance-create-overlay__occurred-at-day-seed" ] [ text ("OccurredAtDaySeed: " <> fromMaybe "-" launch.occurredAtDaySeed) ]
-              ]
-          ]
+          [ renderFinanceCreateForm launch financeCreateState ]
           CloseFinanceOverlay
-          { action: CompleteFinanceOverlayPlaceholder
-          , disabled: false
-          , label: "Simuler l'enregistrement"
+          { action: SubmitFinanceCreate
+          , disabled: fromMaybe true (map _.isSubmitting financeCreateState)
+          , label: if fromMaybe false (map _.isSubmitting financeCreateState) then "Saving..." else "Save transaction"
           }
       Just (FinanceDetailOverlay _) ->
         Modal.renderModal "Détail transaction"
@@ -1269,7 +1424,7 @@ openFinanceCreateOverlay = do
   when (routeCanOpenFinanceOverlay state.currentRoute) do
     armFinanceOverlayBackNavigation
     isMobile <- liftEffect isMobileViewport
-    modify_ _ { financeOverlay = Just FinanceCreateChooserOverlay, financeOverlayScrollY = Nothing, financeIsMobile = isMobile }
+    modify_ _ { financeOverlay = Just FinanceCreateChooserOverlay, financeOverlayScrollY = Nothing, financeCreateState = Nothing, financeIsMobile = isMobile }
 
 closeFinanceOverlayFromBrowserBack :: H.HalogenM State Action ChildSlots Void Aff Unit
 closeFinanceOverlayFromBrowserBack = do
@@ -1299,11 +1454,11 @@ closeFinanceOverlayAndRestoreScroll = do
       case state.financeOverlayScrollY of
         Just scrollY -> do
           liftEffect (WindowScroll.setWindowScrollY scrollY)
-          modify_ _ { financeOverlay = Nothing, financeOverlayScrollY = Nothing }
+          modify_ _ { financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing }
         Nothing ->
-          modify_ _ { financeOverlay = Nothing, financeOverlayScrollY = Nothing }
+          modify_ _ { financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing }
     _ ->
-      modify_ _ { financeOverlay = Nothing, financeOverlayScrollY = Nothing }
+      modify_ _ { financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing }
 
 openFinanceCreateFromIntent :: FinanceCreateIntent -> H.HalogenM State Action ChildSlots Void Aff Unit
 openFinanceCreateFromIntent intent = do
@@ -1311,7 +1466,12 @@ openFinanceCreateFromIntent intent = do
   case state.currentRoute of
     Route (FinanceTransactions transactionsRoute) -> do
       let launch = buildFinanceCreateLaunch intent transactionsRoute
-      modify_ _ { financeOverlay = Just (FinanceCreateOverlay launch), financeOverlayScrollY = Nothing }
+      now <- liftEffect nowDateTime
+      let nowLocalDateTime = DateTime.formatLocalDateTime now
+      let occurredAtInput = defaultOccurredAtInput launch nowLocalDateTime
+      modify_ _ { financeOverlay = Just (FinanceCreateOverlay launch), financeOverlayScrollY = Nothing, financeCreateState = Just (initialFinanceCreateState launch occurredAtInput) }
+      result <- liftAff fetchFinanceCreateAccounts
+      handleAction (FinanceCreateAccountsLoaded result)
     _ ->
       pure unit
 
@@ -1336,6 +1496,145 @@ fromToDaySeed fromValue =
 isMobileViewport :: Effect Boolean
 isMobileViewport =
   map (_ <= 768) (window >>= Window.innerWidth)
+
+initialFinanceCreateState :: FinanceCreateLaunch -> String -> FinanceCreateState
+initialFinanceCreateState launch occurredAtInput =
+  { launch
+  , accounts: []
+  , isLoadingAccounts: true
+  , accountId: fromMaybe "" launch.accountId
+  , amountInput: ""
+  , occurredAtInput
+  , accountError: Nothing
+  , amountError: Nothing
+  , occurredAtError: Nothing
+  , submitError: Nothing
+  , isSubmitting: false
+  , submitKeyNonce: 0
+  }
+
+defaultOccurredAtInput :: FinanceCreateLaunch -> String -> String
+defaultOccurredAtInput launch nowLocalDateTime =
+  fromMaybe nowLocalDateTime (map (_ <> "T12:00") launch.occurredAtDaySeed)
+
+fetchFinanceCreateAccounts :: Aff (Either String (Array FinanceAccount))
+fetchFinanceCreateAccounts = do
+  response <- getAccounts (FinanceAccountsQuery { status: Just AccountsActive })
+  case response of
+    Left err ->
+      pure (Left ("Unable to load accounts: " <> printError err))
+    Right successResponse ->
+      if statusOk successResponse then
+        pure (lmap show (decodeJson successResponse.body :: Either _ (Array FinanceAccount)))
+      else
+        pure (Left ("Unable to load accounts: status " <> show (unwrap successResponse.status)))
+
+validateFinanceAmount :: String -> Maybe String
+validateFinanceAmount raw =
+  if raw == "" then
+    Just "Amount is required."
+  else
+    case Number.fromString raw of
+      Nothing -> Just "Amount must be a valid number."
+      Just amount ->
+        if amount > 0.0 then Nothing else Just "Amount must be strictly positive."
+
+buildFinanceIdempotencyKey :: FinanceCreateState -> String
+buildFinanceIdempotencyKey createState =
+  fold
+    [ "finance-create-"
+    , createState.launch.direction
+    , "-"
+    , createState.accountId
+    , "-"
+    , createState.occurredAtInput
+    , "-"
+    , show createState.submitKeyNonce
+    ]
+
+submitFinanceCreate :: String -> FinanceCreateState -> Aff (Either String Unit)
+submitFinanceCreate idempotencyKey createState =
+  case Number.fromString createState.amountInput of
+    Nothing ->
+      pure (Left "Amount parsing failed.")
+    Just amount -> do
+      let payload = CreateFinanceTransaction { accountId: createState.accountId, amount, occurredAt: Just createState.occurredAtInput }
+      response <- case createState.launch.direction of
+        "sent" -> createSentTransaction idempotencyKey payload
+        _ -> createReceivedTransaction idempotencyKey payload
+      case response of
+        Left err ->
+          pure (Left ("Unable to save transaction: " <> printError err))
+        Right successResponse ->
+          if statusOk successResponse then
+            pure (Right unit)
+          else
+            pure (Left ("Unable to save transaction: status " <> show (unwrap successResponse.status)))
+
+renderFinanceCreateForm :: forall w. FinanceCreateLaunch -> Maybe FinanceCreateState -> HTML w Action
+renderFinanceCreateForm launch maybeCreateState =
+  case maybeCreateState of
+    Nothing ->
+      div [ class_ "finance-create-overlay text-center text-muted" ] [ text "Preparing create form..." ]
+    Just createState ->
+      div [ class_ "finance-create-overlay d-flex flex-column gap-2" ]
+        [ div [ class_ "finance-create-overlay__direction fw-semibold" ] [ text ("Direction: " <> launch.direction) ]
+        , div [ class_ "d-flex flex-column gap-1" ]
+            [ label [ class_ "form-label mb-0" ] [ text "Account" ]
+            , select
+                [ class_ "form-select finance-create-overlay__account-input"
+                , value createState.accountId
+                , disabled (createState.isSubmitting || createState.isLoadingAccounts)
+                , onValueChange FinanceCreateAccountChanged
+                ]
+                ( [ option [ value "" ] [ text "Select account" ] ]
+                    <> map renderAccountOption createState.accounts
+                )
+            , maybe (text "") (\message -> div [ class_ "text-danger small" ] [ text message ]) createState.accountError
+            ]
+        , div [ class_ "d-flex flex-column gap-1" ]
+            [ label [ class_ "form-label mb-0" ] [ text "Amount" ]
+            , input
+                [ class_ "form-control finance-create-overlay__amount-input"
+                , type_ InputNumber
+                , value createState.amountInput
+                , disabled createState.isSubmitting
+                , onValueChange FinanceCreateAmountChanged
+                ]
+            , maybe (text "") (\message -> div [ class_ "text-danger small" ] [ text message ]) createState.amountError
+            ]
+        , div [ class_ "d-flex flex-column gap-1" ]
+            [ label [ class_ "form-label mb-0" ] [ text "Occurred at" ]
+            , input
+                [ class_ "form-control finance-create-overlay__occurred-at-input"
+                , type_ InputDatetimeLocal
+                , value createState.occurredAtInput
+                , disabled createState.isSubmitting
+                , onValueChange FinanceCreateOccurredAtChanged
+                ]
+            , maybe (text "") (\message -> div [ class_ "text-danger small" ] [ text message ]) createState.occurredAtError
+            ]
+        , maybe (text "") (\message -> div [ class_ "alert alert-danger mb-0 finance-create-overlay__submit-error" ] [ text message ]) createState.submitError
+        ]
+  where
+  renderAccountOption (FinanceAccount account) =
+    option [ value account.id ] [ text account.name ]
+
+renderFinanceToast :: forall w. Maybe String -> HTML w Action
+renderFinanceToast maybeMessage =
+  case maybeMessage of
+    Nothing -> text ""
+    Just message ->
+      Toast.render "toast-success" message DismissFinanceToast
+
+financeCreateStateAfterRouteChange :: Route -> Maybe FinanceOverlay -> Maybe FinanceCreateState -> Maybe FinanceCreateState
+financeCreateStateAfterRouteChange route financeOverlay financeCreateState =
+  if routeCanOpenFinanceOverlay route then
+    case financeOverlay of
+      Just (FinanceCreateOverlay _) -> financeCreateState
+      _ -> Nothing
+  else
+    Nothing
 
 tabLabel :: DefinedRoute -> String
 tabLabel Note = "Notes"

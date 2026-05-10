@@ -132,3 +132,12 @@ Do not introduce:
   - successful `Expense` create on desktop, followed by immediate second entry
   - successful `Income` create on mobile with close plus toast confirmation
   - failed create preserves entered values and supports retry
+
+## Implementation Notes
+- Implemented the create form flow in `Pages.App` with a dedicated `FinanceCreateState` that tracks account/amount/occurred-at inputs, validation errors, in-flight submit state, and a nonce-backed idempotency key.
+- Connected submit to `Api.Finance.createSentTransaction` / `createReceivedTransaction` and account loading to `Api.Finance.getAccounts` with `AccountsActive` filter.
+- Added local validation for required account, required positive numeric amount, and valid `datetime-local` occurred-at input format.
+- Desktop success behavior keeps the overlay open, clears amount, and resets errors while preserving direction/account/date defaults.
+- Mobile success behavior closes the overlay and displays a transient success toast on the finance workspace.
+- Added a minimal reusable toast primitive in `src/Ui/Toast.purs` and finance-scoped toast styling in `static/app.css`.
+- Updated E2E navigation tests to cover create submission behavior and mobile toast confirmation.

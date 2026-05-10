@@ -316,8 +316,10 @@ authTest("finance create overlay success closes without changing route", async (
   await financeCreateIncomeAction(page).click();
   await authExpect(financeCreateOverlay(page)).toBeVisible();
 
-  await page.getByRole("button", { name: "Simuler l'enregistrement" }).click();
-  await authExpect(financeCreateOverlay(page)).toHaveCount(0);
+  await page.locator(".finance-create-overlay__amount-input").fill("42");
+  await page.getByRole("button", { name: "Save transaction" }).click();
+  await authExpect(financeCreateOverlay(page)).toBeVisible();
+  await authExpect(page.locator(".finance-create-overlay__amount-input")).toHaveValue("");
   await authExpect(page).toHaveURL(/\/finance\/transactions$/);
   await authExpect(financeTransactionsTab(page)).toHaveClass(/active/);
 });
@@ -328,8 +330,22 @@ authTest("finance create chooser forwards direction and ledger context", async (
   await authExpect(financeCreateChooser(page)).toBeVisible();
   await financeCreateExpenseAction(page).click();
   await authExpect(financeCreateOverlay(page)).toContainText("Direction: sent");
-  await authExpect(financeCreateOverlay(page)).toContainText("AccountId: acc-1");
-  await authExpect(financeCreateOverlay(page)).toContainText("OccurredAtDaySeed: 2026-05-20");
+  await authExpect(page.locator(".finance-create-overlay__account-input")).toHaveValue("acc-1");
+  await authExpect(page.locator(".finance-create-overlay__occurred-at-input")).toHaveValue("2026-05-20T12:00");
+});
+
+authTest("finance create mobile success closes overlay and shows transient toast", async ({ authenticatedPage: page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/finance/transactions");
+  await financeCreateButton(page).click();
+  await authExpect(financeCreateChooser(page)).toBeVisible();
+  await financeCreateExpenseAction(page).click();
+  await authExpect(financeCreateOverlay(page)).toBeVisible();
+
+  await page.locator(".finance-create-overlay__amount-input").fill("21");
+  await page.getByRole("button", { name: "Save transaction" }).click();
+  await authExpect(financeCreateOverlay(page)).toHaveCount(0);
+  await authExpect(page.locator(".app-toast")).toContainText("Transaction saved.");
 });
 
 authTest("finance ledger row opens detail overlay and preserves route and scroll on close", async ({ authenticatedPage: page }) => {
