@@ -34,12 +34,24 @@ import Affjax.RequestBody (RequestBody(..))
 import Affjax.ResponseFormat (string)
 import Api.Auth (AuthenticatedProfile(..), getAuthProfileResponse, isAdminProfile)
 import Api.Calendar (getItemsResponse, updateItemResponse)
-import Api.Finance (createReceivedTransaction, createSentTransaction, getAccounts)
+import Api.Finance
+  ( categorizeTransaction
+  , createReceivedTransaction
+  , createSentTransaction
+  , createTransactionNote
+  , deleteTransactionNote
+  , getAccounts
+  , getCategories
+  , updateTransactionNote
+  )
 import Api.FinanceContract
-  ( CreateFinanceTransaction(..)
+  ( CategorizeFinanceTransaction(..)
+  , CreateFinanceTransaction(..)
+  , CreateFinanceTransactionNote(..)
   , FinanceAccount(..)
   , FinanceAccountsQuery(..)
   , FinanceAccountsStatus(..)
+  , FinanceCategory(..)
   , FinanceTransaction(..)
   , FinanceTransactionAdjustment(..)
   , FinanceTransactionCategory(..)
@@ -47,13 +59,15 @@ import Api.FinanceContract
   , FinanceTransactionNote(..)
   , FinanceTransactionSplitRow(..)
   , FinanceTransferLink(..)
+  , UpdateFinanceTransactionNote(..)
   )
 import Pages.Admin (component) as Admin
 import Pages.Calendar (CalendarRouteOutput(..), CalendarView(..), CalendarItem(..), component, decodeCalendarItemsResponse) as Calendar
 import Pages.Checklists (component) as Checklists
 import Pages.FinanceTransactions (FinanceDetailSnapshot, Output(..), component) as FinanceTransactions
 import Control.Monad.RWS (get, modify_)
-import Data.Array (find, head, length, mapMaybe, null)
+import Control.Alt ((<|>))
+import Data.Array (any, filter, find, head, length, mapMaybe, null, snoc)
 import DOM.HTML.Indexed.ButtonType (ButtonType(..))
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Data.Argonaut.Core (Json, jsonEmptyObject)
@@ -110,7 +124,7 @@ type ChildSlots =
   ( notes :: OpaqueSlot Unit
   , checklists :: OpaqueSlot Unit
   , calendar :: CalendarSlot Unit
-  , financeTransactions :: TransactionsSlot Unit
+  , financeTransactions :: TransactionsSlot Int
   , admin :: OpaqueSlot Unit
   , signup :: AuthSlot Unit
   , signin :: AuthSlot Unit
@@ -361,6 +375,20 @@ data Action
   | SubmitFinanceCreate
   | FinanceCreateAccountsLoaded (Either String (Array FinanceAccount))
   | FinanceCreateSubmitted (Either String Unit)
+  | FinanceDetailCategoriesLoaded (Either String (Array FinanceCategory))
+  | FinanceDetailCategoryChanged String
+  | SubmitFinanceDetailCategory
+  | FinanceDetailCategorySubmitted String (Either String Unit)
+  | FinanceDetailNewNoteChanged String
+  | SubmitFinanceDetailNewNote
+  | FinanceDetailNewNoteSubmitted String (Either String FinanceTransactionNote)
+  | StartFinanceDetailNoteEdit String
+  | FinanceDetailNoteEditChanged String
+  | CancelFinanceDetailNoteEdit
+  | SubmitFinanceDetailNoteEdit
+  | FinanceDetailNoteEditSubmitted String (Either String FinanceTransactionNote)
+  | SubmitFinanceDetailNoteDelete String
+  | FinanceDetailNoteDeleteSubmitted String (Either String Unit)
   | DismissFinanceToast
   | CloseFinanceOverlay
   | NavigateToLateItem String String
@@ -408,6 +436,8 @@ type State =
   , financeOverlayScrollY :: Maybe Int
   , financeCreateState :: Maybe FinanceCreateState
   , financeDetailSnapshot :: Maybe FinanceTransactions.FinanceDetailSnapshot
+  , financeDetailMutationState :: Maybe FinanceDetailMutationState
+  , financeTransactionsSlotNonce :: Int
   , financeToastMessage :: Maybe String
   , financeToastToken :: Int
   , financeIsMobile :: Boolean
@@ -427,6 +457,22 @@ type FinanceCreateState =
   , submitError :: Maybe String
   , isSubmitting :: Boolean
   , submitKeyNonce :: Int
+  }
+
+type FinanceDetailMutationState =
+  { categories :: Array FinanceCategory
+  , isLoadingCategories :: Boolean
+  , categoryDraft :: String
+  , categoryError :: Maybe String
+  , isSubmittingCategory :: Boolean
+  , newNoteInput :: String
+  , noteError :: Maybe String
+  , isAddingNote :: Boolean
+  , editingNoteId :: Maybe String
+  , editingNoteInput :: String
+  , isSubmittingNoteEdit :: Boolean
+  , deletingNoteIds :: Array String
+  , hasSuccessfulMutations :: Boolean
   }
 
 data AuthStatus
@@ -454,6 +500,8 @@ initialState = const
   , financeOverlayScrollY: Nothing
   , financeCreateState: Nothing
   , financeDetailSnapshot: Nothing
+  , financeDetailMutationState: Nothing
+  , financeTransactionsSlotNonce: 0
   , financeToastMessage: Nothing
   , financeToastToken: 0
   , financeIsMobile: false
@@ -611,7 +659,7 @@ handleAction :: Action -> H.HalogenM State Action ChildSlots Void Aff Unit
 handleAction (RouteChanged Root) = do
   st <- get
   let route = routeFromDefined Note
-  modify_ _ { currentRoute = route, financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing, financeDetailSnapshot = Nothing }
+  modify_ _ { currentRoute = route, financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing, financeDetailSnapshot = Nothing, financeDetailMutationState = Nothing }
   navigateWith _.replaceState st.nav route
   when (shouldRefreshLateItemsForRoute st.authStatus route) (handleAction LoadLateItems)
 handleAction (RouteChanged route) = do
@@ -622,6 +670,7 @@ handleAction (RouteChanged route) = do
     , financeOverlayScrollY = financeOverlayScrollYAfterRouteChange route st.financeOverlay
     , financeCreateState = financeCreateStateAfterRouteChange route st.financeOverlay st.financeCreateState
     , financeDetailSnapshot = financeDetailSnapshotAfterRouteChange route st.financeOverlay st.financeDetailSnapshot
+    , financeDetailMutationState = financeDetailMutationStateAfterRouteChange route st.financeOverlay st.financeDetailMutationState
     }
   shouldNormalize <- liftEffect (shouldCanonicalizeFinanceRoute route)
   when shouldNormalize $
@@ -630,7 +679,7 @@ handleAction (RouteChanged route) = do
 handleAction (NavigateTo route) = do
   st <- get
   let nextRoute = routeFromDefined route
-  modify_ _ { currentRoute = nextRoute, financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing, financeDetailSnapshot = Nothing }
+  modify_ _ { currentRoute = nextRoute, financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing, financeDetailSnapshot = Nothing, financeDetailMutationState = Nothing }
   navigateWith _.pushState st.nav nextRoute
 handleAction GlobalPopState =
   closeFinanceOverlayFromBrowserBack
@@ -741,6 +790,7 @@ handleAction (FinanceCreateSubmitted result) = do
                 { financeOverlay = Nothing
                 , financeCreateState = Nothing
                 , financeDetailSnapshot = Nothing
+                , financeDetailMutationState = Nothing
                 , financeToastMessage = Just "Transaction saved."
                 , financeToastToken = next.financeToastToken + 1
                 }
@@ -766,6 +816,276 @@ handleAction (FinanceCreateSubmitted result) = do
                       )
                       next.financeCreateState
                 }
+handleAction (FinanceDetailCategoriesLoaded result) =
+  modify_ \st ->
+    st
+      { financeDetailMutationState =
+          map
+            ( \detailState ->
+                case result of
+                  Left message ->
+                    detailState { isLoadingCategories = false, categoryError = Just message }
+                  Right categories ->
+                    detailState { isLoadingCategories = false, categories = categories }
+            )
+            st.financeDetailMutationState
+      }
+handleAction (FinanceDetailCategoryChanged categoryId) =
+  modify_ \st ->
+    st
+      { financeDetailMutationState =
+          map
+            (_ { categoryDraft = categoryId, categoryError = Nothing })
+            st.financeDetailMutationState
+      }
+handleAction SubmitFinanceDetailCategory = do
+  st <- get
+  case st.financeDetailSnapshot, st.financeDetailMutationState of
+    Just { transaction: FinanceTransaction tx }, Just detailState ->
+      if detailState.isSubmittingCategory then
+        pure unit
+      else if not (null tx.splits) then
+        modify_ \next ->
+          next
+            { financeDetailMutationState =
+                map
+                  (_ { categoryError = Just "Split transactions must be edited through split management." })
+                  next.financeDetailMutationState
+            }
+      else if detailState.categoryDraft == "" then
+        modify_ \next ->
+          next
+            { financeDetailMutationState =
+                map
+                  (_ { categoryError = Just "Category is required." })
+                  next.financeDetailMutationState
+            }
+      else do
+        let previousCategory = foldMap (\(FinanceTransactionCategory entry) -> entry.id) tx.category
+        let draft = detailState.categoryDraft
+        modify_ \next ->
+          next
+            { financeDetailSnapshot = map (mapDetailSnapshotTransaction (setTransactionCategory draft)) next.financeDetailSnapshot
+            , financeDetailMutationState = map (_ { isSubmittingCategory = true, categoryError = Nothing }) next.financeDetailMutationState
+            }
+        result <- liftAff (submitFinanceDetailCategory tx.id draft)
+        handleAction (FinanceDetailCategorySubmitted previousCategory result)
+    _, _ ->
+      pure unit
+handleAction (FinanceDetailCategorySubmitted previousCategory result) =
+  case result of
+    Left message ->
+      modify_ \st ->
+        st
+          { financeDetailSnapshot = map (mapDetailSnapshotTransaction (setTransactionCategory previousCategory)) st.financeDetailSnapshot
+          , financeDetailMutationState =
+              map
+                (_ { isSubmittingCategory = false, categoryError = Just message, categoryDraft = previousCategory })
+                st.financeDetailMutationState
+          }
+    Right _ ->
+      modify_ \st ->
+        st
+          { financeDetailMutationState =
+              map
+                (_ { isSubmittingCategory = false, hasSuccessfulMutations = true })
+                st.financeDetailMutationState
+          }
+handleAction (FinanceDetailNewNoteChanged raw) =
+  modify_ \st ->
+    st
+      { financeDetailMutationState =
+          map
+            (_ { newNoteInput = raw, noteError = Nothing })
+            st.financeDetailMutationState
+      }
+handleAction SubmitFinanceDetailNewNote = do
+  st <- get
+  case st.financeDetailSnapshot, st.financeDetailMutationState of
+    Just { transaction: FinanceTransaction tx }, Just detailState ->
+      if detailState.isAddingNote then
+        pure unit
+      else if StringCommon.trim detailState.newNoteInput == "" then
+        modify_ \next ->
+          next
+            { financeDetailMutationState =
+                map
+                  (_ { noteError = Just "Note text is required." })
+                  next.financeDetailMutationState
+            }
+      else do
+        let noteText = StringCommon.trim detailState.newNoteInput
+        modify_ \next ->
+          next
+            { financeDetailMutationState =
+                map
+                  (_ { isAddingNote = true, noteError = Nothing })
+                  next.financeDetailMutationState
+            }
+        result <- liftAff (submitFinanceDetailNewNote tx.id noteText)
+        handleAction (FinanceDetailNewNoteSubmitted noteText result)
+    _, _ ->
+      pure unit
+handleAction (FinanceDetailNewNoteSubmitted noteText result) =
+  case result of
+    Left message ->
+      modify_ \st ->
+        st
+          { financeDetailMutationState =
+              map
+                (_ { isAddingNote = false, noteError = Just message, newNoteInput = noteText })
+                st.financeDetailMutationState
+          }
+    Right note ->
+      modify_ \st ->
+        st
+          { financeDetailSnapshot = map (mapDetailSnapshotTransaction (appendTransactionNote note)) st.financeDetailSnapshot
+          , financeDetailMutationState =
+              map
+                (_ { isAddingNote = false, noteError = Nothing, newNoteInput = "", hasSuccessfulMutations = true })
+                st.financeDetailMutationState
+          }
+handleAction (StartFinanceDetailNoteEdit noteId) = do
+  st <- get
+  case findDetailNoteText noteId st.financeDetailSnapshot of
+    Nothing -> pure unit
+    Just noteText ->
+      modify_ \next ->
+        next
+          { financeDetailMutationState =
+              map
+                (_ { editingNoteId = Just noteId, editingNoteInput = noteText, noteError = Nothing })
+                next.financeDetailMutationState
+          }
+handleAction (FinanceDetailNoteEditChanged raw) =
+  modify_ \st ->
+    st
+      { financeDetailMutationState =
+          map
+            (_ { editingNoteInput = raw, noteError = Nothing })
+            st.financeDetailMutationState
+      }
+handleAction CancelFinanceDetailNoteEdit =
+  modify_ \st ->
+    st
+      { financeDetailMutationState =
+          map
+            (_ { editingNoteId = Nothing, editingNoteInput = "", isSubmittingNoteEdit = false })
+            st.financeDetailMutationState
+      }
+handleAction SubmitFinanceDetailNoteEdit = do
+  st <- get
+  case st.financeDetailSnapshot, st.financeDetailMutationState of
+    Just { transaction: FinanceTransaction tx }, Just detailState ->
+      case detailState.editingNoteId of
+        Nothing -> pure unit
+        Just noteId ->
+          if detailState.isSubmittingNoteEdit then
+            pure unit
+          else if StringCommon.trim detailState.editingNoteInput == "" then
+            modify_ \next ->
+              next
+                { financeDetailMutationState =
+                    map
+                      (_ { noteError = Just "Note text is required." })
+                      next.financeDetailMutationState
+                }
+          else
+            case findDetailNoteText noteId st.financeDetailSnapshot of
+              Nothing -> pure unit
+              Just previousText -> do
+                let nextText = StringCommon.trim detailState.editingNoteInput
+                modify_ \next ->
+                  next
+                    { financeDetailSnapshot = map (mapDetailSnapshotTransaction (replaceTransactionNoteText noteId nextText)) next.financeDetailSnapshot
+                    , financeDetailMutationState =
+                        map
+                          (_ { isSubmittingNoteEdit = true, noteError = Nothing })
+                          next.financeDetailMutationState
+                    }
+                result <- liftAff (submitFinanceDetailNoteEdit tx.id noteId nextText)
+                handleAction (FinanceDetailNoteEditSubmitted previousText result)
+    _, _ ->
+      pure unit
+handleAction (FinanceDetailNoteEditSubmitted previousText result) = do
+  st <- get
+  case st.financeDetailMutationState of
+    Nothing -> pure unit
+    Just detailState ->
+      case detailState.editingNoteId of
+        Nothing -> pure unit
+        Just noteId ->
+          case result of
+            Left message ->
+              modify_ \next ->
+                next
+                  { financeDetailSnapshot = map (mapDetailSnapshotTransaction (replaceTransactionNoteText noteId previousText)) next.financeDetailSnapshot
+                  , financeDetailMutationState =
+                      map
+                        (_ { isSubmittingNoteEdit = false, noteError = Just message, editingNoteInput = previousText })
+                        next.financeDetailMutationState
+                  }
+            Right updatedNote ->
+              modify_ \next ->
+                next
+                  { financeDetailSnapshot = map (mapDetailSnapshotTransaction (replaceTransactionNote updatedNote)) next.financeDetailSnapshot
+                  , financeDetailMutationState =
+                      map
+                        (_ { isSubmittingNoteEdit = false, editingNoteId = Nothing, editingNoteInput = "", noteError = Nothing, hasSuccessfulMutations = true })
+                        next.financeDetailMutationState
+                  }
+handleAction (SubmitFinanceDetailNoteDelete noteId) = do
+  st <- get
+  case st.financeDetailSnapshot, st.financeDetailMutationState of
+    Just { transaction: FinanceTransaction tx }, Just detailState ->
+      if any (_ == noteId) detailState.deletingNoteIds then
+        pure unit
+      else do
+        modify_ \next ->
+          next
+            { financeDetailSnapshot = map (mapDetailSnapshotTransaction (removeTransactionNote noteId)) next.financeDetailSnapshot
+            , financeDetailMutationState =
+                map
+                  ( \current ->
+                      current
+                        { deletingNoteIds = current.deletingNoteIds <> [ noteId ]
+                        , noteError = Nothing
+                        }
+                  )
+                  next.financeDetailMutationState
+            }
+        result <- liftAff (submitFinanceDetailNoteDelete tx.id noteId)
+        handleAction (FinanceDetailNoteDeleteSubmitted noteId result)
+    _, _ ->
+      pure unit
+handleAction (FinanceDetailNoteDeleteSubmitted noteId result) =
+  case result of
+    Left message ->
+      modify_ \st ->
+        st
+          { financeDetailMutationState =
+              map
+                ( \detailState ->
+                    detailState
+                      { deletingNoteIds = filter (_ /= noteId) detailState.deletingNoteIds
+                      , noteError = Just message
+                      }
+                )
+                st.financeDetailMutationState
+          }
+    Right _ ->
+      modify_ \st ->
+        st
+          { financeDetailMutationState =
+              map
+                ( \detailState ->
+                    detailState
+                      { deletingNoteIds = filter (_ /= noteId) detailState.deletingNoteIds
+                      , hasSuccessfulMutations = true
+                      }
+                )
+                st.financeDetailMutationState
+          }
 handleAction DismissFinanceToast =
   modify_ _ { financeToastMessage = Nothing }
 handleAction CloseFinanceOverlay = do
@@ -996,29 +1316,33 @@ handleAction (HandleTransactionsOutput (FinanceTransactions.OpenTransactionDetai
   when (routeCanOpenFinanceOverlay state.currentRoute) do
     scrollY <- liftEffect WindowScroll.getWindowScrollY
     armFinanceOverlayBackNavigation
+    let initialMutationState = initialFinanceDetailMutationState detailSnapshot
     modify_ _
       { financeOverlay = Just (FinanceDetailOverlay detailSnapshot.transactionId)
       , financeOverlayScrollY = Just scrollY
       , financeDetailSnapshot = Just detailSnapshot
+      , financeDetailMutationState = Just initialMutationState
       }
+    categoriesResult <- liftAff fetchFinanceDetailCategories
+    handleAction (FinanceDetailCategoriesLoaded categoriesResult)
 handleAction (HandleAuthOutput (SignupSucceeded username)) = do
   st <- get
   liftEffect $ AuthSession.storeAuthenticatedUsername username
   let route = routeFromDefined Signin
-  modify_ _ { currentRoute = route, authStatus = Unauthenticated, financeOverlay = Nothing, financeCreateState = Nothing, financeDetailSnapshot = Nothing }
+  modify_ _ { currentRoute = route, authStatus = Unauthenticated, financeOverlay = Nothing, financeCreateState = Nothing, financeDetailSnapshot = Nothing, financeDetailMutationState = Nothing }
   navigateWith _.pushState st.nav route
 handleAction (HandleAuthOutput (SigninSucceeded profile@(AuthenticatedProfile { username }))) = do
   st <- get
   liftEffect $ AuthSession.storeAuthenticatedUsername username
   let route = routeFromDefined Note
-  modify_ _ { currentRoute = route, authStatus = Authenticated profile, financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing, financeDetailSnapshot = Nothing }
+  modify_ _ { currentRoute = route, authStatus = Authenticated profile, financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing, financeDetailSnapshot = Nothing, financeDetailMutationState = Nothing }
   navigateWith _.pushState st.nav route
 handleAction SignOut = do
   st <- get
   _ <- liftAff $ post string "/api/signout" Nothing
   liftEffect AuthSession.clearAuthenticatedUsername
   let route = routeFromDefined Signin
-  modify_ _ { authStatus = Unauthenticated, currentRoute = route, financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing, financeDetailSnapshot = Nothing }
+  modify_ _ { authStatus = Unauthenticated, currentRoute = route, financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing, financeDetailSnapshot = Nothing, financeDetailMutationState = Nothing }
   navigateWith _.pushState st.nav route
 handleAction InitializeRouting = do
   nav <- liftEffect makeInterface
@@ -1068,7 +1392,7 @@ handleAction LoadMoreLateItems =
     st { lateItems = st.lateItems { visibleLimit = st.lateItems.visibleLimit + 50 } }
 
 render :: State -> H.ComponentHTML Action ChildSlots Aff
-render { currentRoute, authStatus, financeOverlay, lateItems, financeIsMobile, financeCreateState, financeDetailSnapshot, financeToastMessage } =
+render { currentRoute, authStatus, financeOverlay, lateItems, financeIsMobile, financeCreateState, financeDetailSnapshot, financeDetailMutationState, financeToastMessage, financeTransactionsSlotNonce } =
   case resolveGuardedRoute authStatus currentRoute of
     Nothing -> renderLoading authStatus
     Just (Route route) ->
@@ -1080,9 +1404,9 @@ render { currentRoute, authStatus, financeOverlay, lateItems, financeIsMobile, f
               , renderLateItemsChip authStatus route lateItems
               ]
             , if route /= Signup && route /= Signin then [ nav [ class_ "row nav nav-tabs" ] (map (\tabRoute -> tab tabRoute route) (visibleTabs authStatus)) ] else []
-            , [ currentComponent authStatus financeOverlay route ]
+            , [ currentComponent authStatus financeOverlay route financeTransactionsSlotNonce ]
             , [ renderLateItemsSheet authStatus route lateItems ]
-            , [ renderFinanceOverlay route financeOverlay financeIsMobile financeCreateState financeDetailSnapshot ]
+            , [ renderFinanceOverlay route financeOverlay financeIsMobile financeCreateState financeDetailSnapshot financeDetailMutationState ]
             ]
         )
     Just Root -> text ""
@@ -1268,10 +1592,10 @@ renderLateItemsQuickCompletePrompt quickCompletePrompt =
             ]
         ]
 
-currentComponent :: AuthStatus -> Maybe FinanceOverlay -> DefinedRoute -> H.ComponentHTML Action ChildSlots Aff
-currentComponent _ _ Note = slot_ (Proxy :: _ "notes") unit Notes.component unit
-currentComponent _ _ Checklist = slot_ (Proxy :: _ "checklists") unit Checklists.component unit
-currentComponent _ _ (Calendar calendarRoute) =
+currentComponent :: AuthStatus -> Maybe FinanceOverlay -> DefinedRoute -> Int -> H.ComponentHTML Action ChildSlots Aff
+currentComponent _ _ Note _ = slot_ (Proxy :: _ "notes") unit Notes.component unit
+currentComponent _ _ Checklist _ = slot_ (Proxy :: _ "checklists") unit Checklists.component unit
+currentComponent _ _ (Calendar calendarRoute) _ =
   slot
     (Proxy :: _ "calendar")
     unit
@@ -1280,16 +1604,16 @@ currentComponent _ _ (Calendar calendarRoute) =
     , initialItemId: calendarRoute.item
     }
     HandleCalendarOutput
-currentComponent _ financeOverlay (FinanceTransactions transactionsRoute) = renderFinanceShell (FinanceTransactions transactionsRoute) financeOverlay
-currentComponent _ financeOverlay FinanceReports = renderFinanceShell FinanceReports financeOverlay
-currentComponent (Authenticated (AuthenticatedProfile { username })) _ Admin =
+currentComponent _ financeOverlay (FinanceTransactions transactionsRoute) financeTransactionsSlotNonce = renderFinanceShell (FinanceTransactions transactionsRoute) financeOverlay financeTransactionsSlotNonce
+currentComponent _ financeOverlay FinanceReports financeTransactionsSlotNonce = renderFinanceShell FinanceReports financeOverlay financeTransactionsSlotNonce
+currentComponent (Authenticated (AuthenticatedProfile { username })) _ Admin _ =
   slot_ (Proxy :: _ "admin") unit Admin.component { currentUsername: username }
-currentComponent _ _ Admin = text ""
-currentComponent _ _ Signup = slot (Proxy :: _ "signup") unit signupComponent unit HandleAuthOutput
-currentComponent _ _ Signin = slot (Proxy :: _ "signin") unit signinComponent unit HandleAuthOutput
+currentComponent _ _ Admin _ = text ""
+currentComponent _ _ Signup _ = slot (Proxy :: _ "signup") unit signupComponent unit HandleAuthOutput
+currentComponent _ _ Signin _ = slot (Proxy :: _ "signin") unit signinComponent unit HandleAuthOutput
 
-renderFinanceShell :: DefinedRoute -> Maybe FinanceOverlay -> H.ComponentHTML Action ChildSlots Aff
-renderFinanceShell route financeOverlay =
+renderFinanceShell :: DefinedRoute -> Maybe FinanceOverlay -> Int -> H.ComponentHTML Action ChildSlots Aff
+renderFinanceShell route financeOverlay financeTransactionsSlotNonce =
   div [ class_ "finance-shell py-3" ]
     [ div [ class_ "finance-shell__header d-flex justify-content-between align-items-center gap-3 mb-3 flex-wrap" ]
         [ nav [ class_ "finance-shell__nav nav nav-pills gap-2" ]
@@ -1305,7 +1629,7 @@ renderFinanceShell route financeOverlay =
     , if routeKey route == routeKey (FinanceTransactions transactionsRoute) then
         slot
           (Proxy :: _ "financeTransactions")
-          unit
+          financeTransactionsSlotNonce
           FinanceTransactions.component
           transactionsRoute
           HandleTransactionsOutput
@@ -1364,8 +1688,8 @@ renderFinancePlaceholderBody route =
         ]
     ]
 
-renderFinanceOverlay :: forall w. DefinedRoute -> Maybe FinanceOverlay -> Boolean -> Maybe FinanceCreateState -> Maybe FinanceTransactions.FinanceDetailSnapshot -> HTML w Action
-renderFinanceOverlay route financeOverlay financeIsMobile financeCreateState financeDetailSnapshot =
+renderFinanceOverlay :: forall w. DefinedRoute -> Maybe FinanceOverlay -> Boolean -> Maybe FinanceCreateState -> Maybe FinanceTransactions.FinanceDetailSnapshot -> Maybe FinanceDetailMutationState -> HTML w Action
+renderFinanceOverlay route financeOverlay financeIsMobile financeCreateState financeDetailSnapshot financeDetailMutationState =
   if shouldRenderFinanceOverlay route financeOverlay then
     case financeOverlay of
       Just FinanceCreateChooserOverlay ->
@@ -1389,7 +1713,7 @@ renderFinanceOverlay route financeOverlay financeIsMobile financeCreateState fin
           }
       Just (FinanceDetailOverlay transactionId) ->
         Modal.renderModal "Détail transaction"
-          [ renderFinanceDetailOverlayBody transactionId financeDetailSnapshot ]
+          [ renderFinanceDetailOverlayBody transactionId financeDetailSnapshot financeDetailMutationState ]
           CloseFinanceOverlay
           CloseFinanceOverlay
       Nothing ->
@@ -1435,7 +1759,7 @@ openFinanceCreateOverlay = do
   when (routeCanOpenFinanceOverlay state.currentRoute) do
     armFinanceOverlayBackNavigation
     isMobile <- liftEffect isMobileViewport
-    modify_ _ { financeOverlay = Just FinanceCreateChooserOverlay, financeOverlayScrollY = Nothing, financeCreateState = Nothing, financeDetailSnapshot = Nothing, financeIsMobile = isMobile }
+    modify_ _ { financeOverlay = Just FinanceCreateChooserOverlay, financeOverlayScrollY = Nothing, financeCreateState = Nothing, financeDetailSnapshot = Nothing, financeDetailMutationState = Nothing, financeIsMobile = isMobile }
 
 closeFinanceOverlayFromBrowserBack :: H.HalogenM State Action ChildSlots Void Aff Unit
 closeFinanceOverlayFromBrowserBack = do
@@ -1460,16 +1784,18 @@ financeOverlayScrollYAfterRouteChange _ _ = Nothing
 closeFinanceOverlayAndRestoreScroll :: H.HalogenM State Action ChildSlots Void Aff Unit
 closeFinanceOverlayAndRestoreScroll = do
   state <- get
+  let shouldReloadLedger = fromMaybe false (map _.hasSuccessfulMutations state.financeDetailMutationState)
+  let nextSlotNonce = if shouldReloadLedger then state.financeTransactionsSlotNonce + 1 else state.financeTransactionsSlotNonce
   case state.financeOverlay of
     Just (FinanceDetailOverlay _) ->
       case state.financeOverlayScrollY of
         Just scrollY -> do
           liftEffect (WindowScroll.setWindowScrollY scrollY)
-          modify_ _ { financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing, financeDetailSnapshot = Nothing }
+          modify_ _ { financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing, financeDetailSnapshot = Nothing, financeDetailMutationState = Nothing, financeTransactionsSlotNonce = nextSlotNonce }
         Nothing ->
-          modify_ _ { financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing, financeDetailSnapshot = Nothing }
+          modify_ _ { financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing, financeDetailSnapshot = Nothing, financeDetailMutationState = Nothing, financeTransactionsSlotNonce = nextSlotNonce }
     _ ->
-      modify_ _ { financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing, financeDetailSnapshot = Nothing }
+      modify_ _ { financeOverlay = Nothing, financeOverlayScrollY = Nothing, financeCreateState = Nothing, financeDetailSnapshot = Nothing, financeDetailMutationState = Nothing, financeTransactionsSlotNonce = nextSlotNonce }
 
 openFinanceCreateFromIntent :: FinanceCreateIntent -> H.HalogenM State Action ChildSlots Void Aff Unit
 openFinanceCreateFromIntent intent = do
@@ -1480,7 +1806,7 @@ openFinanceCreateFromIntent intent = do
       now <- liftEffect nowDateTime
       let nowLocalDateTime = DateTime.formatLocalDateTime now
       let occurredAtInput = defaultOccurredAtInput launch nowLocalDateTime
-      modify_ _ { financeOverlay = Just (FinanceCreateOverlay launch), financeOverlayScrollY = Nothing, financeCreateState = Just (initialFinanceCreateState launch occurredAtInput), financeDetailSnapshot = Nothing }
+      modify_ _ { financeOverlay = Just (FinanceCreateOverlay launch), financeOverlayScrollY = Nothing, financeCreateState = Just (initialFinanceCreateState launch occurredAtInput), financeDetailSnapshot = Nothing, financeDetailMutationState = Nothing }
       result <- liftAff fetchFinanceCreateAccounts
       handleAction (FinanceCreateAccountsLoaded result)
     _ ->
@@ -1631,15 +1957,18 @@ renderFinanceCreateForm launch maybeCreateState =
   renderAccountOption (FinanceAccount account) =
     option [ value account.id ] [ text account.name ]
 
-renderFinanceDetailOverlayBody :: forall w. String -> Maybe FinanceTransactions.FinanceDetailSnapshot -> HTML w Action
-renderFinanceDetailOverlayBody transactionId maybeSnapshot =
-  case maybeSnapshot of
-    Nothing ->
+renderFinanceDetailOverlayBody :: forall w. String -> Maybe FinanceTransactions.FinanceDetailSnapshot -> Maybe FinanceDetailMutationState -> HTML w Action
+renderFinanceDetailOverlayBody transactionId maybeSnapshot maybeMutationState =
+  case maybeSnapshot, maybeMutationState of
+    Nothing, _ ->
       div [ class_ "finance-detail-overlay d-flex flex-column gap-2" ]
         [ div [ class_ "alert alert-warning mb-0" ] [ text "Transaction unavailable in current snapshot." ]
         , div [ class_ "small text-muted" ] [ text ("Requested transaction: " <> transactionId) ]
         ]
-    Just { transaction: FinanceTransaction tx, accountLabel } ->
+    _, Nothing ->
+      div [ class_ "finance-detail-overlay d-flex flex-column gap-2" ]
+        [ div [ class_ "alert alert-warning mb-0" ] [ text "Transaction detail state unavailable." ] ]
+    Just { transaction: FinanceTransaction tx, accountLabel }, Just mutationState ->
       div [ class_ "finance-detail-overlay d-flex flex-column gap-3" ]
         [ div [ class_ "d-flex flex-column gap-1" ]
             [ div [ class_ "fw-semibold" ] [ text "Core facts" ]
@@ -1650,22 +1979,24 @@ renderFinanceDetailOverlayBody transactionId maybeSnapshot =
             , div [] [ text ("Occurred at: " <> tx.occurredAt) ]
             , div [] [ text ("Recorded at: " <> tx.recordedAt) ]
             ]
-        , div [ class_ "d-flex flex-column gap-1" ]
+        , div [ class_ "d-flex flex-column gap-2 finance-detail-overlay__category" ]
             [ div [ class_ "fw-semibold" ] [ text "Categorization" ]
             , renderCategorization tx.splits tx.category
+            , renderCategoryMutationControls tx.splits mutationState
             ]
         , div [ class_ "d-flex flex-column gap-1" ]
             [ div [ class_ "fw-semibold" ] [ text "Transfer" ]
             , renderTransfer tx.transfer
             ]
-        , div [ class_ "d-flex flex-column gap-1" ]
+        , div [ class_ "d-flex flex-column gap-2 finance-detail-overlay__notes" ]
             [ div [ class_ "fw-semibold" ] [ text "Notes" ]
-            , renderNotes tx.notes
+            , renderNotesMutation tx.notes mutationState
             ]
         , div [ class_ "d-flex flex-column gap-1" ]
             [ div [ class_ "fw-semibold" ] [ text "Adjustment" ]
             , renderAdjustment tx.adjustment
             ]
+        , maybe (text "") (\message -> div [ class_ "alert alert-danger mb-0 finance-detail-overlay__mutation-error" ] [ text message ]) (mutationState.categoryError <|> mutationState.noteError)
         ]
   where
   renderCategorization splits category =
@@ -1684,21 +2015,107 @@ renderFinanceDetailOverlayBody transactionId maybeSnapshot =
       Just (FinanceTransferLink transfer) ->
         div [] [ text ("Linked transaction: " <> transfer.linkedTransactionId <> " (" <> transfer.linkType <> ")") ]
 
-  renderNotes notes =
-    if null notes then
-      div [] [ text "No notes." ]
-    else
-      ul [ class_ "mb-0 ps-3" ] (map renderNote notes)
-
-  renderNote (FinanceTransactionNote note) =
-    li [] [ text ("#" <> note.id <> ": " <> note.text) ]
-
   renderAdjustment maybeAdjustment =
     case maybeAdjustment of
       Nothing ->
         div [] [ text "No adjustment context." ]
       Just (FinanceTransactionAdjustment adjustment) ->
         div [] [ text ("Adjustment kind: " <> adjustment.kind) ]
+
+  renderCategoryMutationControls splits mutationState =
+    if not (null splits) then
+      div [ class_ "small text-muted finance-detail-overlay__category-disabled" ]
+        [ text "Single-category change is disabled for split transactions. Use split management." ]
+    else
+      div [ class_ "d-flex flex-column gap-2" ]
+        [ select
+            [ class_ "form-select form-select-sm finance-detail-overlay__category-select"
+            , value mutationState.categoryDraft
+            , onValueChange FinanceDetailCategoryChanged
+            , disabled (mutationState.isSubmittingCategory || mutationState.isLoadingCategories)
+            ]
+            ( [ option [ value "" ] [ text "Select category" ] ] <> map renderCategoryOption mutationState.categories
+            )
+        , button
+            [ class_ "btn btn-sm btn-outline-primary finance-detail-overlay__category-submit"
+            , onClick (const SubmitFinanceDetailCategory)
+            , disabled (mutationState.isSubmittingCategory || mutationState.isLoadingCategories)
+            ]
+            [ text (if mutationState.isSubmittingCategory then "Saving..." else "Save category") ]
+        ]
+
+  renderCategoryOption (FinanceCategory category) =
+    option [ value category.id ] [ text category.id ]
+
+  renderNotesMutation notes mutationState =
+    div [ class_ "d-flex flex-column gap-2" ]
+      [ div [ class_ "d-flex gap-2" ]
+          [ input
+              [ class_ "form-control form-control-sm finance-detail-overlay__new-note-input"
+              , value mutationState.newNoteInput
+              , placeholder "Add note"
+              , onValueChange FinanceDetailNewNoteChanged
+              , disabled mutationState.isAddingNote
+              ]
+          , button
+              [ class_ "btn btn-sm btn-outline-primary finance-detail-overlay__new-note-submit"
+              , onClick (const SubmitFinanceDetailNewNote)
+              , disabled mutationState.isAddingNote
+              ]
+              [ text (if mutationState.isAddingNote then "Adding..." else "Add") ]
+          ]
+      , if null notes then
+          div [ class_ "small text-muted" ] [ text "No notes." ]
+        else
+          ul [ class_ "mb-0 ps-3 d-flex flex-column gap-2" ] (map (renderNoteMutation mutationState) notes)
+      ]
+
+  renderNoteMutation mutationState (FinanceTransactionNote note) =
+    let
+      isEditing = mutationState.editingNoteId == Just note.id
+      isDeleting = any (_ == note.id) mutationState.deletingNoteIds
+    in
+      li [ class_ "d-flex flex-column gap-1 finance-detail-overlay__note-row" ]
+        [ if isEditing then
+            div [ class_ "d-flex gap-2" ]
+              [ input
+                  [ class_ "form-control form-control-sm finance-detail-overlay__edit-note-input"
+                  , value mutationState.editingNoteInput
+                  , onValueChange FinanceDetailNoteEditChanged
+                  , disabled mutationState.isSubmittingNoteEdit
+                  ]
+              , button
+                  [ class_ "btn btn-sm btn-outline-primary finance-detail-overlay__edit-note-save"
+                  , onClick (const SubmitFinanceDetailNoteEdit)
+                  , disabled mutationState.isSubmittingNoteEdit
+                  ]
+                  [ text (if mutationState.isSubmittingNoteEdit then "Saving..." else "Save") ]
+              , button
+                  [ class_ "btn btn-sm btn-outline-secondary finance-detail-overlay__edit-note-cancel"
+                  , onClick (const CancelFinanceDetailNoteEdit)
+                  , disabled mutationState.isSubmittingNoteEdit
+                  ]
+                  [ text "Cancel" ]
+              ]
+          else
+            div [ class_ "d-flex justify-content-between align-items-center gap-2" ]
+              [ span [] [ text ("#" <> note.id <> ": " <> note.text) ]
+              , div [ class_ "d-flex gap-1" ]
+                  [ button
+                      [ class_ "btn btn-sm btn-outline-secondary finance-detail-overlay__note-edit"
+                      , onClick (const (StartFinanceDetailNoteEdit note.id))
+                      , disabled isDeleting
+                      ]
+                      [ text "Edit" ]
+                  , button
+                      [ class_ "btn btn-sm btn-outline-danger finance-detail-overlay__note-delete"
+                      , onClick (const (SubmitFinanceDetailNoteDelete note.id))
+                      , disabled isDeleting
+                      ]
+                      [ text (if isDeleting then "Deleting..." else "Delete") ]
+                  ]
+              ]
+        ]
 
 financeDirectionLabel :: FinanceTransactionDirection -> String
 financeDirectionLabel = case _ of
@@ -1712,11 +2129,174 @@ renderFinanceToast maybeMessage =
     Just message ->
       Toast.render "toast-success" message DismissFinanceToast
 
+initialFinanceDetailMutationState :: FinanceTransactions.FinanceDetailSnapshot -> FinanceDetailMutationState
+initialFinanceDetailMutationState { transaction: FinanceTransaction tx } =
+  { categories: []
+  , isLoadingCategories: true
+  , categoryDraft: foldMap (\(FinanceTransactionCategory category) -> category.id) tx.category
+  , categoryError: Nothing
+  , isSubmittingCategory: false
+  , newNoteInput: ""
+  , noteError: Nothing
+  , isAddingNote: false
+  , editingNoteId: Nothing
+  , editingNoteInput: ""
+  , isSubmittingNoteEdit: false
+  , deletingNoteIds: []
+  , hasSuccessfulMutations: false
+  }
+
+fetchFinanceDetailCategories :: Aff (Either String (Array FinanceCategory))
+fetchFinanceDetailCategories = do
+  result <- getCategories
+  case result of
+    Left err ->
+      pure (Left ("Unable to load categories: " <> printError err))
+    Right response ->
+      if statusOk response then
+        pure
+          ( map
+              (filter (\(FinanceCategory category) -> category.selectable))
+              (lmap show (decodeJson response.body :: Either _ (Array FinanceCategory)))
+          )
+      else
+        pure (Left ("Unable to load categories: status " <> show (unwrap response.status)))
+
+submitFinanceDetailCategory :: String -> String -> Aff (Either String Unit)
+submitFinanceDetailCategory transactionId categoryId = do
+  result <- categorizeTransaction transactionId (CategorizeFinanceTransaction { category: categoryId })
+  case result of
+    Left err ->
+      pure (Left ("Unable to categorize transaction: " <> printError err))
+    Right response ->
+      if statusOk response then pure (Right unit)
+      else pure (Left ("Unable to categorize transaction: status " <> show (unwrap response.status)))
+
+submitFinanceDetailNewNote :: String -> String -> Aff (Either String FinanceTransactionNote)
+submitFinanceDetailNewNote transactionId noteText = do
+  result <- createTransactionNote transactionId (CreateFinanceTransactionNote { text: noteText })
+  case result of
+    Left err ->
+      pure (Left ("Unable to create note: " <> printError err))
+    Right response ->
+      if statusOk response then
+        pure (lmap show (decodeJson response.body :: Either _ FinanceTransactionNote))
+      else
+        pure (Left ("Unable to create note: status " <> show (unwrap response.status)))
+
+submitFinanceDetailNoteEdit :: String -> String -> String -> Aff (Either String FinanceTransactionNote)
+submitFinanceDetailNoteEdit transactionId noteId noteText = do
+  result <- updateTransactionNote transactionId noteId (UpdateFinanceTransactionNote { text: noteText })
+  case result of
+    Left err ->
+      pure (Left ("Unable to update note: " <> printError err))
+    Right response ->
+      if statusOk response then
+        pure (lmap show (decodeJson response.body :: Either _ FinanceTransactionNote))
+      else
+        pure (Left ("Unable to update note: status " <> show (unwrap response.status)))
+
+submitFinanceDetailNoteDelete :: String -> String -> Aff (Either String Unit)
+submitFinanceDetailNoteDelete transactionId noteId = do
+  result <- deleteTransactionNote transactionId noteId
+  case result of
+    Left err ->
+      pure (Left ("Unable to delete note: " <> printError err))
+    Right response ->
+      if statusOk response then pure (Right unit)
+      else pure (Left ("Unable to delete note: status " <> show (unwrap response.status)))
+
+mapDetailSnapshotTransaction :: (FinanceTransaction -> FinanceTransaction) -> FinanceTransactions.FinanceDetailSnapshot -> FinanceTransactions.FinanceDetailSnapshot
+mapDetailSnapshotTransaction f snapshot =
+  snapshot
+    { transaction = f snapshot.transaction
+    }
+
+setTransactionCategory :: String -> FinanceTransaction -> FinanceTransaction
+setTransactionCategory categoryId (FinanceTransaction tx) =
+  FinanceTransaction
+    ( tx
+        { category =
+            if categoryId == "" then
+              Nothing
+            else
+              Just (FinanceTransactionCategory { id: categoryId })
+        }
+    )
+
+appendTransactionNote :: FinanceTransactionNote -> FinanceTransaction -> FinanceTransaction
+appendTransactionNote note (FinanceTransaction tx) =
+  FinanceTransaction (tx { notes = snoc tx.notes note })
+
+replaceTransactionNote :: FinanceTransactionNote -> FinanceTransaction -> FinanceTransaction
+replaceTransactionNote (FinanceTransactionNote note) (FinanceTransaction tx) =
+  FinanceTransaction
+    ( tx
+        { notes =
+            map
+              ( \(FinanceTransactionNote current) ->
+                  if current.id == note.id then
+                    FinanceTransactionNote note
+                  else
+                    FinanceTransactionNote current
+              )
+              tx.notes
+        }
+    )
+
+replaceTransactionNoteText :: String -> String -> FinanceTransaction -> FinanceTransaction
+replaceTransactionNoteText noteId nextText (FinanceTransaction tx) =
+  FinanceTransaction
+    ( tx
+        { notes =
+            map
+              ( \(FinanceTransactionNote note) ->
+                  if note.id == noteId then
+                    FinanceTransactionNote (note { text = nextText })
+                  else
+                    FinanceTransactionNote note
+              )
+              tx.notes
+        }
+    )
+
+removeTransactionNote :: String -> FinanceTransaction -> FinanceTransaction
+removeTransactionNote noteId (FinanceTransaction tx) =
+  FinanceTransaction
+    ( tx
+        { notes =
+            filter
+              ( \(FinanceTransactionNote note) -> note.id /= noteId
+              )
+              tx.notes
+        }
+    )
+
+findDetailNoteText :: String -> Maybe FinanceTransactions.FinanceDetailSnapshot -> Maybe String
+findDetailNoteText noteId maybeSnapshot =
+  case maybeSnapshot of
+    Nothing ->
+      Nothing
+    Just { transaction: FinanceTransaction tx } ->
+      map
+        ( \(FinanceTransactionNote note) -> note.text
+        )
+        (find (\(FinanceTransactionNote note) -> note.id == noteId) tx.notes)
+
 financeCreateStateAfterRouteChange :: Route -> Maybe FinanceOverlay -> Maybe FinanceCreateState -> Maybe FinanceCreateState
 financeCreateStateAfterRouteChange route financeOverlay financeCreateState =
   if routeCanOpenFinanceOverlay route then
     case financeOverlay of
       Just (FinanceCreateOverlay _) -> financeCreateState
+      _ -> Nothing
+  else
+    Nothing
+
+financeDetailMutationStateAfterRouteChange :: Route -> Maybe FinanceOverlay -> Maybe FinanceDetailMutationState -> Maybe FinanceDetailMutationState
+financeDetailMutationStateAfterRouteChange route financeOverlay financeDetailMutationState =
+  if routeCanOpenFinanceOverlay route then
+    case financeOverlay of
+      Just (FinanceDetailOverlay _) -> financeDetailMutationState
       _ -> Nothing
   else
     Nothing

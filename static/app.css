@@ -2316,3 +2316,8 @@ a.nav-link:hover {
   max-height: min(70vh, 640px);
   overflow-y: auto;
 }
+
+.finance-detail-overlay__note-row {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  padding-bottom: 0.5rem;
+}

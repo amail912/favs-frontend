@@ -129,6 +129,66 @@ async function mockFinanceLedgerRoutes(page, transactions) {
     }
     await route.continue();
   });
+
+  await page.route("**/api/v1/finance/categories**", async route => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json; charset=utf-8",
+        body: JSON.stringify([
+          { id: "personal.clothing", name: "Clothing", parentId: null, owner: "system", selectable: true },
+          { id: "internal.root", name: "Root", parentId: null, owner: "system", selectable: false }
+        ])
+      });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.route("**/api/v1/finance/transactions/*/categorize", async route => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json; charset=utf-8",
+        body: JSON.stringify({})
+      });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.route("**/api/v1/finance/transactions/*/notes", async route => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json; charset=utf-8",
+        body: JSON.stringify({ id: "note-new", text: "added note" })
+      });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.route("**/api/v1/finance/transactions/*/notes/*", async route => {
+    if (route.request().method() === "PUT") {
+      const body = JSON.parse(route.request().postData() || "{}");
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json; charset=utf-8",
+        body: JSON.stringify({ id: "note-new", text: body.text || "" })
+      });
+      return;
+    }
+    if (route.request().method() === "DELETE") {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/plain; charset=utf-8",
+        body: ""
+      });
+      return;
+    }
+    await route.continue();
+  });
 }
 
 test("root route redirects to /notes", async ({ page }) => {
@@ -377,6 +437,37 @@ authTest("finance ledger row opens detail overlay and preserves route and scroll
   await authExpect(page).toHaveURL(/\/finance\/transactions\?from=2026-05-01T00:00:00Z&to=2026-05-31T23:59:59Z$/);
   const afterCloseScroll = await page.evaluate(() => Math.trunc(window.scrollY));
   expect(Math.abs(afterCloseScroll - beforeOpenScroll)).toBeLessThanOrEqual(2);
+});
+
+authTest("finance detail supports category and note management", async ({ authenticatedPage: page }) => {
+  const transactions = buildFinanceTransactions(8);
+  await mockFinanceLedgerRoutes(page, transactions);
+
+  await page.goto("/finance/transactions");
+  await authExpect(page.locator(".finance-ledger-row")).toHaveCount(8);
+
+  await page.locator(".finance-ledger-row").first().click();
+  await authExpect(financeDetailOverlay(page)).toContainText("Split transactions");
+  await authExpect(page.locator(".finance-detail-overlay__category-submit")).toHaveCount(0);
+  await page.getByRole("button", { name: "Fermer" }).click();
+
+  await page.locator(".finance-ledger-row").nth(1).click();
+  await authExpect(financeDetailOverlay(page)).toBeVisible();
+
+  await page.locator(".finance-detail-overlay__category-select").selectOption("personal.clothing");
+  await page.locator(".finance-detail-overlay__category-submit").click();
+
+  await page.locator(".finance-detail-overlay__new-note-input").fill("added note");
+  await page.locator(".finance-detail-overlay__new-note-submit").click();
+  await authExpect(financeDetailOverlay(page)).toContainText("#note-new: added note");
+
+  await page.locator(".finance-detail-overlay__note-edit").first().click();
+  await page.locator(".finance-detail-overlay__edit-note-input").fill("edited note");
+  await page.locator(".finance-detail-overlay__edit-note-save").click();
+  await authExpect(financeDetailOverlay(page)).toContainText("edited note");
+
+  await page.locator(".finance-detail-overlay__note-delete").first().click();
+  await authExpect(financeDetailOverlay(page)).not.toContainText("edited note");
 });
 
 test("admin user sees admin navigation and can open admin page", async ({ context, page, baseURL }) => {

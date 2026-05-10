@@ -97,3 +97,19 @@ Do not introduce:
   - categorize a non-split transaction from detail
   - add, edit, and delete notes from detail
   - verify split transaction shows disabled category-change affordance and guidance toward split editing
+
+## Implementation Notes
+- Added detail-level mutation state in `Pages.App` for category updates and note add/edit/delete, including per-action pending flags and recoverable error feedback.
+- Category mutation is available only for non-split transactions:
+  - split transactions render a visible disabled guidance state for single-category changes.
+  - category options come from `GET /api/v1/finance/categories` filtered to `selectable = true`.
+  - category choices are represented by category slug ids (e.g. `personal.clothing`).
+- Note management is now available inline from detail:
+  - add note (`POST /transactions/:id/notes`)
+  - edit note (`PUT /transactions/:id/notes/:noteId`)
+  - delete note (`DELETE /transactions/:id/notes/:noteId`)
+- Successful mutations update the captured detail snapshot locally and mark the detail session as mutated.
+- Ledger synchronization follows the chosen policy:
+  - ledger remains stale while detail is open
+  - closing detail after a successful mutation remounts/reloads the transactions workspace.
+- Updated E2E finance navigation spec to cover split-category disabled behavior and category/note mutation actions from detail.
