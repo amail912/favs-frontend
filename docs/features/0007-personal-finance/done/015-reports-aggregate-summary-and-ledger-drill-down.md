@@ -78,3 +78,16 @@ But this story does not introduce:
 - Integration tests ensuring drill-down restores the expected ledger date context.
 - Integration tests covering transfer exclusion and split semantics as documented by the backend contract.
 - E2E tests verifying that a user can submit a date-scoped report and drill into the supporting ledger context.
+
+## Implementation Notes
+- Added a dedicated `Pages.FinanceReports` workspace component with explicit date-range controls (`from`, `to`) and report states: idle, loading, error, empty, and summary.
+- Report submission now calls the current backend aggregate endpoint through the existing contract using only active story controls:
+  - required `from`
+  - required `to`
+  - no direction/account/category controls in the UI
+- Aggregate result rendering now shows `total` and `count`, with explicit recoverable error and empty states.
+- Added drill-down output from reports to app shell, mapped to existing ledger context route semantics:
+  - `/finance/transactions?from=...&to=...`
+- Replaced finance reports placeholder rendering in `Pages.App` with the new reports component slot and output handling.
+- Added unit/integration coverage in `Test.Pages.FinanceReportsSpec` and wired it into `SpecSuite`.
+- Updated routing/navigation E2E coverage to assert real reports workspace behavior and date-context drill-down.

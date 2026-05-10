@@ -215,6 +215,20 @@ async function mockFinanceLedgerRoutes(page, transactions) {
   });
 }
 
+async function mockFinanceReportRoute(page, response) {
+  await page.route("**/api/v1/finance/report**", async route => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({
+        status: response.status,
+        contentType: "application/json; charset=utf-8",
+        body: JSON.stringify(response.body)
+      });
+      return;
+    }
+    await route.continue();
+  });
+}
+
 test("root route redirects to /notes", async ({ page }) => {
   await page.goto("/");
   await expect(page).toHaveURL(/\/notes$/);
@@ -327,12 +341,12 @@ authTest("authenticated finance route stays accessible after reload", async ({ a
   await authExpect(financeShell(page)).toBeVisible();
   await authExpect(financeReportsTab(page)).toHaveClass(/active/);
   await authExpect(financeCreateButton(page)).toHaveCount(0);
-  await authExpect(page.locator(".finance-route-placeholder")).toContainText("Reports");
+  await authExpect(page.locator(".finance-reports-workspace")).toBeVisible();
   await page.reload();
   await authExpect(page).toHaveURL(/\/finance\/reports$/);
   await authExpect(financeReportsTab(page)).toHaveClass(/active/);
   await authExpect(financeCreateButton(page)).toHaveCount(0);
-  await authExpect(page.locator(".finance-route-placeholder")).toContainText("Reports");
+  await authExpect(page.locator(".finance-reports-workspace")).toBeVisible();
 });
 
 authTest("finance local navigation switches between transactions and reports", async ({ authenticatedPage: page }) => {
@@ -342,10 +356,45 @@ authTest("finance local navigation switches between transactions and reports", a
   await authExpect(page).toHaveURL(/\/finance\/reports$/);
   await authExpect(financeReportsTab(page)).toHaveClass(/active/);
   await authExpect(financeCreateButton(page)).toHaveCount(0);
+  await authExpect(page.locator(".finance-reports-workspace")).toBeVisible();
   await financeTransactionsTab(page).click();
   await authExpect(page).toHaveURL(/\/finance\/transactions$/);
   await authExpect(financeTransactionsTab(page)).toHaveClass(/active/);
   await authExpect(financeCreateButton(page)).toBeVisible();
+});
+
+authTest("finance reports submits a date range and drills down to ledger scope", async ({ authenticatedPage: page }) => {
+  await mockFinanceLedgerRoutes(page, buildFinanceTransactions(8));
+  await mockFinanceReportRoute(page, {
+    status: 200,
+    body: { total: 42.5, count: 3, transactionIds: ["tx-1", "tx-3", "tx-5"] }
+  });
+
+  await page.goto("/finance/reports");
+  await page.locator(".finance-reports-filter-from").fill("2026-05-01T00:00:00Z");
+  await page.locator(".finance-reports-filter-to").fill("2026-05-31T23:59:59Z");
+  await page.locator(".finance-reports-apply").click();
+  await authExpect(page.locator(".finance-reports-total")).toContainText("42.5");
+  await authExpect(page.locator(".finance-reports-count")).toContainText("3");
+
+  await page.locator(".finance-reports-drilldown").click();
+  await authExpect(page).toHaveURL(/\/finance\/transactions\?from=2026-05-01T00:00:00Z&to=2026-05-31T23:59:59Z$/);
+  await authExpect(page.locator(".finance-ledger-filter-from")).toHaveValue("2026-05-01T00:00:00Z");
+  await authExpect(page.locator(".finance-ledger-filter-to")).toHaveValue("2026-05-31T23:59:59Z");
+});
+
+authTest("finance reports shows recoverable backend error", async ({ authenticatedPage: page }) => {
+  await mockFinanceReportRoute(page, {
+    status: 500,
+    body: { error: "server unavailable" }
+  });
+
+  await page.goto("/finance/reports");
+  await page.locator(".finance-reports-filter-from").fill("2026-05-01T00:00:00Z");
+  await page.locator(".finance-reports-filter-to").fill("2026-05-31T23:59:59Z");
+  await page.locator(".finance-reports-apply").click();
+  await authExpect(page.locator(".finance-reports-error")).toContainText("Unable to load report: status 500");
+  await authExpect(page.locator(".finance-reports-apply")).toBeVisible();
 });
 
 authTest("finance transactions filters update URL and survive reload/back-forward", async ({ authenticatedPage: page }) => {

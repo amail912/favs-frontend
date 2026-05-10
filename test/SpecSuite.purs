@@ -13,6 +13,7 @@ import Test.Pages.AppSpec as AppSpec
 import Test.Pages.CalendarSpec as CalendarPageSpec
 import Test.Pages.ChecklistsSpec as ChecklistsSpec
 import Test.Pages.FinanceTransactionsSpec as FinanceTransactionsSpec
+import Test.Pages.FinanceReportsSpec as FinanceReportsSpec
 import Test.Pages.NotesSpec as NotesSpec
 import Test.Ui.DateTimePickerSpec as DateTimePickerSpec
 import Test.Ui.ErrorsSpec as ErrorsSpec
@@ -31,6 +32,7 @@ runSpecSuite = runSpec [ consoleReporter ] do
   NotesSpec.spec
   ChecklistsSpec.spec
   FinanceTransactionsSpec.spec
+  FinanceReportsSpec.spec
   CalendarPageSpec.spec
   CalendarSpec.spec
   DateTimePickerSpec.spec

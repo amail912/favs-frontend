@@ -71,6 +71,7 @@ import Api.FinanceContract
 import Pages.Admin (component) as Admin
 import Pages.Calendar (CalendarRouteOutput(..), CalendarView(..), CalendarItem(..), component, decodeCalendarItemsResponse) as Calendar
 import Pages.Checklists (component) as Checklists
+import Pages.FinanceReports (Output(..), component) as FinanceReports
 import Pages.FinanceTransactions (FinanceDetailSnapshot, Output(..), component) as FinanceTransactions
 import Control.Monad.RWS (get, modify_)
 import Control.Alt ((<|>))
@@ -129,11 +130,13 @@ import Web.HTML.Window as Window
 type OpaqueSlot slot = forall query. H.Slot query Void slot
 type CalendarSlot slot = forall query. H.Slot query Calendar.CalendarRouteOutput slot
 type TransactionsSlot slot = forall query. H.Slot query FinanceTransactions.Output slot
+type ReportsSlot slot = forall query. H.Slot query FinanceReports.Output slot
 type ChildSlots =
   ( notes :: OpaqueSlot Unit
   , checklists :: OpaqueSlot Unit
   , calendar :: CalendarSlot Unit
   , financeTransactions :: TransactionsSlot Int
+  , financeReports :: ReportsSlot Unit
   , admin :: OpaqueSlot Unit
   , signup :: AuthSlot Unit
   , signin :: AuthSlot Unit
@@ -421,6 +424,7 @@ data Action
   | CancelLateItemQuickComplete
   | HandleCalendarOutput Calendar.CalendarRouteOutput
   | HandleTransactionsOutput FinanceTransactions.Output
+  | HandleReportsOutput FinanceReports.Output
   | LoadLateItems
   | LateItemsLoaded Int (Array LateItems.LateItem)
   | LateItemsLoadFailed Int String
@@ -1703,6 +1707,22 @@ handleAction (HandleTransactionsOutput (FinanceTransactions.OpenTransactionDetai
       }
     categoriesResult <- liftAff fetchFinanceDetailCategories
     handleAction (FinanceDetailCategoriesLoaded categoriesResult)
+handleAction (HandleReportsOutput (FinanceReports.DrillDownRequested range)) = do
+  st <- get
+  let
+    nextRoute =
+      Route
+        ( FinanceTransactions
+            ( normalizeTransactionsRouteState
+                { accountId: Nothing
+                , from: Just range.from
+                , to: Just range.to
+                }
+            )
+        )
+  when (st.currentRoute /= nextRoute) do
+    modify_ _ { currentRoute = nextRoute }
+    navigateWith _.pushState st.nav nextRoute
 handleAction (HandleAuthOutput (SignupSucceeded username)) = do
   st <- get
   liftEffect $ AuthSession.storeAuthenticatedUsername username
@@ -2011,6 +2031,13 @@ renderFinanceShell route financeOverlay financeTransactionsSlotNonce =
           FinanceTransactions.component
           transactionsRoute
           HandleTransactionsOutput
+      else if routeKey route == routeKey FinanceReports then
+        slot
+          (Proxy :: _ "financeReports")
+          unit
+          FinanceReports.component
+          unit
+          HandleReportsOutput
       else
         renderFinancePlaceholderBody route
     ]

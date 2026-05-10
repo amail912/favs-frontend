@@ -78,9 +78,9 @@ Help users manage financial operations as explicit, explainable facts: capture t
 - [012 Transaction Categorization And Notes Management](done/012-transaction-categorization-and-notes-management.md) - Allow category refinement and mutable note management from transaction detail while matching current backend capabilities.
 - [013 Transaction Split Editor With Explicit Remainder](done/013-transaction-split-editor-with-explicit-remainder.md) - Add a split editor with empty unsplit start, live remainder feedback, and save-back-to-detail behavior using the current backend split write shape.
 - [014 Transaction Transfer Linking](done/014-transaction-transfer-linking.md) - Add in-flow target selection for explicit pairwise transfer linking, with backend-validated linking and linked-state reflection in detail and ledger.
+- [015 Reports Aggregate Summary And Ledger Drill-Down](done/015-reports-aggregate-summary-and-ledger-drill-down.md) - Add a first-pass date-range aggregate report with exact drill-down back into the ledger’s current date-context model.
 
 ### Ready
-- [015 Reports Aggregate Summary And Ledger Drill-Down](ready/015-reports-aggregate-summary-and-ledger-drill-down.md) - Add a first-pass date-range aggregate report with exact drill-down back into the ledger’s current date-context model.
 
 ### To Refine
 
