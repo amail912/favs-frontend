@@ -53,3 +53,8 @@ The user can:
 - E2E tests validating filter application and coherent analytics presentation in reports UI.
 - Explicit test note:
   - rich analytics bucket drill-down behavior remains deferred to `019`.
+
+## Implementation Notes (2026-05-12)
+- Added analytics backend adoption in the finance contract/API layer for `GET /api/v1/finance/report/analytics` and typed analytics sections (`summary`, `categoryBreakdown`, `cashflowSeries`, `accountBalances`).
+- Replaced aggregate-only reports surface with analytics-driven reporting and report-local extended filters (direction, account, category include/exclude, amount bounds, search).
+- Kept drill-down behavior date-range scoped while adding analytics section rendering and validation-aligned query submission.

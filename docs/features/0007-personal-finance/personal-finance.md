@@ -79,11 +79,11 @@ Help users manage financial operations as explicit, explainable facts: capture t
 - [013 Transaction Split Editor With Explicit Remainder](done/013-transaction-split-editor-with-explicit-remainder.md) - Add a split editor with empty unsplit start, live remainder feedback, and save-back-to-detail behavior using the current backend split write shape.
 - [014 Transaction Transfer Linking](done/014-transaction-transfer-linking.md) - Add in-flow target selection for explicit pairwise transfer linking, with backend-validated linking and linked-state reflection in detail and ledger.
 - [015 Reports Aggregate Summary And Ledger Drill-Down](done/015-reports-aggregate-summary-and-ledger-drill-down.md) - Add a first-pass date-range aggregate report with exact drill-down back into the ledger’s current date-context model.
+- [016 Rich Transaction Metadata](done/016-rich-transaction-metadata.md) - Add backend-aligned counterparty/description capture, metadata editing, and counterparty suggestions with explicit non-automatic categorization behavior.
+- [017 Extended Ledger Filtering](done/017-extended-ledger-filtering.md) - Add backend-supported direction/category/amount/text ledger filtering with URL-backed context and explicit backend validation behavior.
+- [018 Rich Analytical Reports](done/018-rich-analytical-reports.md) - Add backend analytics report sections (`summary`, `categoryBreakdown`, `cashflowSeries`, `accountBalances`) with shared finance filter semantics.
 
 ### Ready
-- [016 Rich Transaction Metadata](ready/016-rich-transaction-metadata.md) - Add backend-aligned counterparty/description capture, metadata editing, and counterparty suggestions with explicit non-automatic categorization behavior.
-- [017 Extended Ledger Filtering](ready/017-extended-ledger-filtering.md) - Add backend-supported direction/category/amount/text ledger filtering with URL-backed context and explicit backend validation behavior.
-- [018 Rich Analytical Reports](ready/018-rich-analytical-reports.md) - Add backend analytics report sections (`summary`, `categoryBreakdown`, `cashflowSeries`, `accountBalances`) with shared finance filter semantics.
 - [019 Report/Ledger Exact Drill-Down And Richer Report Filters](ready/019-report-ledger-exact-drill-down-and-richer-report-filters.md) - Align richer report controls and ledger context for exact drill-down using shared backend filter semantics.
 
 ### To Refine

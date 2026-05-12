@@ -61,3 +61,8 @@ The user can:
   - user can apply/reset extended filters from ledger UI
   - active filter context is visible and URL-backed
   - reload/back-forward restores the same extended context
+
+## Implementation Notes (2026-05-12)
+- Extended ledger context, route query parsing/printing, and transaction query encoding to include direction, category include/exclude, amount bounds, and search.
+- Added new ledger filter controls and active filter pills with URL-backed apply/reset behavior and context restoration across navigation/reload.
+- Added client-side validation for integer amount bounds, min/max ordering, and include/exclude category overlap before loading.

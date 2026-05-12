@@ -76,3 +76,8 @@ The user can:
   - metadata visible in ledger/detail
   - metadata editable after create
   - suggestion selection assists entry without silently changing category
+
+## Implementation Notes (2026-05-12)
+- Delivered metadata support in frontend finance contract and API helpers for create and metadata-update flows.
+- Added counterparty and description capture in transaction create, metadata editing in transaction detail, and metadata visibility in ledger rows.
+- Integrated backend counterparty suggestions into create flow as assistive input only, without automatic category mutation.
