@@ -4,6 +4,7 @@ import Prelude
 
 import Api.FinanceContract
   ( FinanceAccount(..)
+  , FinanceCategory(..)
   , FinanceTransaction(..)
   , FinanceTransactionAdjustment(..)
   , FinanceTransactionCategory(..)
@@ -34,11 +35,16 @@ spec =
     it "transitions from loading to loaded rows" do
       let
         loadingState =
-          { context: { accountId: Nothing, from: Nothing, to: Nothing }
-          , draftContext: { accountId: Nothing, from: Nothing, to: Nothing }
+          { context: { accountId: Nothing, from: Nothing, to: Nothing, direction: Nothing, categoryIn: [], categoryNotIn: [], amountMin: Nothing, amountMax: Nothing, search: Nothing }
+          , draftContext: { accountId: Nothing, from: Nothing, to: Nothing, direction: Nothing, categoryIn: [], categoryNotIn: [], amountMin: Nothing, amountMax: Nothing, search: Nothing }
+          , draftAmountMinInput: ""
+          , draftAmountMaxInput: ""
+          , draftCategoryInSelection: ""
+          , draftCategoryNotInSelection: ""
+          , filterError: Nothing
           , remoteState: LedgerLoading
           }
-        loadedState = applyLedgerLoadSuccess [ sampleTransaction ] [ sampleAccount ] loadingState
+        loadedState = applyLedgerLoadSuccess [ sampleTransaction ] [ sampleAccount ] [ sampleCategory ] loadingState
       case deriveLedgerBodyState loadedState of
         LedgerBodyRows rows ->
           rows `shouldEqual` buildLedgerRows [ sampleAccount ] [ sampleTransaction ]
@@ -48,11 +54,16 @@ spec =
     it "transitions from loading to empty when no transactions and no context" do
       let
         loadingState =
-          { context: { accountId: Nothing, from: Nothing, to: Nothing }
-          , draftContext: { accountId: Nothing, from: Nothing, to: Nothing }
+          { context: { accountId: Nothing, from: Nothing, to: Nothing, direction: Nothing, categoryIn: [], categoryNotIn: [], amountMin: Nothing, amountMax: Nothing, search: Nothing }
+          , draftContext: { accountId: Nothing, from: Nothing, to: Nothing, direction: Nothing, categoryIn: [], categoryNotIn: [], amountMin: Nothing, amountMax: Nothing, search: Nothing }
+          , draftAmountMinInput: ""
+          , draftAmountMaxInput: ""
+          , draftCategoryInSelection: ""
+          , draftCategoryNotInSelection: ""
+          , filterError: Nothing
           , remoteState: LedgerLoading
           }
-        loadedState = applyLedgerLoadSuccess [] [] loadingState
+        loadedState = applyLedgerLoadSuccess [] [] [] loadingState
       case deriveLedgerBodyState loadedState of
         LedgerBodyEmpty -> pure unit
         _ -> fail "Expected empty state"
@@ -60,11 +71,16 @@ spec =
     it "transitions from loading to no-results when context is active and no rows match" do
       let
         loadingState =
-          { context: { accountId: Just "acc-1", from: Nothing, to: Nothing }
-          , draftContext: { accountId: Just "acc-1", from: Nothing, to: Nothing }
+          { context: { accountId: Just "acc-1", from: Nothing, to: Nothing, direction: Nothing, categoryIn: [], categoryNotIn: [], amountMin: Nothing, amountMax: Nothing, search: Nothing }
+          , draftContext: { accountId: Just "acc-1", from: Nothing, to: Nothing, direction: Nothing, categoryIn: [], categoryNotIn: [], amountMin: Nothing, amountMax: Nothing, search: Nothing }
+          , draftAmountMinInput: ""
+          , draftAmountMaxInput: ""
+          , draftCategoryInSelection: ""
+          , draftCategoryNotInSelection: ""
+          , filterError: Nothing
           , remoteState: LedgerLoading
           }
-        loadedState = applyLedgerLoadSuccess [] [] loadingState
+        loadedState = applyLedgerLoadSuccess [] [] [] loadingState
       case deriveLedgerBodyState loadedState of
         LedgerBodyNoResults -> pure unit
         _ -> fail "Expected no-results state"
@@ -72,8 +88,13 @@ spec =
     it "transitions from loading to error and can retry" do
       let
         loadingState =
-          { context: { accountId: Nothing, from: Nothing, to: Nothing }
-          , draftContext: { accountId: Nothing, from: Nothing, to: Nothing }
+          { context: { accountId: Nothing, from: Nothing, to: Nothing, direction: Nothing, categoryIn: [], categoryNotIn: [], amountMin: Nothing, amountMax: Nothing, search: Nothing }
+          , draftContext: { accountId: Nothing, from: Nothing, to: Nothing, direction: Nothing, categoryIn: [], categoryNotIn: [], amountMin: Nothing, amountMax: Nothing, search: Nothing }
+          , draftAmountMinInput: ""
+          , draftAmountMaxInput: ""
+          , draftCategoryInSelection: ""
+          , draftCategoryNotInSelection: ""
+          , filterError: Nothing
           , remoteState: LedgerLoading
           }
         erroredState = applyLedgerLoadFailure "boom" loadingState
@@ -125,6 +146,16 @@ sampleAccount =
     { id: "acc-1"
     , name: "Primary account"
     , status: "active"
+    }
+
+sampleCategory :: FinanceCategory
+sampleCategory =
+  FinanceCategory
+    { id: "cat-1"
+    , name: "Food"
+    , parentId: Nothing
+    , owner: "user"
+    , selectable: true
     }
 
 sampleTransaction :: FinanceTransaction

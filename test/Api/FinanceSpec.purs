@@ -125,10 +125,25 @@ spec =
       stringify (encodeJson (UpdateFinanceTransactionNote { text: "updated" }))
         `shouldEqual` "{\"text\":\"updated\"}"
 
-    it "encodes transactions query with only accountId/from/to keys" do
+    it "encodes transactions query with existing and extended keys" do
       let
-        query = encodeTransactionsQuery (FinanceTransactionsQuery { accountId: Just "acc-1", from: Just "2026-05-01T00:00:00Z", to: Just "2026-05-08T00:00:00Z" })
-      query `shouldEqual` "?accountId=acc-1&from=2026-05-01T00:00:00Z&to=2026-05-08T00:00:00Z"
+        query =
+          encodeTransactionsQuery
+            ( FinanceTransactionsQuery
+                { accountId: Just "acc-1"
+                , from: Just "2026-05-01T00:00:00Z"
+                , to: Just "2026-05-08T00:00:00Z"
+                , direction: Just ReportSent
+                , categoryIn: [ "cat-1", "cat-2" ]
+                , categoryNotIn: [ "cat-9" ]
+                , amountMin: Just 10
+                , amountMax: Just 999
+                , search: Just "coffee"
+                }
+            )
+      query
+        `shouldEqual`
+          "?accountId=acc-1&from=2026-05-01T00:00:00Z&to=2026-05-08T00:00:00Z&direction=sent&amountMin=10&amountMax=999&search=coffee&categoryIn=cat-1&categoryIn=cat-2&categoryNotIn=cat-9"
 
     it "encodes account status query values" do
       encodeAccountsQuery (FinanceAccountsQuery { status: Nothing }) `shouldEqual` ""

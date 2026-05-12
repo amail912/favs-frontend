@@ -142,10 +142,17 @@ encodeAccountsQuery (FinanceAccountsQuery query) =
 encodeTransactionsQuery :: FinanceTransactionsQuery -> String
 encodeTransactionsQuery (FinanceTransactionsQuery query) =
   encodeQueryString
-    [ map (\value -> "accountId=" <> value) query.accountId
-    , map (\value -> "from=" <> value) query.from
-    , map (\value -> "to=" <> value) query.to
-    ]
+    ( [ map (\value -> "accountId=" <> value) query.accountId
+      , map (\value -> "from=" <> value) query.from
+      , map (\value -> "to=" <> value) query.to
+      , map (\value -> "direction=" <> encodeReportDirection value) query.direction
+      , map (\value -> "amountMin=" <> show value) query.amountMin
+      , map (\value -> "amountMax=" <> show value) query.amountMax
+      , map (\value -> "search=" <> value) query.search
+      ]
+        <> map (\value -> Just ("categoryIn=" <> value)) query.categoryIn
+        <> map (\value -> Just ("categoryNotIn=" <> value)) query.categoryNotIn
+    )
 
 encodeReportQuery :: FinanceReportQuery -> String
 encodeReportQuery (FinanceReportQuery query) =

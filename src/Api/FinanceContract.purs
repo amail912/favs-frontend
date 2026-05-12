@@ -200,6 +200,12 @@ newtype FinanceTransactionsQuery = FinanceTransactionsQuery
   { accountId :: Maybe String
   , from :: Maybe String
   , to :: Maybe String
+  , direction :: Maybe FinanceReportDirection
+  , categoryIn :: Array String
+  , categoryNotIn :: Array String
+  , amountMin :: Maybe Int
+  , amountMax :: Maybe Int
+  , search :: Maybe String
   }
 
 newtype CreateFinanceTransaction = CreateFinanceTransaction
@@ -236,6 +242,7 @@ newtype UpdateFinanceTransactionNote = UpdateFinanceTransactionNote
 data FinanceReportDirection = ReportSent | ReportReceived | ReportAll
 
 derive instance financeReportDirectionEq :: Eq FinanceReportDirection
+derive instance financeReportDirectionOrd :: Ord FinanceReportDirection
 derive instance financeReportDirectionGeneric :: Generic FinanceReportDirection _
 
 instance showFinanceReportDirection :: Show FinanceReportDirection where

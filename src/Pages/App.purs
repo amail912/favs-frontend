@@ -94,6 +94,7 @@ import Data.Char (toCharCode)
 import Data.Either (Either(..), either)
 import Data.Foldable (all, fold, foldMap, foldl)
 import Data.Generic.Rep (class Generic)
+import Data.Int as Int
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.Monoid (guard)
 import Data.Number as Number
@@ -158,6 +159,12 @@ type TransactionsRouteState =
   { accountId :: Maybe String
   , from :: Maybe String
   , to :: Maybe String
+  , direction :: Maybe FinanceReportDirection
+  , categoryIn :: Array String
+  , categoryNotIn :: Array String
+  , amountMin :: Maybe Int
+  , amountMax :: Maybe Int
+  , search :: Maybe String
   }
 
 data DefinedRoute = Note | Checklist | Calendar CalendarRouteState | FinanceTransactions TransactionsRouteState | FinanceReports | Admin | Signup | Signin
@@ -217,6 +224,12 @@ parseRouteString rawPath =
                   { accountId: parseTransactionsAccountId query
                   , from: parseTransactionsFrom query
                   , to: parseTransactionsTo query
+                  , direction: parseTransactionsDirection query
+                  , categoryIn: parseTransactionsCategoryIn query
+                  , categoryNotIn: parseTransactionsCategoryNotIn query
+                  , amountMin: parseTransactionsAmountMin query
+                  , amountMax: parseTransactionsAmountMax query
+                  , search: parseTransactionsSearch query
                   }
               )
           )
@@ -236,7 +249,18 @@ defaultCalendarRoute :: DefinedRoute
 defaultCalendarRoute = Calendar { day: Nothing, item: Nothing }
 
 defaultTransactionsRoute :: DefinedRoute
-defaultTransactionsRoute = FinanceTransactions { accountId: Nothing, from: Nothing, to: Nothing }
+defaultTransactionsRoute =
+  FinanceTransactions
+    { accountId: Nothing
+    , from: Nothing
+    , to: Nothing
+    , direction: Nothing
+    , categoryIn: []
+    , categoryNotIn: []
+    , amountMin: Nothing
+    , amountMax: Nothing
+    , search: Nothing
+    }
 
 normalizeCalendarRouteState :: CalendarRouteState -> CalendarRouteState
 normalizeCalendarRouteState { day, item } =
@@ -245,11 +269,21 @@ normalizeCalendarRouteState { day, item } =
   }
 
 normalizeTransactionsRouteState :: TransactionsRouteState -> TransactionsRouteState
-normalizeTransactionsRouteState { accountId, from, to } =
-  { accountId: accountId >>= nonEmptyStringMaybe
-  , from: from >>= nonEmptyStringMaybe
-  , to: to >>= nonEmptyStringMaybe
-  }
+normalizeTransactionsRouteState { accountId, from, to, direction, categoryIn, categoryNotIn, amountMin, amountMax, search } =
+  let
+    normalizedCategoryIn = normalizeCategoryValues categoryIn
+    normalizedCategoryNotIn = normalizeCategoryValues (filter (\value -> not (any (_ == value) normalizedCategoryIn)) categoryNotIn)
+  in
+    { accountId: accountId >>= nonEmptyStringMaybe
+    , from: from >>= nonEmptyStringMaybe
+    , to: to >>= nonEmptyStringMaybe
+    , direction
+    , categoryIn: normalizedCategoryIn
+    , categoryNotIn: normalizedCategoryNotIn
+    , amountMin
+    , amountMax
+    , search: search >>= nonEmptyStringMaybe
+    }
 
 routeFromDefined :: DefinedRoute -> Route
 routeFromDefined = Route
@@ -307,7 +341,14 @@ printRoute = case _ of
       accountIdQuery = map (\accountId -> "accountId=" <> accountId) transactionsRoute.accountId
       fromQuery = map (\fromValue -> "from=" <> fromValue) transactionsRoute.from
       toQuery = map (\toValue -> "to=" <> toValue) transactionsRoute.to
-      queryParts = mapMaybe identity [ accountIdQuery, fromQuery, toQuery ]
+      directionQuery = map (\value -> "direction=" <> encodeFinanceReportDirection value) transactionsRoute.direction
+      amountMinQuery = map (\value -> "amountMin=" <> show value) transactionsRoute.amountMin
+      amountMaxQuery = map (\value -> "amountMax=" <> show value) transactionsRoute.amountMax
+      searchQuery = map (\value -> "search=" <> value) transactionsRoute.search
+      queryParts =
+        mapMaybe identity [ accountIdQuery, fromQuery, toQuery, directionQuery, amountMinQuery, amountMaxQuery, searchQuery ]
+          <> map (\value -> "categoryIn=" <> value) transactionsRoute.categoryIn
+          <> map (\value -> "categoryNotIn=" <> value) transactionsRoute.categoryNotIn
       querySuffix =
         if length queryParts == 0 then
           ""
@@ -340,6 +381,30 @@ parseTransactionsTo :: String -> Maybe String
 parseTransactionsTo rawQuery =
   findMapQueryValue "to" rawQuery >>= nonEmptyStringMaybe
 
+parseTransactionsDirection :: String -> Maybe FinanceReportDirection
+parseTransactionsDirection rawQuery =
+  findMapQueryValue "direction" rawQuery >>= decodeFinanceReportDirection
+
+parseTransactionsCategoryIn :: String -> Array String
+parseTransactionsCategoryIn rawQuery =
+  findMapQueryValues "categoryIn" rawQuery
+
+parseTransactionsCategoryNotIn :: String -> Array String
+parseTransactionsCategoryNotIn rawQuery =
+  findMapQueryValues "categoryNotIn" rawQuery
+
+parseTransactionsAmountMin :: String -> Maybe Int
+parseTransactionsAmountMin rawQuery =
+  findMapQueryValue "amountMin" rawQuery >>= parseInt
+
+parseTransactionsAmountMax :: String -> Maybe Int
+parseTransactionsAmountMax rawQuery =
+  findMapQueryValue "amountMax" rawQuery >>= parseInt
+
+parseTransactionsSearch :: String -> Maybe String
+parseTransactionsSearch rawQuery =
+  findMapQueryValue "search" rawQuery >>= nonEmptyStringMaybe
+
 nonEmptyStringMaybe :: String -> Maybe String
 nonEmptyStringMaybe raw =
   if raw == "" then Nothing else Just raw
@@ -357,6 +422,48 @@ findMapQueryValue key rawQuery =
     case StringCommon.split (Pattern "=") pair of
       [ _, pairValue ] -> Just pairValue
       _ -> Nothing
+
+findMapQueryValues :: String -> String -> Array String
+findMapQueryValues key rawQuery =
+  mapMaybe valueFromPair (filter isMatchingPair queryPairs)
+  where
+  queryPairs = StringCommon.split (Pattern "&") rawQuery
+  isMatchingPair pair =
+    case head (StringCommon.split (Pattern "=") pair) of
+      Just pairKey -> pairKey == key
+      Nothing -> false
+  valueFromPair pair =
+    case StringCommon.split (Pattern "=") pair of
+      [ _, pairValue ] -> nonEmptyStringMaybe pairValue
+      _ -> Nothing
+
+parseInt :: String -> Maybe Int
+parseInt raw =
+  Int.fromString raw
+
+decodeFinanceReportDirection :: String -> Maybe FinanceReportDirection
+decodeFinanceReportDirection = case _ of
+  "sent" -> Just ReportSent
+  "received" -> Just ReportReceived
+  "all" -> Just ReportAll
+  _ -> Nothing
+
+encodeFinanceReportDirection :: FinanceReportDirection -> String
+encodeFinanceReportDirection = case _ of
+  ReportSent -> "sent"
+  ReportReceived -> "received"
+  ReportAll -> "all"
+
+normalizeCategoryValues :: Array String -> Array String
+normalizeCategoryValues =
+  foldl
+    ( \acc raw ->
+        case nonEmptyStringMaybe raw of
+          Nothing -> acc
+          Just value ->
+            if any (_ == value) acc then acc else snoc acc value
+    )
+    []
 
 subscribeToRouting :: forall state slots output m. MonadEffect m => PushStateInterface -> H.HalogenM state Action slots output m Unit
 subscribeToRouting nav = do
@@ -1483,9 +1590,25 @@ handleAction OpenFinanceTransferSelector = do
                 { accountId: routeState.accountId
                 , from: routeState.from
                 , to: routeState.to
+                , direction: routeState.direction
+                , categoryIn: routeState.categoryIn
+                , categoryNotIn: routeState.categoryNotIn
+                , amountMin: routeState.amountMin
+                , amountMax: routeState.amountMax
+                , search: routeState.search
                 }
             _ ->
-              FinanceTransactionsQuery { accountId: Nothing, from: Nothing, to: Nothing }
+              FinanceTransactionsQuery
+                { accountId: Nothing
+                , from: Nothing
+                , to: Nothing
+                , direction: Nothing
+                , categoryIn: []
+                , categoryNotIn: []
+                , amountMin: Nothing
+                , amountMax: Nothing
+                , search: Nothing
+                }
       modify_ \next ->
         next
           { financeDetailMutationState =
@@ -1861,6 +1984,12 @@ handleAction (HandleReportsOutput (FinanceReports.DrillDownRequested range)) = d
                 { accountId: Nothing
                 , from: Just range.from
                 , to: Just range.to
+                , direction: Nothing
+                , categoryIn: []
+                , categoryNotIn: []
+                , amountMin: Nothing
+                , amountMax: Nothing
+                , search: Nothing
                 }
             )
         )
@@ -2189,7 +2318,17 @@ renderFinanceShell route financeOverlay financeTransactionsSlotNonce =
   transactionsRoute =
     case route of
       FinanceTransactions currentRoute -> currentRoute
-      _ -> { accountId: Nothing, from: Nothing, to: Nothing }
+      _ ->
+        { accountId: Nothing
+        , from: Nothing
+        , to: Nothing
+        , direction: Nothing
+        , categoryIn: []
+        , categoryNotIn: []
+        , amountMin: Nothing
+        , amountMax: Nothing
+        , search: Nothing
+        }
 
 renderInlineCreateChooser :: forall w. DefinedRoute -> Maybe FinanceOverlay -> HTML w Action
 renderInlineCreateChooser route financeOverlay =

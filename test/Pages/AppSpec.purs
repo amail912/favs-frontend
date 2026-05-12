@@ -5,6 +5,7 @@ import Prelude
 import Api.Auth (AuthenticatedProfile(..))
 import Api.FinanceContract
   ( FinanceTransaction(..)
+  , FinanceReportDirection(..)
   , FinanceTransactionDirection(..)
   , FinanceTransactionSplitRow
   , FinanceTransferLink(..)
@@ -25,14 +26,44 @@ spec =
       parseRouteString "/finance" `shouldEqual` Right (Route defaultTransactionsRoute)
       parseRouteString "/finance/transactions" `shouldEqual` Right (Route defaultTransactionsRoute)
       parseRouteString "/finance/transactions?accountId=acc-1&from=2026-05-01T00:00:00Z&to=2026-05-31T23:59:59Z"
-        `shouldEqual` Right (Route (FinanceTransactions { accountId: Just "acc-1", from: Just "2026-05-01T00:00:00Z", to: Just "2026-05-31T23:59:59Z" }))
+        `shouldEqual`
+          Right
+            ( Route
+                ( FinanceTransactions
+                    { accountId: Just "acc-1"
+                    , from: Just "2026-05-01T00:00:00Z"
+                    , to: Just "2026-05-31T23:59:59Z"
+                    , direction: Nothing
+                    , categoryIn: []
+                    , categoryNotIn: []
+                    , amountMin: Nothing
+                    , amountMax: Nothing
+                    , search: Nothing
+                    }
+                )
+            )
       parseRouteString "/finance/reports" `shouldEqual` Right (Route FinanceReports)
       parseRouteString "/admin" `shouldEqual` Right (Route Admin)
 
     it "prints canonical finance routes" do
       printRoute (Route defaultTransactionsRoute) `shouldEqual` "/finance/transactions"
-      printRoute (Route (FinanceTransactions { accountId: Just "acc-1", from: Just "2026-05-01T00:00:00Z", to: Just "2026-05-31T23:59:59Z" }))
-        `shouldEqual` "/finance/transactions?accountId=acc-1&from=2026-05-01T00:00:00Z&to=2026-05-31T23:59:59Z"
+      printRoute
+        ( Route
+            ( FinanceTransactions
+                { accountId: Just "acc-1"
+                , from: Just "2026-05-01T00:00:00Z"
+                , to: Just "2026-05-31T23:59:59Z"
+                , direction: Just ReportSent
+                , categoryIn: [ "cat-1", "cat-2" ]
+                , categoryNotIn: [ "cat-9" ]
+                , amountMin: Just 10
+                , amountMax: Just 20
+                , search: Just "coffee"
+                }
+            )
+        )
+        `shouldEqual`
+          "/finance/transactions?accountId=acc-1&from=2026-05-01T00:00:00Z&to=2026-05-31T23:59:59Z&direction=sent&amountMin=10&amountMax=20&search=coffee&categoryIn=cat-1&categoryIn=cat-2&categoryNotIn=cat-9"
       printRoute (Route FinanceReports) `shouldEqual` "/finance/reports"
 
     it "parses calendar routes with and without a valid day query" do
@@ -146,7 +177,17 @@ spec =
 
 defaultTransactionsRoute :: DefinedRoute
 defaultTransactionsRoute =
-  FinanceTransactions { accountId: Nothing, from: Nothing, to: Nothing }
+  FinanceTransactions
+    { accountId: Nothing
+    , from: Nothing
+    , to: Nothing
+    , direction: Nothing
+    , categoryIn: []
+    , categoryNotIn: []
+    , amountMin: Nothing
+    , amountMax: Nothing
+    , search: Nothing
+    }
 
 memberProfile :: AuthenticatedProfile
 memberProfile =
