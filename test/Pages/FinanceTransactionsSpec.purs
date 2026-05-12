@@ -136,6 +136,8 @@ sampleTransaction =
     , amount: 120.0
     , occurredAt: "2026-05-10T09:00:00Z"
     , recordedAt: "2026-05-10T09:00:01Z"
+    , counterparty: Just "acme"
+    , description: Just "memo"
     , transfer: Just (FinanceTransferLink { linkedTransactionId: "tx-2", linkType: "transfer" })
     , category: Just (FinanceTransactionCategory { id: "cat-1" })
     , splits: [ FinanceTransactionSplitRow { amount: 70.0, category: "cat-1" } ]

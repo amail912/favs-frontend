@@ -7,6 +7,8 @@ import Api.FinanceContract
   ( CategorizeFinanceTransaction(..)
   , CreateFinanceTransaction(..)
   , CreateFinanceTransactionNote(..)
+  , FinanceCounterpartySuggestion(..)
+  , FinanceCounterpartySuggestionsResult(..)
   , FinanceAccount(..)
   , FinanceAccountsQuery(..)
   , FinanceAccountsStatus(..)
@@ -24,6 +26,7 @@ import Api.FinanceContract
   , FinanceTransferLink(..)
   , LinkFinanceTransfer(..)
   , SplitFinanceTransaction(..)
+  , UpdateFinanceTransactionMetadata(..)
   , UpdateFinanceTransactionNote(..)
   )
 import Data.Argonaut.Core (stringify)
@@ -53,7 +56,7 @@ spec =
           if decoded == category then pure unit else fail "Decoded category did not match encoded value"
         Left err -> fail $ "Failed to decode category shape: " <> show err
 
-    it "round-trips transaction decoding shape without unsupported fields" do
+    it "round-trips transaction decoding shape with metadata fields" do
       let
         transaction =
           FinanceTransaction
@@ -63,6 +66,8 @@ spec =
             , amount: 42.5
             , occurredAt: "2026-05-01T10:00:00Z"
             , recordedAt: "2026-05-01T10:00:01Z"
+            , counterparty: Just "acme"
+            , description: Just "memo"
             , transfer: Just (FinanceTransferLink { linkedTransactionId: "tx-2", linkType: "transfer" })
             , category: Just (FinanceTransactionCategory { id: "cat-1" })
             , splits: [ FinanceTransactionSplitRow { amount: 42.5, category: "cat-1" } ]
@@ -74,21 +79,33 @@ spec =
           if decoded == transaction then pure unit else fail "Decoded transaction did not match encoded value"
         Left err -> fail $ "Failed to decode transaction shape: " <> show err
       let raw = stringify (encodeJson transaction)
-      contains (Pattern "\"counterparty\"") raw `shouldEqual` false
-      contains (Pattern "\"description\"") raw `shouldEqual` false
+      contains (Pattern "\"counterparty\":\"acme\"") raw `shouldEqual` true
+      contains (Pattern "\"description\":\"memo\"") raw `shouldEqual` true
 
     it "encodes sent and received create payloads with optional occurredAt" do
       let
-        createSent = CreateFinanceTransaction { accountId: "acc-1", amount: 10.0, occurredAt: Just "2026-05-01T10:00:00Z" }
-        createReceived = CreateFinanceTransaction { accountId: "acc-1", amount: 12.0, occurredAt: Nothing }
+        createSent = CreateFinanceTransaction { accountId: "acc-1", amount: 10.0, occurredAt: Just "2026-05-01T10:00:00Z", counterparty: Just "acme", description: Just "coffee" }
+        createReceived = CreateFinanceTransaction { accountId: "acc-1", amount: 12.0, occurredAt: Nothing, counterparty: Nothing, description: Nothing }
       let encodedSent = stringify (encodeJson createSent)
       contains (Pattern "\"accountId\":\"acc-1\"") encodedSent `shouldEqual` true
       contains (Pattern "\"amount\":10") encodedSent `shouldEqual` true
       contains (Pattern "\"occurredAt\":\"2026-05-01T10:00:00Z\"") encodedSent `shouldEqual` true
+      contains (Pattern "\"counterparty\":\"acme\"") encodedSent `shouldEqual` true
+      contains (Pattern "\"description\":\"coffee\"") encodedSent `shouldEqual` true
       let encodedReceived = stringify (encodeJson createReceived)
       contains (Pattern "\"accountId\":\"acc-1\"") encodedReceived `shouldEqual` true
       contains (Pattern "\"amount\":12") encodedReceived `shouldEqual` true
       contains (Pattern "\"occurredAt\":null") encodedReceived `shouldEqual` true
+      contains (Pattern "\"counterparty\":null") encodedReceived `shouldEqual` true
+      contains (Pattern "\"description\":null") encodedReceived `shouldEqual` true
+
+    it "encodes metadata update payload with optional partial fields" do
+      let fullPayload = stringify (encodeJson (UpdateFinanceTransactionMetadata { counterparty: Just (Just "acme"), description: Just Nothing }))
+      contains (Pattern "\"counterparty\":\"acme\"") fullPayload `shouldEqual` true
+      contains (Pattern "\"description\":null") fullPayload `shouldEqual` true
+      let partialPayload = stringify (encodeJson (UpdateFinanceTransactionMetadata { counterparty: Nothing, description: Just (Just "note") }))
+      contains (Pattern "\"counterparty\":null") partialPayload `shouldEqual` true
+      contains (Pattern "\"description\":\"note\"") partialPayload `shouldEqual` true
 
     it "encodes categorize, split, transfer link, and notes payloads" do
       stringify (encodeJson (CategorizeFinanceTransaction { category: "cat-1" }))
@@ -130,6 +147,24 @@ spec =
       contains (Pattern "\"total\":125.5") encoded `shouldEqual` true
       contains (Pattern "\"count\":2") encoded `shouldEqual` true
       contains (Pattern "\"transactionIds\":[\"tx-1\",\"tx-2\"]") encoded `shouldEqual` true
+
+    it "decodes counterparty suggestions response shape" do
+      let
+        payload =
+          FinanceCounterpartySuggestionsResult
+            { items:
+                [ FinanceCounterpartySuggestion
+                    { value: "acme"
+                    , usageCount: 3
+                    , lastUsedAt: "2026-05-01T00:00:00Z"
+                    , suggestedCategory: Just "pets.food"
+                    }
+                ]
+            }
+      case decodeJson (encodeJson payload) of
+        Right decoded ->
+          if decoded == payload then pure unit else fail "Decoded suggestions payload did not match encoded value"
+        Left err -> fail $ "Failed to decode suggestions payload: " <> show err
 
     it "encodes aggregate report query with supported backend parameters" do
       let

@@ -80,6 +80,8 @@ type FinanceLedgerRow =
   , accountLabel :: String
   , occurredAtLabel :: String
   , categoryLabel :: String
+  , counterpartyLabel :: String
+  , descriptionLabel :: String
   , hasSplit :: Boolean
   , hasTransfer :: Boolean
   , hasNote :: Boolean
@@ -189,6 +191,8 @@ buildLedgerRow accounts (FinanceTransaction tx) =
   , accountLabel: resolveAccountLabel accounts tx.accountId
   , occurredAtLabel: tx.occurredAt
   , categoryLabel: maybe "-" (\(FinanceTransactionCategory category) -> category.id) tx.category
+  , counterpartyLabel: fromMaybe "-" tx.counterparty
+  , descriptionLabel: fromMaybe "-" tx.description
   , hasSplit: not (null tx.splits)
   , hasTransfer: isJust tx.transfer
   , hasNote: not (null tx.notes)
@@ -302,6 +306,8 @@ renderRows rows =
                 , th [] [ text "Account" ]
                 , th [] [ text "Occurred At" ]
                 , th [] [ text "Category" ]
+                , th [] [ text "Counterparty" ]
+                , th [] [ text "Description" ]
                 , th [] [ text "Facts" ]
                 ]
             ]
@@ -317,6 +323,8 @@ renderRow row =
     , td [ class_ "finance-ledger-row__account" ] [ text row.accountLabel ]
     , td [ class_ "finance-ledger-row__occurred-at" ] [ text row.occurredAtLabel ]
     , td [ class_ "finance-ledger-row__category" ] [ text row.categoryLabel ]
+    , td [ class_ "finance-ledger-row__counterparty" ] [ text row.counterpartyLabel ]
+    , td [ class_ "finance-ledger-row__description" ] [ text row.descriptionLabel ]
     , td [ class_ "finance-ledger-row__facts" ] [ renderFacts row ]
     ]
 

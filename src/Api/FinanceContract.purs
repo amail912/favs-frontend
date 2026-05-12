@@ -12,6 +12,7 @@ module Api.FinanceContract
   , FinanceTransaction(..)
   , FinanceTransactionsQuery(..)
   , CreateFinanceTransaction(..)
+  , UpdateFinanceTransactionMetadata(..)
   , CategorizeFinanceTransaction(..)
   , SplitFinanceTransaction(..)
   , LinkFinanceTransfer(..)
@@ -20,6 +21,9 @@ module Api.FinanceContract
   , FinanceReportDirection(..)
   , FinanceReportQuery(..)
   , FinanceAggregateReport(..)
+  , FinanceCounterpartySuggestionsQuery(..)
+  , FinanceCounterpartySuggestion(..)
+  , FinanceCounterpartySuggestionsResult(..)
   , basePath
   , accountsPath
   , categoriesPath
@@ -31,6 +35,8 @@ module Api.FinanceContract
   , linkTransferPath
   , transactionNotesPath
   , transactionNotePath
+  , transactionMetadataPath
+  , counterpartySuggestPath
   , reportPath
   ) where
 
@@ -81,6 +87,13 @@ transactionNotesPath transactionId =
 transactionNotePath :: String -> String -> String
 transactionNotePath transactionId noteId =
   transactionNotesPath transactionId <> "/" <> noteId
+
+transactionMetadataPath :: String -> String
+transactionMetadataPath transactionId =
+  transactionsPath <> "/" <> transactionId <> "/metadata"
+
+counterpartySuggestPath :: String
+counterpartySuggestPath = basePath <> "/counterparties/suggest"
 
 reportPath :: String
 reportPath = basePath <> "/report"
@@ -174,6 +187,8 @@ newtype FinanceTransaction = FinanceTransaction
   , amount :: Number
   , occurredAt :: String
   , recordedAt :: String
+  , counterparty :: Maybe String
+  , description :: Maybe String
   , transfer :: Maybe FinanceTransferLink
   , category :: Maybe FinanceTransactionCategory
   , splits :: Array FinanceTransactionSplitRow
@@ -191,6 +206,13 @@ newtype CreateFinanceTransaction = CreateFinanceTransaction
   { accountId :: String
   , amount :: Number
   , occurredAt :: Maybe String
+  , counterparty :: Maybe String
+  , description :: Maybe String
+  }
+
+newtype UpdateFinanceTransactionMetadata = UpdateFinanceTransactionMetadata
+  { counterparty :: Maybe (Maybe String)
+  , description :: Maybe (Maybe String)
   }
 
 newtype CategorizeFinanceTransaction = CategorizeFinanceTransaction
@@ -241,6 +263,24 @@ newtype FinanceAggregateReport = FinanceAggregateReport
   , transactionIds :: Array String
   }
 
+newtype FinanceCounterpartySuggestionsQuery = FinanceCounterpartySuggestionsQuery
+  { q :: String
+  , limit :: Maybe Int
+  , direction :: Maybe FinanceReportDirection
+  , accountId :: Maybe String
+  }
+
+newtype FinanceCounterpartySuggestion = FinanceCounterpartySuggestion
+  { value :: String
+  , usageCount :: Int
+  , lastUsedAt :: String
+  , suggestedCategory :: Maybe String
+  }
+
+newtype FinanceCounterpartySuggestionsResult = FinanceCounterpartySuggestionsResult
+  { items :: Array FinanceCounterpartySuggestion
+  }
+
 derive instance financeAccountEq :: Eq FinanceAccount
 derive instance financeCategoryEq :: Eq FinanceCategory
 derive instance financeTransferLinkEq :: Eq FinanceTransferLink
@@ -255,7 +295,10 @@ derive instance splitFinanceTransactionEq :: Eq SplitFinanceTransaction
 derive instance linkFinanceTransferEq :: Eq LinkFinanceTransfer
 derive instance createFinanceTransactionNoteEq :: Eq CreateFinanceTransactionNote
 derive instance updateFinanceTransactionNoteEq :: Eq UpdateFinanceTransactionNote
+derive instance updateFinanceTransactionMetadataEq :: Eq UpdateFinanceTransactionMetadata
 derive instance financeAggregateReportEq :: Eq FinanceAggregateReport
+derive instance financeCounterpartySuggestionEq :: Eq FinanceCounterpartySuggestion
+derive instance financeCounterpartySuggestionsResultEq :: Eq FinanceCounterpartySuggestionsResult
 
 instance decodeFinanceAccount :: DecodeJson FinanceAccount where
   decodeJson json = do
@@ -317,6 +360,8 @@ instance decodeFinanceTransaction :: DecodeJson FinanceTransaction where
     amount <- obj .: "amount"
     occurredAt <- obj .: "occurredAt"
     recordedAt <- obj .: "recordedAt"
+    counterparty <- obj .:? "counterparty"
+    description <- obj .:? "description"
     transfer <- obj .:? "transfer"
     category <- obj .:? "category"
     splits <- obj .: "splits"
@@ -330,6 +375,8 @@ instance decodeFinanceTransaction :: DecodeJson FinanceTransaction where
           , amount
           , occurredAt
           , recordedAt
+          , counterparty
+          , description
           , transfer
           , category
           , splits
@@ -345,6 +392,33 @@ instance decodeFinanceAggregateReport :: DecodeJson FinanceAggregateReport where
     count <- obj .: "count"
     transactionIds <- obj .: "transactionIds"
     pure (FinanceAggregateReport { total, count, transactionIds })
+
+instance decodeFinanceCounterpartySuggestion :: DecodeJson FinanceCounterpartySuggestion where
+  decodeJson json = do
+    obj <- decodeJson json
+    value <- obj .: "value"
+    usageCount <- obj .: "usageCount"
+    lastUsedAt <- obj .: "lastUsedAt"
+    suggestedCategory <- obj .:? "suggestedCategory"
+    pure (FinanceCounterpartySuggestion { value, usageCount, lastUsedAt, suggestedCategory })
+
+instance decodeFinanceCounterpartySuggestionsResult :: DecodeJson FinanceCounterpartySuggestionsResult where
+  decodeJson json = do
+    obj <- decodeJson json
+    items <- obj .: "items"
+    pure (FinanceCounterpartySuggestionsResult { items })
+
+instance encodeFinanceCounterpartySuggestion :: EncodeJson FinanceCounterpartySuggestion where
+  encodeJson (FinanceCounterpartySuggestion payload) =
+    "value" := payload.value
+      ~> "usageCount" := payload.usageCount
+      ~> "lastUsedAt" := payload.lastUsedAt
+      ~> "suggestedCategory" := payload.suggestedCategory
+      ~> jsonEmptyObject
+
+instance encodeFinanceCounterpartySuggestionsResult :: EncodeJson FinanceCounterpartySuggestionsResult where
+  encodeJson (FinanceCounterpartySuggestionsResult payload) =
+    "items" := payload.items ~> jsonEmptyObject
 
 instance encodeFinanceAccount :: EncodeJson FinanceAccount where
   encodeJson (FinanceAccount payload) =
@@ -390,6 +464,8 @@ instance encodeFinanceTransaction :: EncodeJson FinanceTransaction where
       ~> "amount" := payload.amount
       ~> "occurredAt" := payload.occurredAt
       ~> "recordedAt" := payload.recordedAt
+      ~> "counterparty" := payload.counterparty
+      ~> "description" := payload.description
       ~> "transfer" := payload.transfer
       ~> "category" := payload.category
       ~> "splits" := payload.splits
@@ -409,6 +485,14 @@ instance encodeCreateFinanceTransaction :: EncodeJson CreateFinanceTransaction w
     "accountId" := payload.accountId
       ~> "amount" := payload.amount
       ~> "occurredAt" := payload.occurredAt
+      ~> "counterparty" := payload.counterparty
+      ~> "description" := payload.description
+      ~> jsonEmptyObject
+
+instance encodeUpdateFinanceTransactionMetadata :: EncodeJson UpdateFinanceTransactionMetadata where
+  encodeJson (UpdateFinanceTransactionMetadata payload) =
+    "counterparty" := payload.counterparty
+      ~> "description" := payload.description
       ~> jsonEmptyObject
 
 instance encodeCategorizeFinanceTransaction :: EncodeJson CategorizeFinanceTransaction where

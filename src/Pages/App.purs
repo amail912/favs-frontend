@@ -41,11 +41,13 @@ import Api.Finance
   , createSentTransaction
   , createTransactionNote
   , deleteTransactionNote
+  , getCounterpartySuggestions
   , getAccounts
   , getCategories
   , getTransactions
   , linkTransfer
   , splitTransaction
+  , updateTransactionMetadata
   , updateTransactionNote
   )
 import Api.FinanceContract
@@ -57,15 +59,20 @@ import Api.FinanceContract
   , FinanceAccountsStatus(..)
   , FinanceCategory(..)
   , FinanceTransaction(..)
+  , FinanceReportDirection(..)
   , FinanceTransactionAdjustment(..)
   , FinanceTransactionCategory(..)
   , FinanceTransactionDirection(..)
   , FinanceTransactionNote(..)
+  , FinanceCounterpartySuggestion(..)
+  , FinanceCounterpartySuggestionsQuery(..)
+  , FinanceCounterpartySuggestionsResult(..)
   , FinanceTransactionSplitRow(..)
   , FinanceTransactionsQuery(..)
   , FinanceTransferLink(..)
   , LinkFinanceTransfer(..)
   , SplitFinanceTransaction(..)
+  , UpdateFinanceTransactionMetadata(..)
   , UpdateFinanceTransactionNote(..)
   )
 import Pages.Admin (component) as Admin
@@ -384,10 +391,18 @@ data Action
   | FinanceCreateAccountChanged String
   | FinanceCreateAmountChanged String
   | FinanceCreateOccurredAtChanged String
+  | FinanceCreateCounterpartyChanged String
+  | FinanceCreateDescriptionChanged String
+  | FinanceCreateSuggestionsLoaded (Either String (Array FinanceCounterpartySuggestion))
+  | FinanceCreateSuggestionSelected String
   | SubmitFinanceCreate
   | FinanceCreateAccountsLoaded (Either String (Array FinanceAccount))
   | FinanceCreateSubmitted (Either String Unit)
   | FinanceDetailCategoriesLoaded (Either String (Array FinanceCategory))
+  | FinanceDetailCounterpartyChanged String
+  | FinanceDetailDescriptionChanged String
+  | SubmitFinanceDetailMetadata
+  | FinanceDetailMetadataSubmitted String String (Either String FinanceTransaction)
   | FinanceDetailCategoryChanged String
   | SubmitFinanceDetailCategory
   | FinanceDetailCategorySubmitted String (Either String Unit)
@@ -478,6 +493,11 @@ type FinanceCreateState =
   , accountId :: String
   , amountInput :: String
   , occurredAtInput :: String
+  , counterpartyInput :: String
+  , descriptionInput :: String
+  , suggestions :: Array FinanceCounterpartySuggestion
+  , isLoadingSuggestions :: Boolean
+  , suggestionsError :: Maybe String
   , accountError :: Maybe String
   , amountError :: Maybe String
   , occurredAtError :: Maybe String
@@ -489,6 +509,10 @@ type FinanceCreateState =
 type FinanceDetailMutationState =
   { categories :: Array FinanceCategory
   , isLoadingCategories :: Boolean
+  , counterpartyDraft :: String
+  , descriptionDraft :: String
+  , isSubmittingMetadata :: Boolean
+  , metadataError :: Maybe String
   , categoryDraft :: String
   , categoryError :: Maybe String
   , isSubmittingCategory :: Boolean
@@ -762,6 +786,65 @@ handleAction (FinanceCreateOccurredAtChanged raw) =
             (_ { occurredAtInput = raw, occurredAtError = Nothing, submitError = Nothing })
             st.financeCreateState
       }
+handleAction (FinanceCreateCounterpartyChanged raw) = do
+  modify_ \st ->
+    st
+      { financeCreateState =
+          map
+            ( _
+                { counterpartyInput = raw
+                , submitError = Nothing
+                , suggestionsError = Nothing
+                , isLoadingSuggestions = raw /= ""
+                }
+            )
+            st.financeCreateState
+      }
+  st <- get
+  case st.financeCreateState of
+    Nothing -> pure unit
+    Just createState ->
+      if raw == "" then
+        modify_ \next ->
+          next
+            { financeCreateState =
+                map
+                  (_ { suggestions = [], isLoadingSuggestions = false, suggestionsError = Nothing })
+                  next.financeCreateState
+            }
+      else do
+        result <- liftAff (fetchCounterpartySuggestions createState.launch.direction createState.accountId raw)
+        handleAction (FinanceCreateSuggestionsLoaded result)
+handleAction (FinanceCreateDescriptionChanged raw) =
+  modify_ \st ->
+    st
+      { financeCreateState =
+          map
+            (_ { descriptionInput = raw, submitError = Nothing })
+            st.financeCreateState
+      }
+handleAction (FinanceCreateSuggestionsLoaded result) =
+  modify_ \st ->
+    st
+      { financeCreateState =
+          map
+            ( \createState ->
+                case result of
+                  Left message ->
+                    createState { suggestions = [], isLoadingSuggestions = false, suggestionsError = Just message }
+                  Right suggestions ->
+                    createState { suggestions = suggestions, isLoadingSuggestions = false, suggestionsError = Nothing }
+            )
+            st.financeCreateState
+      }
+handleAction (FinanceCreateSuggestionSelected selectedCounterparty) =
+  modify_ \st ->
+    st
+      { financeCreateState =
+          map
+            (_ { counterpartyInput = selectedCounterparty, suggestions = [], suggestionsError = Nothing })
+            st.financeCreateState
+      }
 handleAction SubmitFinanceCreate = do
   st <- get
   case st.financeCreateState of
@@ -857,6 +940,11 @@ handleAction (FinanceCreateSubmitted result) = do
                       ( _
                           { isSubmitting = false
                           , amountInput = ""
+                          , counterpartyInput = ""
+                          , descriptionInput = ""
+                          , suggestions = []
+                          , isLoadingSuggestions = false
+                          , suggestionsError = Nothing
                           , accountError = Nothing
                           , amountError = Nothing
                           , occurredAtError = Nothing
@@ -879,6 +967,62 @@ handleAction (FinanceDetailCategoriesLoaded result) =
             )
             st.financeDetailMutationState
       }
+handleAction (FinanceDetailCounterpartyChanged raw) =
+  modify_ \st ->
+    st
+      { financeDetailMutationState =
+          map
+            (_ { counterpartyDraft = raw, metadataError = Nothing })
+            st.financeDetailMutationState
+      }
+handleAction (FinanceDetailDescriptionChanged raw) =
+  modify_ \st ->
+    st
+      { financeDetailMutationState =
+          map
+            (_ { descriptionDraft = raw, metadataError = Nothing })
+            st.financeDetailMutationState
+      }
+handleAction SubmitFinanceDetailMetadata = do
+  st <- get
+  case st.financeDetailSnapshot, st.financeDetailMutationState of
+    Just { transaction: FinanceTransaction tx }, Just mutationState ->
+      if mutationState.isSubmittingMetadata then pure unit
+      else do
+        let previousCounterparty = mutationState.counterpartyDraft
+        let previousDescription = mutationState.descriptionDraft
+        modify_ \next ->
+          next
+            { financeDetailMutationState =
+                map
+                  (_ { isSubmittingMetadata = true, metadataError = Nothing })
+                  next.financeDetailMutationState
+            }
+        result <- liftAff (submitFinanceDetailMetadata tx.id mutationState.counterpartyDraft mutationState.descriptionDraft)
+        handleAction (FinanceDetailMetadataSubmitted previousCounterparty previousDescription result)
+    _, _ -> pure unit
+handleAction (FinanceDetailMetadataSubmitted previousCounterparty previousDescription result) =
+  case result of
+    Left message ->
+      modify_ \st ->
+        st
+          { financeDetailMutationState =
+              map
+                (_ { isSubmittingMetadata = false, metadataError = Just message, counterpartyDraft = previousCounterparty, descriptionDraft = previousDescription })
+                st.financeDetailMutationState
+          }
+    Right updatedTx ->
+      modify_ \st ->
+        st
+          { financeDetailSnapshot =
+              map
+                (mapDetailSnapshotTransaction (const updatedTx))
+                st.financeDetailSnapshot
+          , financeDetailMutationState =
+              map
+                (_ { isSubmittingMetadata = false, metadataError = Nothing, hasSuccessfulMutations = true })
+                st.financeDetailMutationState
+          }
 handleAction (FinanceDetailCategoryChanged categoryId) =
   modify_ \st ->
     st
@@ -2247,6 +2391,11 @@ initialFinanceCreateState launch occurredAtInput =
   , accountId: fromMaybe "" launch.accountId
   , amountInput: ""
   , occurredAtInput
+  , counterpartyInput: ""
+  , descriptionInput: ""
+  , suggestions: []
+  , isLoadingSuggestions: false
+  , suggestionsError: Nothing
   , accountError: Nothing
   , amountError: Nothing
   , occurredAtError: Nothing
@@ -2270,6 +2419,29 @@ fetchFinanceCreateAccounts = do
         pure (lmap show (decodeJson successResponse.body :: Either _ (Array FinanceAccount)))
       else
         pure (Left ("Unable to load accounts: status " <> show (unwrap successResponse.status)))
+
+fetchCounterpartySuggestions :: String -> String -> String -> Aff (Either String (Array FinanceCounterpartySuggestion))
+fetchCounterpartySuggestions direction accountId q = do
+  let reportDirection = if direction == "sent" then Just ReportSent else Just ReportReceived
+  response <-
+    getCounterpartySuggestions
+      ( FinanceCounterpartySuggestionsQuery
+          { q
+          , limit: Just 8
+          , direction: reportDirection
+          , accountId: if accountId == "" then Nothing else Just accountId
+          }
+      )
+  case response of
+    Left err ->
+      pure (Left ("Unable to load counterparty suggestions: " <> printError err))
+    Right successResponse ->
+      if statusOk successResponse then
+        case lmap show (decodeJson successResponse.body :: Either _ FinanceCounterpartySuggestionsResult) of
+          Left decodeError -> pure (Left decodeError)
+          Right (FinanceCounterpartySuggestionsResult payload) -> pure (Right payload.items)
+      else
+        pure (Left ("Unable to load counterparty suggestions: status " <> show (unwrap successResponse.status)))
 
 validateFinanceAmount :: String -> Maybe String
 validateFinanceAmount raw =
@@ -2300,7 +2472,15 @@ submitFinanceCreate idempotencyKey createState =
     Nothing ->
       pure (Left "Amount parsing failed.")
     Just amount -> do
-      let payload = CreateFinanceTransaction { accountId: createState.accountId, amount, occurredAt: Just createState.occurredAtInput }
+      let
+        payload =
+          CreateFinanceTransaction
+            { accountId: createState.accountId
+            , amount
+            , occurredAt: Just createState.occurredAtInput
+            , counterparty: nonEmptyTrimmed createState.counterpartyInput
+            , description: nonEmptyTrimmed createState.descriptionInput
+            }
       response <- case createState.launch.direction of
         "sent" -> createSentTransaction idempotencyKey payload
         _ -> createReceivedTransaction idempotencyKey payload
@@ -2312,6 +2492,13 @@ submitFinanceCreate idempotencyKey createState =
             pure (Right unit)
           else
             pure (Left ("Unable to save transaction: status " <> show (unwrap successResponse.status)))
+
+nonEmptyTrimmed :: String -> Maybe String
+nonEmptyTrimmed raw =
+  let
+    trimmed = StringCommon.trim raw
+  in
+    if trimmed == "" then Nothing else Just trimmed
 
 renderFinanceCreateForm :: forall w. FinanceCreateLaunch -> Maybe FinanceCreateState -> HTML w Action
 renderFinanceCreateForm launch maybeCreateState =
@@ -2356,11 +2543,47 @@ renderFinanceCreateForm launch maybeCreateState =
                 ]
             , maybe (text "") (\message -> div [ class_ "text-danger small" ] [ text message ]) createState.occurredAtError
             ]
+        , div [ class_ "d-flex flex-column gap-1" ]
+            [ label [ class_ "form-label mb-0" ] [ text "Counterparty" ]
+            , input
+                [ class_ "form-control finance-create-overlay__counterparty-input"
+                , value createState.counterpartyInput
+                , disabled createState.isSubmitting
+                , onValueChange FinanceCreateCounterpartyChanged
+                ]
+            , if createState.isLoadingSuggestions then
+                div [ class_ "small text-muted" ] [ text "Loading suggestions..." ]
+              else if null createState.suggestions then
+                text ""
+              else
+                div [ class_ "d-flex flex-column gap-1" ] (map renderSuggestion createState.suggestions)
+            , maybe (text "") (\message -> div [ class_ "text-danger small" ] [ text message ]) createState.suggestionsError
+            ]
+        , div [ class_ "d-flex flex-column gap-1" ]
+            [ label [ class_ "form-label mb-0" ] [ text "Description" ]
+            , input
+                [ class_ "form-control finance-create-overlay__description-input"
+                , value createState.descriptionInput
+                , disabled createState.isSubmitting
+                , onValueChange FinanceCreateDescriptionChanged
+                ]
+            ]
         , maybe (text "") (\message -> div [ class_ "alert alert-danger mb-0 finance-create-overlay__submit-error" ] [ text message ]) createState.submitError
         ]
   where
   renderAccountOption (FinanceAccount account) =
     option [ value account.id ] [ text account.name ]
+
+  renderSuggestion (FinanceCounterpartySuggestion suggestion) =
+    button
+      [ class_ "btn btn-sm btn-outline-secondary text-start finance-create-overlay__counterparty-suggestion"
+      , onClick (const (FinanceCreateSuggestionSelected suggestion.value))
+      ]
+      [ text
+          ( suggestion.value
+              <> foldMap (\category -> " (" <> category <> ")") suggestion.suggestedCategory
+          )
+      ]
 
 renderFinanceDetailOverlayBody :: forall w. String -> Maybe FinanceTransactions.FinanceDetailSnapshot -> Maybe FinanceDetailMutationState -> HTML w Action
 renderFinanceDetailOverlayBody transactionId maybeSnapshot maybeMutationState =
@@ -2384,6 +2607,33 @@ renderFinanceDetailOverlayBody transactionId maybeSnapshot maybeMutationState =
             , div [] [ text ("Occurred at: " <> tx.occurredAt) ]
             , div [] [ text ("Recorded at: " <> tx.recordedAt) ]
             ]
+        , div [ class_ "d-flex flex-column gap-2 finance-detail-overlay__metadata" ]
+            [ div [ class_ "fw-semibold" ] [ text "Metadata" ]
+            , div [ class_ "d-flex flex-column gap-1" ]
+                [ label [ class_ "form-label mb-0" ] [ text "Counterparty" ]
+                , input
+                    [ class_ "form-control form-control-sm finance-detail-overlay__counterparty-input"
+                    , value mutationState.counterpartyDraft
+                    , onValueChange FinanceDetailCounterpartyChanged
+                    , disabled mutationState.isSubmittingMetadata
+                    ]
+                ]
+            , div [ class_ "d-flex flex-column gap-1" ]
+                [ label [ class_ "form-label mb-0" ] [ text "Description" ]
+                , input
+                    [ class_ "form-control form-control-sm finance-detail-overlay__description-input"
+                    , value mutationState.descriptionDraft
+                    , onValueChange FinanceDetailDescriptionChanged
+                    , disabled mutationState.isSubmittingMetadata
+                    ]
+                ]
+            , button
+                [ class_ "btn btn-sm btn-outline-primary finance-detail-overlay__metadata-submit"
+                , onClick (const SubmitFinanceDetailMetadata)
+                , disabled mutationState.isSubmittingMetadata
+                ]
+                [ text (if mutationState.isSubmittingMetadata then "Saving..." else "Save metadata") ]
+            ]
         , div [ class_ "d-flex flex-column gap-2 finance-detail-overlay__category" ]
             [ div [ class_ "fw-semibold" ] [ text "Categorization" ]
             , renderCategorization tx.splits tx.category
@@ -2402,7 +2652,7 @@ renderFinanceDetailOverlayBody transactionId maybeSnapshot maybeMutationState =
             [ div [ class_ "fw-semibold" ] [ text "Adjustment" ]
             , renderAdjustment tx.adjustment
             ]
-        , maybe (text "") (\message -> div [ class_ "alert alert-danger mb-0 finance-detail-overlay__mutation-error" ] [ text message ]) (mutationState.categoryError <|> mutationState.noteError)
+        , maybe (text "") (\message -> div [ class_ "alert alert-danger mb-0 finance-detail-overlay__mutation-error" ] [ text message ]) (mutationState.metadataError <|> mutationState.categoryError <|> mutationState.noteError)
         ]
   where
   renderCategorization splits category =
@@ -2661,6 +2911,10 @@ initialFinanceDetailMutationState :: FinanceTransactions.FinanceDetailSnapshot -
 initialFinanceDetailMutationState { transaction: FinanceTransaction tx } =
   { categories: []
   , isLoadingCategories: true
+  , counterpartyDraft: fromMaybe "" tx.counterparty
+  , descriptionDraft: fromMaybe "" tx.description
+  , isSubmittingMetadata: false
+  , metadataError: Nothing
   , categoryDraft: foldMap (\(FinanceTransactionCategory category) -> category.id) tx.category
   , categoryError: Nothing
   , isSubmittingCategory: false
@@ -2827,6 +3081,25 @@ submitFinanceDetailCategory transactionId categoryId = do
     Right response ->
       if statusOk response then pure (Right unit)
       else pure (Left ("Unable to categorize transaction: status " <> show (unwrap response.status)))
+
+submitFinanceDetailMetadata :: String -> String -> String -> Aff (Either String FinanceTransaction)
+submitFinanceDetailMetadata transactionId counterpartyRaw descriptionRaw = do
+  result <-
+    updateTransactionMetadata
+      transactionId
+      ( UpdateFinanceTransactionMetadata
+          { counterparty: Just (nonEmptyTrimmed counterpartyRaw)
+          , description: Just (nonEmptyTrimmed descriptionRaw)
+          }
+      )
+  case result of
+    Left err ->
+      pure (Left ("Unable to update metadata: " <> printError err))
+    Right response ->
+      if statusOk response then
+        pure (lmap show (decodeJson response.body :: Either _ FinanceTransaction))
+      else
+        pure (Left ("Unable to update metadata: status " <> show (unwrap response.status)))
 
 submitFinanceDetailNewNote :: String -> String -> Aff (Either String FinanceTransactionNote)
 submitFinanceDetailNewNote transactionId noteText = do

@@ -184,6 +184,8 @@ sampleFinanceTransaction id linkedTransactionId =
     , amount: 12.0
     , occurredAt: "2026-05-01T10:00:00Z"
     , recordedAt: "2026-05-01T10:05:00Z"
+    , counterparty: Nothing
+    , description: Nothing
     , transfer: map (\linkedId -> FinanceTransferLink { linkedTransactionId: linkedId, linkType: "transfer" }) linkedTransactionId
     , category: Nothing
     , splits: [] :: Array FinanceTransactionSplitRow

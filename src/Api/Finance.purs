@@ -9,10 +9,13 @@ module Api.Finance
   , linkTransfer
   , createTransactionNote
   , updateTransactionNote
+  , updateTransactionMetadata
   , deleteTransactionNote
+  , getCounterpartySuggestions
   , getAggregateReport
   , encodeTransactionsQuery
   , encodeAccountsQuery
+  , encodeCounterpartySuggestionsQuery
   , encodeReportQuery
   ) where
 
@@ -27,6 +30,7 @@ import Api.FinanceContract
   ( CategorizeFinanceTransaction
   , CreateFinanceTransaction
   , CreateFinanceTransactionNote
+  , FinanceCounterpartySuggestionsQuery(..)
   , FinanceAccountsQuery(..)
   , FinanceAccountsStatus(..)
   , FinanceReportDirection(..)
@@ -34,6 +38,7 @@ import Api.FinanceContract
   , FinanceTransactionsQuery(..)
   , LinkFinanceTransfer
   , SplitFinanceTransaction
+  , UpdateFinanceTransactionMetadata
   , UpdateFinanceTransactionNote
   , accountsPath
   , categoriesPath
@@ -42,7 +47,9 @@ import Api.FinanceContract
   , reportPath
   , splitTransactionPath
   , transactionNotePath
+  , transactionMetadataPath
   , transactionNotesPath
+  , counterpartySuggestPath
   , transactionsPath
   , transactionsReceivedPath
   , transactionsSentPath
@@ -110,9 +117,17 @@ updateTransactionNote :: String -> String -> UpdateFinanceTransactionNote -> Aff
 updateTransactionNote transactionId noteId payload =
   Affjax.put json (transactionNotePath transactionId noteId) (jsonBody payload)
 
+updateTransactionMetadata :: String -> UpdateFinanceTransactionMetadata -> Aff JsonResponse
+updateTransactionMetadata transactionId payload =
+  Affjax.post json (transactionMetadataPath transactionId) (jsonBody payload)
+
 deleteTransactionNote :: String -> String -> Aff TextResponse
 deleteTransactionNote transactionId noteId =
   Affjax.delete string (transactionNotePath transactionId noteId)
+
+getCounterpartySuggestions :: FinanceCounterpartySuggestionsQuery -> Aff JsonResponse
+getCounterpartySuggestions query =
+  Affjax.get json (counterpartySuggestPath <> encodeCounterpartySuggestionsQuery query)
 
 getAggregateReport :: FinanceReportQuery -> Aff JsonResponse
 getAggregateReport query =
@@ -144,6 +159,15 @@ encodeReportQuery (FinanceReportQuery query) =
         <> map (\value -> Just ("categoryIn=" <> value)) query.categoryIn
         <> map (\value -> Just ("categoryNotIn=" <> value)) query.categoryNotIn
     )
+
+encodeCounterpartySuggestionsQuery :: FinanceCounterpartySuggestionsQuery -> String
+encodeCounterpartySuggestionsQuery (FinanceCounterpartySuggestionsQuery query) =
+  encodeQueryString
+    [ Just ("q=" <> query.q)
+    , map (\value -> "limit=" <> show value) query.limit
+    , map (\direction -> "direction=" <> encodeReportDirection direction) query.direction
+    , map (\value -> "accountId=" <> value) query.accountId
+    ]
 
 encodeQueryString :: Array (Maybe String) -> String
 encodeQueryString entries =
