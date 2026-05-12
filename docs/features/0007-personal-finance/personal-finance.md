@@ -81,6 +81,10 @@ Help users manage financial operations as explicit, explainable facts: capture t
 - [015 Reports Aggregate Summary And Ledger Drill-Down](done/015-reports-aggregate-summary-and-ledger-drill-down.md) - Add a first-pass date-range aggregate report with exact drill-down back into the ledger’s current date-context model.
 
 ### Ready
+- [016 Rich Transaction Metadata](ready/016-rich-transaction-metadata.md) - Add backend-aligned counterparty/description capture, metadata editing, and counterparty suggestions with explicit non-automatic categorization behavior.
+- [017 Extended Ledger Filtering](ready/017-extended-ledger-filtering.md) - Add backend-supported direction/category/amount/text ledger filtering with URL-backed context and explicit backend validation behavior.
+- [018 Rich Analytical Reports](ready/018-rich-analytical-reports.md) - Add backend analytics report sections (`summary`, `categoryBreakdown`, `cashflowSeries`, `accountBalances`) with shared finance filter semantics.
+- [019 Report/Ledger Exact Drill-Down And Richer Report Filters](ready/019-report-ledger-exact-drill-down-and-richer-report-filters.md) - Align richer report controls and ledger context for exact drill-down using shared backend filter semantics.
 
 ### To Refine
 
@@ -88,7 +92,3 @@ Help users manage financial operations as explicit, explainable facts: capture t
 - [005 Account Context Surface And Handoff](canceled/005-account-context-surface-and-handoff.md) - Canceled because account context comes from the `Transactions` page account filter; its useful behavior was redistributed into ledger filtering, create prefill, and report drill-down.
 
 ### Postponed
-- [016 Rich Transaction Metadata](postponed/016-rich-transaction-metadata.md) - Track counterparty, description, counterparty suggestions, and counterparty-driven category suggestions once the backend exposes the required data.
-- [017 Extended Ledger Filtering](postponed/017-extended-ledger-filtering.md) - Track direction, category, amount-range, and text-search ledger filtering beyond the backend-supported account/date filters.
-- [018 Rich Analytical Reports](postponed/018-rich-analytical-reports.md) - Track chart-ready category breakdowns, time-series cashflow, account-balance reporting, and other analytical datasets that the current backend report endpoint does not return.
-- [019 Report/Ledger Exact Drill-Down And Richer Report Filters](postponed/019-report-ledger-exact-drill-down-and-richer-report-filters.md) - Track richer report controls and exact drill-down beyond the current ledger filter contract, including why this was deferred from `007` and the first-pass `015`.
