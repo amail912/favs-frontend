@@ -216,7 +216,7 @@ async function mockFinanceLedgerRoutes(page, transactions) {
 }
 
 async function mockFinanceReportRoute(page, response) {
-  await page.route("**/api/v1/finance/report**", async route => {
+  await page.route("**/api/v1/finance/report/analytics**", async route => {
     if (route.request().method() === "GET") {
       await route.fulfill({
         status: response.status,
@@ -367,7 +367,12 @@ authTest("finance reports submits a date range and drills down to ledger scope",
   await mockFinanceLedgerRoutes(page, buildFinanceTransactions(8));
   await mockFinanceReportRoute(page, {
     status: 200,
-    body: { total: 42.5, count: 3, transactionIds: ["tx-1", "tx-3", "tx-5"] }
+    body: {
+      summary: { total: 42.5, count: 3 },
+      categoryBreakdown: [{ categoryId: "cat-1", total: 30.0, count: 2 }],
+      cashflowSeries: [{ bucketStart: "2026-05-01T00:00:00Z", bucketEnd: "2026-05-02T00:00:00Z", total: 12.5, count: 1 }],
+      accountBalances: [{ accountId: "acc-1", total: 12.5 }]
+    }
   });
 
   await page.goto("/finance/reports");
@@ -393,7 +398,7 @@ authTest("finance reports shows recoverable backend error", async ({ authenticat
   await page.locator(".finance-reports-filter-from").fill("2026-05-01T00:00:00Z");
   await page.locator(".finance-reports-filter-to").fill("2026-05-31T23:59:59Z");
   await page.locator(".finance-reports-apply").click();
-  await authExpect(page.locator(".finance-reports-error")).toContainText("Unable to load report: status 500");
+  await authExpect(page.locator(".finance-reports-error")).toContainText("Unable to load report analytics: status 500");
   await authExpect(page.locator(".finance-reports-apply")).toBeVisible();
 });
 

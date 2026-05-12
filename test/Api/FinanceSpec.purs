@@ -2,11 +2,17 @@ module Test.Api.FinanceSpec (spec) where
 
 import Prelude
 
-import Api.Finance (encodeAccountsQuery, encodeReportQuery, encodeTransactionsQuery)
+import Api.Finance (encodeAccountsQuery, encodeAnalyticsQuery, encodeReportQuery, encodeTransactionsQuery)
 import Api.FinanceContract
   ( CategorizeFinanceTransaction(..)
   , CreateFinanceTransaction(..)
   , CreateFinanceTransactionNote(..)
+  , FinanceAnalyticsAccountBalanceRow(..)
+  , FinanceAnalyticsCashflowSeriesRow(..)
+  , FinanceAnalyticsCategoryBreakdownRow(..)
+  , FinanceAnalyticsQuery(..)
+  , FinanceAnalyticsReport(..)
+  , FinanceAnalyticsSummary(..)
   , FinanceCounterpartySuggestion(..)
   , FinanceCounterpartySuggestionsResult(..)
   , FinanceAccount(..)
@@ -198,3 +204,55 @@ spec =
       query
         `shouldEqual`
           "?from=2026-05-01T00:00:00Z&to=2026-05-31T00:00:00Z&direction=sent&accountIn=acc-1&accountNotIn=acc-9&categoryIn=cat-1&categoryIn=cat-2&categoryNotIn=cat-9"
+
+    it "encodes analytics query with extended filters" do
+      let
+        query =
+          encodeAnalyticsQuery
+            ( FinanceAnalyticsQuery
+                { from: "2026-05-01T00:00:00Z"
+                , to: "2026-05-31T00:00:00Z"
+                , direction: Just ReportReceived
+                , accountId: Just "acc-1"
+                , categoryIn: [ "cat-1", "cat-2" ]
+                , categoryNotIn: [ "cat-9" ]
+                , amountMin: Just 10
+                , amountMax: Just 90
+                , search: Just "coffee"
+                }
+            )
+      query
+        `shouldEqual`
+          "?from=2026-05-01T00:00:00Z&to=2026-05-31T00:00:00Z&direction=received&accountId=acc-1&amountMin=10&amountMax=90&search=coffee&categoryIn=cat-1&categoryIn=cat-2&categoryNotIn=cat-9"
+
+    it "decodes analytics report response shape" do
+      let
+        payload =
+          FinanceAnalyticsReport
+            { summary: FinanceAnalyticsSummary { total: 42.5, count: 3 }
+            , categoryBreakdown:
+                [ FinanceAnalyticsCategoryBreakdownRow
+                    { categoryId: "cat-1"
+                    , total: 21.0
+                    , count: 2
+                    }
+                ]
+            , cashflowSeries:
+                [ FinanceAnalyticsCashflowSeriesRow
+                    { bucketStart: "2026-05-01T00:00:00Z"
+                    , bucketEnd: "2026-05-02T00:00:00Z"
+                    , total: 5.0
+                    , count: 1
+                    }
+                ]
+            , accountBalances:
+                [ FinanceAnalyticsAccountBalanceRow
+                    { accountId: "acc-1"
+                    , total: 11.0
+                    }
+                ]
+            }
+      case decodeJson (encodeJson payload) of
+        Right decoded ->
+          if decoded == payload then pure unit else fail "Decoded analytics payload did not match encoded value"
+        Left err -> fail $ "Failed to decode analytics payload: " <> show err

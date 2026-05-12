@@ -21,6 +21,12 @@ module Api.FinanceContract
   , FinanceReportDirection(..)
   , FinanceReportQuery(..)
   , FinanceAggregateReport(..)
+  , FinanceAnalyticsQuery(..)
+  , FinanceAnalyticsSummary(..)
+  , FinanceAnalyticsCategoryBreakdownRow(..)
+  , FinanceAnalyticsCashflowSeriesRow(..)
+  , FinanceAnalyticsAccountBalanceRow(..)
+  , FinanceAnalyticsReport(..)
   , FinanceCounterpartySuggestionsQuery(..)
   , FinanceCounterpartySuggestion(..)
   , FinanceCounterpartySuggestionsResult(..)
@@ -38,6 +44,7 @@ module Api.FinanceContract
   , transactionMetadataPath
   , counterpartySuggestPath
   , reportPath
+  , analyticsReportPath
   ) where
 
 import Prelude
@@ -97,6 +104,9 @@ counterpartySuggestPath = basePath <> "/counterparties/suggest"
 
 reportPath :: String
 reportPath = basePath <> "/report"
+
+analyticsReportPath :: String
+analyticsReportPath = reportPath <> "/analytics"
 
 data FinanceAccountsStatus = AccountsActive | AccountsClosed | AccountsAll
 
@@ -270,6 +280,48 @@ newtype FinanceAggregateReport = FinanceAggregateReport
   , transactionIds :: Array String
   }
 
+newtype FinanceAnalyticsQuery = FinanceAnalyticsQuery
+  { from :: String
+  , to :: String
+  , direction :: Maybe FinanceReportDirection
+  , accountId :: Maybe String
+  , categoryIn :: Array String
+  , categoryNotIn :: Array String
+  , amountMin :: Maybe Int
+  , amountMax :: Maybe Int
+  , search :: Maybe String
+  }
+
+newtype FinanceAnalyticsSummary = FinanceAnalyticsSummary
+  { total :: Number
+  , count :: Int
+  }
+
+newtype FinanceAnalyticsCategoryBreakdownRow = FinanceAnalyticsCategoryBreakdownRow
+  { categoryId :: String
+  , total :: Number
+  , count :: Int
+  }
+
+newtype FinanceAnalyticsCashflowSeriesRow = FinanceAnalyticsCashflowSeriesRow
+  { bucketStart :: String
+  , bucketEnd :: String
+  , total :: Number
+  , count :: Int
+  }
+
+newtype FinanceAnalyticsAccountBalanceRow = FinanceAnalyticsAccountBalanceRow
+  { accountId :: String
+  , total :: Number
+  }
+
+newtype FinanceAnalyticsReport = FinanceAnalyticsReport
+  { summary :: FinanceAnalyticsSummary
+  , categoryBreakdown :: Array FinanceAnalyticsCategoryBreakdownRow
+  , cashflowSeries :: Array FinanceAnalyticsCashflowSeriesRow
+  , accountBalances :: Array FinanceAnalyticsAccountBalanceRow
+  }
+
 newtype FinanceCounterpartySuggestionsQuery = FinanceCounterpartySuggestionsQuery
   { q :: String
   , limit :: Maybe Int
@@ -304,6 +356,11 @@ derive instance createFinanceTransactionNoteEq :: Eq CreateFinanceTransactionNot
 derive instance updateFinanceTransactionNoteEq :: Eq UpdateFinanceTransactionNote
 derive instance updateFinanceTransactionMetadataEq :: Eq UpdateFinanceTransactionMetadata
 derive instance financeAggregateReportEq :: Eq FinanceAggregateReport
+derive instance financeAnalyticsSummaryEq :: Eq FinanceAnalyticsSummary
+derive instance financeAnalyticsCategoryBreakdownRowEq :: Eq FinanceAnalyticsCategoryBreakdownRow
+derive instance financeAnalyticsCashflowSeriesRowEq :: Eq FinanceAnalyticsCashflowSeriesRow
+derive instance financeAnalyticsAccountBalanceRowEq :: Eq FinanceAnalyticsAccountBalanceRow
+derive instance financeAnalyticsReportEq :: Eq FinanceAnalyticsReport
 derive instance financeCounterpartySuggestionEq :: Eq FinanceCounterpartySuggestion
 derive instance financeCounterpartySuggestionsResultEq :: Eq FinanceCounterpartySuggestionsResult
 
@@ -400,6 +457,46 @@ instance decodeFinanceAggregateReport :: DecodeJson FinanceAggregateReport where
     transactionIds <- obj .: "transactionIds"
     pure (FinanceAggregateReport { total, count, transactionIds })
 
+instance decodeFinanceAnalyticsSummary :: DecodeJson FinanceAnalyticsSummary where
+  decodeJson json = do
+    obj <- decodeJson json
+    total <- obj .: "total"
+    count <- obj .: "count"
+    pure (FinanceAnalyticsSummary { total, count })
+
+instance decodeFinanceAnalyticsCategoryBreakdownRow :: DecodeJson FinanceAnalyticsCategoryBreakdownRow where
+  decodeJson json = do
+    obj <- decodeJson json
+    categoryId <- obj .: "categoryId"
+    total <- obj .: "total"
+    count <- obj .: "count"
+    pure (FinanceAnalyticsCategoryBreakdownRow { categoryId, total, count })
+
+instance decodeFinanceAnalyticsCashflowSeriesRow :: DecodeJson FinanceAnalyticsCashflowSeriesRow where
+  decodeJson json = do
+    obj <- decodeJson json
+    bucketStart <- obj .: "bucketStart"
+    bucketEnd <- obj .: "bucketEnd"
+    total <- obj .: "total"
+    count <- obj .: "count"
+    pure (FinanceAnalyticsCashflowSeriesRow { bucketStart, bucketEnd, total, count })
+
+instance decodeFinanceAnalyticsAccountBalanceRow :: DecodeJson FinanceAnalyticsAccountBalanceRow where
+  decodeJson json = do
+    obj <- decodeJson json
+    accountId <- obj .: "accountId"
+    total <- obj .: "total"
+    pure (FinanceAnalyticsAccountBalanceRow { accountId, total })
+
+instance decodeFinanceAnalyticsReport :: DecodeJson FinanceAnalyticsReport where
+  decodeJson json = do
+    obj <- decodeJson json
+    summary <- obj .: "summary"
+    categoryBreakdown <- obj .: "categoryBreakdown"
+    cashflowSeries <- obj .: "cashflowSeries"
+    accountBalances <- obj .: "accountBalances"
+    pure (FinanceAnalyticsReport { summary, categoryBreakdown, cashflowSeries, accountBalances })
+
 instance decodeFinanceCounterpartySuggestion :: DecodeJson FinanceCounterpartySuggestion where
   decodeJson json = do
     obj <- decodeJson json
@@ -485,6 +582,41 @@ instance encodeFinanceAggregateReport :: EncodeJson FinanceAggregateReport where
     "total" := payload.total
       ~> "count" := payload.count
       ~> "transactionIds" := payload.transactionIds
+      ~> jsonEmptyObject
+
+instance encodeFinanceAnalyticsSummary :: EncodeJson FinanceAnalyticsSummary where
+  encodeJson (FinanceAnalyticsSummary payload) =
+    "total" := payload.total
+      ~> "count" := payload.count
+      ~> jsonEmptyObject
+
+instance encodeFinanceAnalyticsCategoryBreakdownRow :: EncodeJson FinanceAnalyticsCategoryBreakdownRow where
+  encodeJson (FinanceAnalyticsCategoryBreakdownRow payload) =
+    "categoryId" := payload.categoryId
+      ~> "total" := payload.total
+      ~> "count" := payload.count
+      ~> jsonEmptyObject
+
+instance encodeFinanceAnalyticsCashflowSeriesRow :: EncodeJson FinanceAnalyticsCashflowSeriesRow where
+  encodeJson (FinanceAnalyticsCashflowSeriesRow payload) =
+    "bucketStart" := payload.bucketStart
+      ~> "bucketEnd" := payload.bucketEnd
+      ~> "total" := payload.total
+      ~> "count" := payload.count
+      ~> jsonEmptyObject
+
+instance encodeFinanceAnalyticsAccountBalanceRow :: EncodeJson FinanceAnalyticsAccountBalanceRow where
+  encodeJson (FinanceAnalyticsAccountBalanceRow payload) =
+    "accountId" := payload.accountId
+      ~> "total" := payload.total
+      ~> jsonEmptyObject
+
+instance encodeFinanceAnalyticsReport :: EncodeJson FinanceAnalyticsReport where
+  encodeJson (FinanceAnalyticsReport payload) =
+    "summary" := payload.summary
+      ~> "categoryBreakdown" := payload.categoryBreakdown
+      ~> "cashflowSeries" := payload.cashflowSeries
+      ~> "accountBalances" := payload.accountBalances
       ~> jsonEmptyObject
 
 instance encodeCreateFinanceTransaction :: EncodeJson CreateFinanceTransaction where

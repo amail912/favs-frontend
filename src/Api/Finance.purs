@@ -13,10 +13,12 @@ module Api.Finance
   , deleteTransactionNote
   , getCounterpartySuggestions
   , getAggregateReport
+  , getAnalyticsReport
   , encodeTransactionsQuery
   , encodeAccountsQuery
   , encodeCounterpartySuggestionsQuery
   , encodeReportQuery
+  , encodeAnalyticsQuery
   ) where
 
 import Prelude
@@ -35,6 +37,7 @@ import Api.FinanceContract
   , FinanceAccountsStatus(..)
   , FinanceReportDirection(..)
   , FinanceReportQuery(..)
+  , FinanceAnalyticsQuery(..)
   , FinanceTransactionsQuery(..)
   , LinkFinanceTransfer
   , SplitFinanceTransaction
@@ -45,6 +48,7 @@ import Api.FinanceContract
   , categorizeTransactionPath
   , linkTransferPath
   , reportPath
+  , analyticsReportPath
   , splitTransactionPath
   , transactionNotePath
   , transactionMetadataPath
@@ -133,6 +137,10 @@ getAggregateReport :: FinanceReportQuery -> Aff JsonResponse
 getAggregateReport query =
   Affjax.get json (reportPath <> encodeReportQuery query)
 
+getAnalyticsReport :: FinanceAnalyticsQuery -> Aff JsonResponse
+getAnalyticsReport query =
+  Affjax.get json (analyticsReportPath <> encodeAnalyticsQuery query)
+
 encodeAccountsQuery :: FinanceAccountsQuery -> String
 encodeAccountsQuery (FinanceAccountsQuery query) =
   case query.status of
@@ -163,6 +171,21 @@ encodeReportQuery (FinanceReportQuery query) =
       ]
         <> map (\value -> Just ("accountIn=" <> value)) query.accountIn
         <> map (\value -> Just ("accountNotIn=" <> value)) query.accountNotIn
+        <> map (\value -> Just ("categoryIn=" <> value)) query.categoryIn
+        <> map (\value -> Just ("categoryNotIn=" <> value)) query.categoryNotIn
+    )
+
+encodeAnalyticsQuery :: FinanceAnalyticsQuery -> String
+encodeAnalyticsQuery (FinanceAnalyticsQuery query) =
+  encodeQueryString
+    ( [ Just ("from=" <> query.from)
+      , Just ("to=" <> query.to)
+      , map (\direction -> "direction=" <> encodeReportDirection direction) query.direction
+      , map (\value -> "accountId=" <> value) query.accountId
+      , map (\value -> "amountMin=" <> show value) query.amountMin
+      , map (\value -> "amountMax=" <> show value) query.amountMax
+      , map (\value -> "search=" <> value) query.search
+      ]
         <> map (\value -> Just ("categoryIn=" <> value)) query.categoryIn
         <> map (\value -> Just ("categoryNotIn=" <> value)) query.categoryNotIn
     )
