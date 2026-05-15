@@ -5,6 +5,7 @@ import Prelude
 import Api.Finance (encodeAccountsQuery, encodeAnalyticsQuery, encodeReportQuery, encodeTransactionsQuery)
 import Api.FinanceContract
   ( CategorizeFinanceTransaction(..)
+  , CreateFinanceAccount(..)
   , CreateFinanceTransaction(..)
   , CreateFinanceTransactionNote(..)
   , FinanceAnalyticsAccountBalanceRow(..)
@@ -104,6 +105,10 @@ spec =
       contains (Pattern "\"occurredAt\":null") encodedReceived `shouldEqual` true
       contains (Pattern "\"counterparty\":null") encodedReceived `shouldEqual` true
       contains (Pattern "\"description\":null") encodedReceived `shouldEqual` true
+
+    it "encodes account create payload" do
+      let encoded = stringify (encodeJson (CreateFinanceAccount { name: "Main account" }))
+      encoded `shouldEqual` "{\"name\":\"Main account\"}"
 
     it "encodes metadata update payload with optional partial fields" do
       let fullPayload = stringify (encodeJson (UpdateFinanceTransactionMetadata { counterparty: Just (Just "acme"), description: Just Nothing }))

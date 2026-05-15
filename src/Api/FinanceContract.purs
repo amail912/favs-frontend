@@ -11,6 +11,7 @@ module Api.FinanceContract
   , FinanceTransactionAdjustment(..)
   , FinanceTransaction(..)
   , FinanceTransactionsQuery(..)
+  , CreateFinanceAccount(..)
   , CreateFinanceTransaction(..)
   , UpdateFinanceTransactionMetadata(..)
   , CategorizeFinanceTransaction(..)
@@ -218,6 +219,10 @@ newtype FinanceTransactionsQuery = FinanceTransactionsQuery
   , search :: Maybe String
   }
 
+newtype CreateFinanceAccount = CreateFinanceAccount
+  { name :: String
+  }
+
 newtype CreateFinanceTransaction = CreateFinanceTransaction
   { accountId :: String
   , amount :: Number
@@ -348,6 +353,7 @@ derive instance financeTransactionSplitRowEq :: Eq FinanceTransactionSplitRow
 derive instance financeTransactionNoteEq :: Eq FinanceTransactionNote
 derive instance financeTransactionAdjustmentEq :: Eq FinanceTransactionAdjustment
 derive instance financeTransactionEq :: Eq FinanceTransaction
+derive instance createFinanceAccountEq :: Eq CreateFinanceAccount
 derive instance createFinanceTransactionEq :: Eq CreateFinanceTransaction
 derive instance categorizeFinanceTransactionEq :: Eq CategorizeFinanceTransaction
 derive instance splitFinanceTransactionEq :: Eq SplitFinanceTransaction
@@ -626,6 +632,11 @@ instance encodeCreateFinanceTransaction :: EncodeJson CreateFinanceTransaction w
       ~> "occurredAt" := payload.occurredAt
       ~> "counterparty" := payload.counterparty
       ~> "description" := payload.description
+      ~> jsonEmptyObject
+
+instance encodeCreateFinanceAccount :: EncodeJson CreateFinanceAccount where
+  encodeJson (CreateFinanceAccount payload) =
+    "name" := payload.name
       ~> jsonEmptyObject
 
 instance encodeUpdateFinanceTransactionMetadata :: EncodeJson UpdateFinanceTransactionMetadata where

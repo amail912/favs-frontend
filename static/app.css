@@ -1166,7 +1166,7 @@ a.nav-link:hover {
   z-index: 4;
 }
 
-.calendar-fab {
+.fab {
   position: fixed;
   right: 24px;
   bottom: 24px;
@@ -1197,7 +1197,7 @@ a.nav-link:hover {
 
 @media (min-width: 992px) {
   :root { --container-max: 960px; }
-  .calendar-fab {
+  .fab {
     right: calc((100vw - var(--container-max)) / 2 + 24px);
   }
 }
@@ -1210,11 +1210,11 @@ a.nav-link:hover {
   :root { --container-max: 1320px; }
 }
 
-.calendar-fab:hover {
+.fab:hover {
   background: #1f5bd6;
 }
 
-.calendar-fab .bi {
+.fab .bi {
   font-size: 1.4rem;
 }
 
@@ -2275,23 +2275,6 @@ a.nav-link:hover {
 
 .finance-ledger-row--adjustment {
   border-left: 4px solid rgba(13, 110, 253, 0.6);
-}
-
-.finance-shell__actions {
-  position: relative;
-}
-
-.finance-create-chooser--desktop {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 8px);
-  min-width: 220px;
-  background: #fff;
-  border: 1px solid rgba(25, 55, 90, 0.14);
-  border-radius: 12px;
-  box-shadow: 0 14px 28px rgba(20, 37, 68, 0.18);
-  padding: 0.65rem;
-  z-index: 40;
 }
 
 .app-toast {

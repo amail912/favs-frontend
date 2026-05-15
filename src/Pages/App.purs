@@ -37,6 +37,7 @@ import Api.Auth (AuthenticatedProfile(..), getAuthProfileResponse, isAdminProfil
 import Api.Calendar (getItemsResponse, updateItemResponse)
 import Api.Finance
   ( categorizeTransaction
+  , createAccount
   , createReceivedTransaction
   , createSentTransaction
   , createTransactionNote
@@ -52,6 +53,7 @@ import Api.Finance
   )
 import Api.FinanceContract
   ( CategorizeFinanceTransaction(..)
+  , CreateFinanceAccount(..)
   , CreateFinanceTransaction(..)
   , CreateFinanceTransactionNote(..)
   , FinanceAccount(..)
@@ -502,6 +504,8 @@ data Action
   | FinanceCreateDescriptionChanged String
   | FinanceCreateSuggestionsLoaded (Either String (Array FinanceCounterpartySuggestion))
   | FinanceCreateSuggestionSelected String
+  | FinanceCreateAccountNameChanged String
+  | SubmitFinanceCreateAccount
   | SubmitFinanceCreate
   | FinanceCreateAccountsLoaded (Either String (Array FinanceAccount))
   | FinanceCreateSubmitted (Either String Unit)
@@ -597,6 +601,10 @@ type FinanceCreateState =
   { launch :: FinanceCreateLaunch
   , accounts :: Array FinanceAccount
   , isLoadingAccounts :: Boolean
+  , newAccountNameInput :: String
+  , newAccountNameError :: Maybe String
+  , createAccountError :: Maybe String
+  , isCreatingAccount :: Boolean
   , accountId :: String
   , amountInput :: String
   , occurredAtInput :: String
@@ -952,6 +960,87 @@ handleAction (FinanceCreateSuggestionSelected selectedCounterparty) =
             (_ { counterpartyInput = selectedCounterparty, suggestions = [], suggestionsError = Nothing })
             st.financeCreateState
       }
+handleAction (FinanceCreateAccountNameChanged raw) =
+  modify_ \st ->
+    st
+      { financeCreateState =
+          map
+            (_ { newAccountNameInput = raw, newAccountNameError = Nothing, createAccountError = Nothing, accountError = Nothing })
+            st.financeCreateState
+      }
+handleAction SubmitFinanceCreateAccount = do
+  st <- get
+  case st.financeCreateState of
+    Nothing -> pure unit
+    Just createState ->
+      if createState.isCreatingAccount || createState.isSubmitting then
+        pure unit
+      else do
+        let name = StringCommon.trim createState.newAccountNameInput
+        if name == "" then
+          modify_ \next ->
+            next
+              { financeCreateState =
+                  map
+                    (_ { newAccountNameError = Just "Account name is required.", createAccountError = Nothing })
+                    next.financeCreateState
+              }
+        else do
+          modify_ \next ->
+            next
+              { financeCreateState =
+                  map
+                    (_ { isCreatingAccount = true, createAccountError = Nothing, newAccountNameError = Nothing, accountError = Nothing })
+                    next.financeCreateState
+              }
+          result <- liftAff (createFinanceAccount name)
+          case result of
+            Left message ->
+              modify_ \next ->
+                next
+                  { financeCreateState =
+                      map
+                        (_ { isCreatingAccount = false, createAccountError = Just message })
+                        next.financeCreateState
+                  }
+            Right (FinanceAccount account) -> do
+              accountsResult <- liftAff fetchFinanceCreateAccounts
+              case accountsResult of
+                Left message ->
+                  modify_ \next ->
+                    next
+                      { financeCreateState =
+                          map
+                            ( _
+                                { isCreatingAccount = false
+                                , createAccountError = Just message
+                                , newAccountNameInput = ""
+                                , newAccountNameError = Nothing
+                                , accountId = account.id
+                                }
+                            )
+                            next.financeCreateState
+                      , financeToastMessage = Just ("Account \"" <> account.name <> "\" created.")
+                      , financeToastToken = next.financeToastToken + 1
+                      }
+                Right accounts ->
+                  modify_ \next ->
+                    next
+                      { financeCreateState =
+                          map
+                            ( _
+                                { accounts = accounts
+                                , isCreatingAccount = false
+                                , createAccountError = Nothing
+                                , newAccountNameInput = ""
+                                , newAccountNameError = Nothing
+                                , accountId = resolveCreatedAccountId account.id accounts
+                                }
+                            )
+                            next.financeCreateState
+                      , financeToastMessage = Just ("Account \"" <> account.name <> "\" created.")
+                      , financeToastToken = next.financeToastToken + 1
+                      }
 handleAction SubmitFinanceCreate = do
   st <- get
   case st.financeCreateState of
@@ -1047,6 +1136,10 @@ handleAction (FinanceCreateSubmitted result) = do
                       ( _
                           { isSubmitting = false
                           , amountInput = ""
+                          , newAccountNameInput = ""
+                          , newAccountNameError = Nothing
+                          , createAccountError = Nothing
+                          , isCreatingAccount = false
                           , counterpartyInput = ""
                           , descriptionInput = ""
                           , suggestions = []
@@ -2275,45 +2368,50 @@ currentComponent _ _ (Calendar calendarRoute) _ =
     , initialItemId: calendarRoute.item
     }
     HandleCalendarOutput
-currentComponent _ financeOverlay (FinanceTransactions transactionsRoute) financeTransactionsSlotNonce = renderFinanceShell (FinanceTransactions transactionsRoute) financeOverlay financeTransactionsSlotNonce
-currentComponent _ financeOverlay FinanceReports financeTransactionsSlotNonce = renderFinanceShell FinanceReports financeOverlay financeTransactionsSlotNonce
+currentComponent _ _ (FinanceTransactions transactionsRoute) financeTransactionsSlotNonce = renderFinanceShell (FinanceTransactions transactionsRoute) financeTransactionsSlotNonce
+currentComponent _ _ FinanceReports financeTransactionsSlotNonce = renderFinanceShell FinanceReports financeTransactionsSlotNonce
 currentComponent (Authenticated (AuthenticatedProfile { username })) _ Admin _ =
   slot_ (Proxy :: _ "admin") unit Admin.component { currentUsername: username }
 currentComponent _ _ Admin _ = text ""
 currentComponent _ _ Signup _ = slot (Proxy :: _ "signup") unit signupComponent unit HandleAuthOutput
 currentComponent _ _ Signin _ = slot (Proxy :: _ "signin") unit signinComponent unit HandleAuthOutput
 
-renderFinanceShell :: DefinedRoute -> Maybe FinanceOverlay -> Int -> H.ComponentHTML Action ChildSlots Aff
-renderFinanceShell route financeOverlay financeTransactionsSlotNonce =
-  div [ class_ "finance-shell py-3" ]
-    [ div [ class_ "finance-shell__header d-flex justify-content-between align-items-center gap-3 mb-3 flex-wrap" ]
-        [ nav [ class_ "finance-shell__nav nav nav-pills gap-2" ]
-            (map (\tabRoute -> financeLocalTab tabRoute route) [ FinanceTransactions transactionsRoute, FinanceReports ])
-        , if shouldShowFinanceCreateButton route then
-            div [ class_ "finance-shell__actions" ]
-              [ CreateButton.renderIconCreateButton "btn btn-primary finance-shell__create-btn" "Nouvelle transaction" FinanceCreateClicked
-              , renderInlineCreateChooser route financeOverlay
-              ]
+renderFinanceShell :: DefinedRoute -> Int -> H.ComponentHTML Action ChildSlots Aff
+renderFinanceShell route financeTransactionsSlotNonce =
+  let
+    content =
+      div [ class_ "finance-shell py-3" ]
+        [ div [ class_ "finance-shell__header d-flex justify-content-between align-items-center gap-3 mb-3 flex-wrap" ]
+            [ nav [ class_ "finance-shell__nav nav nav-pills gap-2" ]
+                (map (\tabRoute -> financeLocalTab tabRoute route) [ FinanceTransactions transactionsRoute, FinanceReports ])
+            ]
+        , if routeKey route == routeKey (FinanceTransactions transactionsRoute) then
+            slot
+              (Proxy :: _ "financeTransactions")
+              financeTransactionsSlotNonce
+              FinanceTransactions.component
+              transactionsRoute
+              HandleTransactionsOutput
+          else if routeKey route == routeKey FinanceReports then
+            slot
+              (Proxy :: _ "financeReports")
+              unit
+              FinanceReports.component
+              unit
+              HandleReportsOutput
           else
-            text ""
+            renderFinancePlaceholderBody route
         ]
-    , if routeKey route == routeKey (FinanceTransactions transactionsRoute) then
-        slot
-          (Proxy :: _ "financeTransactions")
-          financeTransactionsSlotNonce
-          FinanceTransactions.component
-          transactionsRoute
-          HandleTransactionsOutput
-      else if routeKey route == routeKey FinanceReports then
-        slot
-          (Proxy :: _ "financeReports")
-          unit
-          FinanceReports.component
-          unit
-          HandleReportsOutput
-      else
-        renderFinancePlaceholderBody route
-    ]
+  in
+    if shouldShowFinanceCreateButton route then
+      CreateButton.withFabButton
+        { fabClass: "fab"
+        , fabAriaLabel: "Nouvelle transaction"
+        , fabAction: FinanceCreateClicked
+        }
+        content
+    else
+      content
   where
   transactionsRoute =
     case route of
@@ -2329,20 +2427,6 @@ renderFinanceShell route financeOverlay financeTransactionsSlotNonce =
         , amountMax: Nothing
         , search: Nothing
         }
-
-renderInlineCreateChooser :: forall w. DefinedRoute -> Maybe FinanceOverlay -> HTML w Action
-renderInlineCreateChooser route financeOverlay =
-  if routeKey route /= "finance-transactions" then
-    text ""
-  else
-    case financeOverlay of
-      Just FinanceCreateChooserOverlay ->
-        div [ class_ "finance-create-chooser finance-create-chooser--desktop d-grid gap-2 mt-2" ]
-          [ button [ class_ "btn btn-outline-danger finance-create-chooser__expense", onClick (const FinanceCreateExpenseSelected) ] [ text "New Expense" ]
-          , button [ class_ "btn btn-outline-success finance-create-chooser__income", onClick (const FinanceCreateIncomeSelected) ] [ text "New Income" ]
-          ]
-      _ ->
-        text ""
 
 financeLocalTab :: forall w. DefinedRoute -> DefinedRoute -> HTML w Action
 financeLocalTab tabRoute activeRoute =
@@ -2527,6 +2611,10 @@ initialFinanceCreateState launch occurredAtInput =
   { launch
   , accounts: []
   , isLoadingAccounts: true
+  , newAccountNameInput: ""
+  , newAccountNameError: Nothing
+  , createAccountError: Nothing
+  , isCreatingAccount: false
   , accountId: fromMaybe "" launch.accountId
   , amountInput: ""
   , occurredAtInput
@@ -2558,6 +2646,30 @@ fetchFinanceCreateAccounts = do
         pure (lmap show (decodeJson successResponse.body :: Either _ (Array FinanceAccount)))
       else
         pure (Left ("Unable to load accounts: status " <> show (unwrap successResponse.status)))
+
+createFinanceAccount :: String -> Aff (Either String FinanceAccount)
+createFinanceAccount name = do
+  response <- createAccount (CreateFinanceAccount { name })
+  case response of
+    Left err ->
+      pure (Left ("Unable to create account: " <> printError err))
+    Right successResponse ->
+      if statusOk successResponse then
+        pure (lmap show (decodeJson successResponse.body :: Either _ FinanceAccount))
+      else
+        pure (Left (financeCreateAccountErrorMessage (unwrap successResponse.status)))
+
+financeCreateAccountErrorMessage :: Int -> String
+financeCreateAccountErrorMessage = case _ of
+  400 -> "Account name is required."
+  409 -> "An account with this name already exists."
+  status -> "Unable to create account: status " <> show status
+
+resolveCreatedAccountId :: String -> Array FinanceAccount -> String
+resolveCreatedAccountId fallbackId accounts =
+  case find (\(FinanceAccount account) -> account.id == fallbackId) accounts of
+    Just (FinanceAccount account) -> account.id
+    Nothing -> fallbackId
 
 fetchCounterpartySuggestions :: String -> String -> String -> Aff (Either String (Array FinanceCounterpartySuggestion))
 fetchCounterpartySuggestions direction accountId q = do
@@ -2659,6 +2771,25 @@ renderFinanceCreateForm launch maybeCreateState =
                     <> map renderAccountOption createState.accounts
                 )
             , maybe (text "") (\message -> div [ class_ "text-danger small" ] [ text message ]) createState.accountError
+            , div [ class_ "d-flex flex-column gap-1 mt-2" ]
+                [ label [ class_ "form-label mb-0" ] [ text "Create account" ]
+                , div [ class_ "d-flex gap-2" ]
+                    [ input
+                        [ class_ "form-control finance-create-overlay__new-account-input"
+                        , value createState.newAccountNameInput
+                        , disabled (createState.isSubmitting || createState.isCreatingAccount)
+                        , onValueChange FinanceCreateAccountNameChanged
+                        ]
+                    , button
+                        [ class_ "btn btn-outline-primary finance-create-overlay__new-account-submit"
+                        , onClick (const SubmitFinanceCreateAccount)
+                        , disabled (createState.isSubmitting || createState.isCreatingAccount || createState.isLoadingAccounts)
+                        ]
+                        [ text (if createState.isCreatingAccount then "Creating..." else "Create") ]
+                    ]
+                , maybe (text "") (\message -> div [ class_ "text-danger small" ] [ text message ]) createState.newAccountNameError
+                , maybe (text "") (\message -> div [ class_ "text-danger small" ] [ text message ]) createState.createAccountError
+                ]
             ]
         , div [ class_ "d-flex flex-column gap-1" ]
             [ label [ class_ "form-label mb-0" ] [ text "Amount" ]

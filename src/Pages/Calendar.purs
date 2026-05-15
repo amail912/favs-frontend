@@ -334,10 +334,6 @@ renderAgendaView viewMode focusDate todayDate items sharedPresence presenceCuePr
     ViewMonth ->
       renderRangeView "Mois" (generateMonthDates focusDate) items isMobile
 
-renderCreateFab :: forall w. HTML w Action
-renderCreateFab =
-  CreateButton.renderIconCreateButton "calendar-fab" "Nouvel item" (ViewAction ViewOpenCreate)
-
 renderRecurrenceSlot :: RecurrenceSlot -> RecurrenceDraft -> (Recurrence.RecurrenceCommand -> Action) -> H.ComponentHTML Action Slots Aff
 renderRecurrenceSlot slotId draft onOutput =
   slot (Proxy :: _ "recurrence") slotId Recurrence.component draft onOutput
@@ -1432,28 +1428,32 @@ render { calendar, sync, mouseDrag, view } =
     agendaModalsInput = buildAgendaModalsInput { calendar, sync, mouseDrag, view }
     sortedItems = sortItems SortByTime items
   in
-    div [ class_ "entity-page calendar-page" ]
-      ( [ section [ class_ "calendar-header" ]
-            [ h2 [ class_ "calendar-title" ] [ text (viewTitle viewMode) ]
-            , div [ class_ "calendar-subtitle" ] [ text "Capture rapide des tâches à organiser." ]
-            , toAction <$> renderViewSelector viewMode focusDate todayDate
-            , toAction <$> renderMobileTools viewMode
-            ]
-        , div [ class_ $ "calendar-layout" <> guard (viewMode == ViewDay) " calendar-layout--calendar" ]
-            [ div [ class_ "calendar-main" ]
-                [ maybe (text "") renderUpdateError updateError
-                , section [ class_ $ "calendar-list-panel" <> guard (viewMode == ViewDay) " calendar-list-panel--calendar" ]
-                    [ renderAgendaView viewMode focusDate todayDate sortedItems sharedPresence presenceCuePreferences presenceInspection presenceInspectionInitialTopPx presenceInspectionPinned isMobile promotedOverlaps draggingId dragHoverIndex ]
+    CreateButton.withFabButton
+      { fabClass: "fab"
+      , fabAriaLabel: "Nouvel item"
+      , fabAction: ViewAction ViewOpenCreate
+      }
+      ( div [ class_ "entity-page calendar-page" ]
+          ( [ section [ class_ "calendar-header" ]
+                [ h2 [ class_ "calendar-title" ] [ text (viewTitle viewMode) ]
+                , div [ class_ "calendar-subtitle" ] [ text "Capture rapide des tâches à organiser." ]
+                , toAction <$> renderViewSelector viewMode focusDate todayDate
+                , toAction <$> renderMobileTools viewMode
                 ]
-            , div [ class_ "calendar-side" ]
-                [ map toAction (renderShareManager sharePanelConfig shareList)
-                , map toAction (renderSubscriptionManager subscriptionPanelConfig subscriptionList)
+            , div [ class_ $ "calendar-layout" <> guard (viewMode == ViewDay) " calendar-layout--calendar" ]
+                [ div [ class_ "calendar-main" ]
+                    [ maybe (text "") renderUpdateError updateError
+                    , section [ class_ $ "calendar-list-panel" <> guard (viewMode == ViewDay) " calendar-list-panel--calendar" ]
+                        [ renderAgendaView viewMode focusDate todayDate sortedItems sharedPresence presenceCuePreferences presenceInspection presenceInspectionInitialTopPx presenceInspectionPinned isMobile promotedOverlaps draggingId dragHoverIndex ]
+                    ]
+                , div [ class_ "calendar-side" ]
+                    [ map toAction (renderShareManager sharePanelConfig shareList)
+                    , map toAction (renderSubscriptionManager subscriptionPanelConfig subscriptionList)
+                    ]
                 ]
             ]
-        ]
-          <> [ renderAgendaModals agendaModalsInput ]
-          <>
-            [ renderCreateFab ]
+              <> [ renderAgendaModals agendaModalsInput ]
+          )
       )
 
 type AgendaModalsInput =

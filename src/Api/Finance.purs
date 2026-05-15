@@ -1,5 +1,6 @@
 module Api.Finance
   ( getAccounts
+  , createAccount
   , getCategories
   , getTransactions
   , createSentTransaction
@@ -30,6 +31,7 @@ import Affjax.Web as Affjax
 import Api.Common (JsonResponse, TextResponse, jsonBody)
 import Api.FinanceContract
   ( CategorizeFinanceTransaction
+  , CreateFinanceAccount
   , CreateFinanceTransaction
   , CreateFinanceTransactionNote
   , FinanceCounterpartySuggestionsQuery(..)
@@ -68,6 +70,10 @@ import Effect.Aff (Aff)
 getAccounts :: FinanceAccountsQuery -> Aff JsonResponse
 getAccounts query =
   Affjax.get json (accountsPath <> encodeAccountsQuery query)
+
+createAccount :: CreateFinanceAccount -> Aff JsonResponse
+createAccount payload =
+  Affjax.post json accountsPath (jsonBody payload)
 
 getCategories :: Aff JsonResponse
 getCategories =
